@@ -8,8 +8,8 @@
 #   ./admin.sh bootstrap              - One-time setup (S3, DynamoDB, KMS)
 #   ./admin.sh up                     - Create / update AWS infrastructure
 #   ./admin.sh down                   - Destroy AWS infrastructure
-#   ./admin.sh start   <username>     - Start a user's EC2 instance
-#   ./admin.sh stop    <username>     - Stop a user's EC2 instance
+#   ./admin.sh start   [username]     - Start a user's EC2 instance (omit username to start all)
+#   ./admin.sh stop    [username]     - Stop a user's EC2 instance (omit username to stop all)
 #   ./admin.sh connect <username>     - Open a shell on a user's EC2 instance
 #   ./admin.sh refresh <username>     - Push updated session_start.sh to a running instance
 #   ./admin.sh ssm     <username>     - Direct SSM shell (fallback when SSH isn't working)
@@ -96,16 +96,34 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
     ;;
   start)
-    require_username
-    docker run "${DOCKER_ARGS[@]}" \
-      --env "DEV_USERNAME=${USERNAME}" \
-      "${IMAGE_NAME}" /workspace/scripts/start.sh
+    if [[ -n "${USERNAME}" ]]; then
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        "${IMAGE_NAME}" /workspace/scripts/start.sh
+    else
+      CONFIGURED_USERS=$(grep -E '^\s+[a-zA-Z0-9_-]+ = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{print $1}')
+      if [[ -z "${CONFIGURED_USERS}" ]]; then
+        echo "No users configured in config/users.tfvars." >&2; exit 1
+      fi
+      for user in ${CONFIGURED_USERS}; do
+        docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" "${IMAGE_NAME}" /workspace/scripts/start.sh
+      done
+    fi
     ;;
   stop)
-    require_username
-    docker run "${DOCKER_ARGS[@]}" \
-      --env "DEV_USERNAME=${USERNAME}" \
-      "${IMAGE_NAME}" /workspace/scripts/stop.sh
+    if [[ -n "${USERNAME}" ]]; then
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        "${IMAGE_NAME}" /workspace/scripts/stop.sh
+    else
+      CONFIGURED_USERS=$(grep -E '^\s+[a-zA-Z0-9_-]+ = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{print $1}')
+      if [[ -z "${CONFIGURED_USERS}" ]]; then
+        echo "No users configured in config/users.tfvars." >&2; exit 1
+      fi
+      for user in ${CONFIGURED_USERS}; do
+        docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
+      done
+    fi
     ;;
   connect)
     require_username

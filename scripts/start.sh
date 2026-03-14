@@ -46,6 +46,17 @@ if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
   exit 1
 fi
 
+INSTANCE_STATE=$(aws ec2 describe-instances \
+  --instance-ids "${INSTANCE_ID}" \
+  --region "${AWS_REGION}" \
+  --query 'Reservations[0].Instances[0].State.Name' \
+  --output text 2>/dev/null)
+
+if [[ "${INSTANCE_STATE}" == "running" ]]; then
+  echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is already running."
+  exit 0
+fi
+
 echo "Starting instance ${INSTANCE_ID} (${DEV_USERNAME})..."
 aws ec2 start-instances \
   --instance-ids "${INSTANCE_ID}" \
@@ -57,6 +68,5 @@ aws ec2 wait instance-running \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}"
 
-echo "Instance ${INSTANCE_ID} is running."
-echo ""
+echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is running."
 echo "To connect: ./dev.sh connect    (or: ./admin.sh connect ${DEV_USERNAME})"

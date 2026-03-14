@@ -46,6 +46,17 @@ if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
   exit 1
 fi
 
+INSTANCE_STATE=$(aws ec2 describe-instances \
+  --instance-ids "${INSTANCE_ID}" \
+  --region "${AWS_REGION}" \
+  --query 'Reservations[0].Instances[0].State.Name' \
+  --output text 2>/dev/null)
+
+if [[ "${INSTANCE_STATE}" == "stopped" ]]; then
+  echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is already stopped."
+  exit 0
+fi
+
 echo "Stopping instance ${INSTANCE_ID} (${DEV_USERNAME})..."
 aws ec2 stop-instances \
   --instance-ids "${INSTANCE_ID}" \
@@ -57,4 +68,4 @@ aws ec2 wait instance-stopped \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}"
 
-echo "Instance ${INSTANCE_ID} is stopped. EBS data is preserved."
+echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is stopped. EBS data is preserved."
