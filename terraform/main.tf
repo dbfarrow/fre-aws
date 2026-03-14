@@ -176,6 +176,47 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
+# Allow the instance to read its own provisioning parameters at boot
+resource "aws_iam_role_policy" "ssm_params" {
+  name = "${var.project_name}-ssm-params"
+  role = aws_iam_role.ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
+# SSM parameters — provisioning values for user_data.sh
+# Stored here so user_data.sh stays a plain bash file (no templatefile escaping).
+# ---------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "ssh_public_key" {
+  count = var.ssh_public_key != "" ? 1 : 0
+  name  = "/${var.project_name}/developer/ssh-public-key"
+  type  = "String"
+  value = var.ssh_public_key
+}
+
+resource "aws_ssm_parameter" "git_user_name" {
+  count = var.git_user_name != "" ? 1 : 0
+  name  = "/${var.project_name}/developer/git-user-name"
+  type  = "String"
+  value = var.git_user_name
+}
+
+resource "aws_ssm_parameter" "git_user_email" {
+  count = var.git_user_email != "" ? 1 : 0
+  name  = "/${var.project_name}/developer/git-user-email"
+  type  = "String"
+  value = var.git_user_email
+}
+
 # ---------------------------------------------------------------------------
 # EC2 instance
 # ---------------------------------------------------------------------------
@@ -202,10 +243,12 @@ module "ec2" {
   spot_instance_interruption_behavior = "stop" # preserve EBS data on interruption
 
   # IMDSv2 (Zero Trust: prevents SSRF-based credential theft)
+  # instance_metadata_tags lets user_data.sh discover the project name at boot
   metadata_options = {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
+    instance_metadata_tags      = "enabled"
   }
 
   # Encrypted root volume
@@ -219,13 +262,10 @@ module "ec2" {
     }
   ]
 
-  user_data = templatefile("${path.module}/user_data.sh", {
-    ssh_public_key = var.ssh_public_key
-    git_user_name  = var.git_user_name
-    git_user_email = var.git_user_email
-    project_name   = var.project_name
-  })
-  user_data_replace_on_change = true
+  user_data                   = file("${path.module}/user_data.sh")
+  user_data_replace_on_change = false
 
-  tags = local.owner_tags
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }
