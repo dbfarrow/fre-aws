@@ -1,0 +1,11 @@
+# AWS CLI config for IAM user access keys — Option B (free tier)
+#
+# HOW TO USE:
+#   1. Copy this file to ~/.aws/config  (no file extension)
+#   2. Replace YOUR_DEPLOY_REGION with your region (e.g. us-east-1)
+#   3. Copy aws-credentials-keys.example to ~/.aws/credentials and fill in your keys
+#   4. Run: ./run.sh verify
+
+[profile claude-code]
+region = YOUR_DEPLOY_REGION
+output = json

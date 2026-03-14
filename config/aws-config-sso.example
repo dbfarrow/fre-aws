@@ -1,0 +1,24 @@
+# AWS CLI config for IAM Identity Center (SSO) — Option A
+#
+# HOW TO USE:
+#   1. Copy this file to ~/.aws/config  (no file extension)
+#   2. Replace every value in UPPER_CASE with your own values
+#   3. Run: ./run.sh sso-login
+#
+# WHERE TO FIND EACH VALUE:
+#   YOUR_12_DIGIT_ACCOUNT_ID  — top-right corner of any AWS Console page
+#   YOUR_PORTAL_ID            — IAM Identity Center → Dashboard → "AWS access portal URL"
+#   YOUR_SSO_REGION           — IAM Identity Center → Settings → Identity source
+#   YOUR_DEPLOY_REGION        — the region you set in config/defaults.env (e.g. us-east-1)
+
+[profile claude-code]
+sso_session = fre-aws-sso
+sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
+sso_role_name = AdministratorAccess
+region = YOUR_DEPLOY_REGION
+output = json
+
+[sso-session fre-aws-sso]
+sso_start_url = https://YOUR_PORTAL_ID.awsapps.com/start
+sso_region = YOUR_SSO_REGION
+sso_registration_scopes = sso:account:access

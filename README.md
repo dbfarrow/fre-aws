@@ -102,27 +102,16 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
    | **SSO Region** | The region shown in IAM Identity Center → Settings → **Identity source** |
    | **Account ID** | Top-right corner of any AWS Console page (12-digit number) |
 
-7. **Create `~/.aws/config` on your Mac** as a plain text file. Open Terminal and run these commands, replacing the placeholder values with the ones you collected above:
+7. **Create `~/.aws/config` on your Mac** using the template file included in this repo:
 
    ```bash
    mkdir -p ~/.aws
-
-   cat > ~/.aws/config << 'EOF'
-   [profile claude-code]
-   sso_session = fre-aws-sso
-   sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
-   sso_role_name = AdministratorAccess
-   region = us-east-1
-   output = json
-
-   [sso-session fre-aws-sso]
-   sso_start_url = https://YOUR_PORTAL_ID.awsapps.com/start
-   sso_region = us-east-1
-   sso_registration_scopes = sso:account:access
-   EOF
+   cp config/aws-config-sso.example ~/.aws/config
    ```
 
-   Replace `us-east-1` in both places with your SSO region if different. If you prefer not to use Terminal, create `~/.aws/config` with a text editor — use **TextEdit → Format → Make Plain Text**. The filename is `config` with no extension.
+   Open `~/.aws/config` in any text editor and replace the four `UPPER_CASE` placeholders with the values you collected in the previous step. The file already contains comments explaining where to find each value.
+
+   > **Important:** Section headers like `[profile claude-code]` must start at the very beginning of the line with no leading spaces. If you use TextEdit, choose **Format → Make Plain Text** before saving.
 
 8. **Log in** using the Docker container:
    ```bash
@@ -166,27 +155,19 @@ Access keys are long-lived credentials. MFA and key rotation reduce the risk of 
 5. **Enable MFA on the IAM user** (same Security credentials tab → **MFA → Authenticator app**)
    - Without MFA, a leaked access key gives full account access
 
-6. **Create the AWS credentials files on your Mac.** Open Terminal and run these commands, replacing the placeholder values with your keys from the CSV:
+6. **Create the AWS credentials files on your Mac** using the templates included in this repo:
 
    ```bash
    mkdir -p ~/.aws
-
-   cat > ~/.aws/credentials << 'EOF'
-   [claude-code]
-   aws_access_key_id = PASTE_YOUR_ACCESS_KEY_ID_HERE
-   aws_secret_access_key = PASTE_YOUR_SECRET_ACCESS_KEY_HERE
-   EOF
-
-   cat > ~/.aws/config << 'EOF'
-   [profile claude-code]
-   region = us-east-1
-   output = json
-   EOF
+   cp config/aws-credentials-keys.example ~/.aws/credentials
+   cp config/aws-config-keys.example ~/.aws/config
    ```
 
-   If you prefer not to use Terminal, create these as plain text files in `~/.aws/` using any text editor. In TextEdit: **Format → Make Plain Text** before saving. The filenames are `credentials` and `config` with no file extension.
+   Open each file in a text editor and replace the `UPPER_CASE` placeholders:
+   - In `~/.aws/credentials`: paste your Access Key ID and Secret Access Key from the CSV
+   - In `~/.aws/config`: set `YOUR_DEPLOY_REGION` to your AWS region (e.g. `us-east-1`)
 
-   Change `us-east-1` to your preferred AWS region if needed.
+   > **Important:** Section headers like `[claude-code]` must start at the very beginning of the line with no leading spaces. If you use TextEdit, choose **Format → Make Plain Text** before saving.
 
 7. **Verify the credentials work** using the Docker container:
    ```bash
