@@ -217,6 +217,12 @@ resource "aws_ssm_parameter" "git_user_email" {
   value = var.git_user_email
 }
 
+resource "aws_ssm_parameter" "session_start" {
+  name  = "/${var.project_name}/developer/session-start"
+  type  = "String"
+  value = file("${path.module}/../scripts/session_start.sh")
+}
+
 # ---------------------------------------------------------------------------
 # EC2 instance
 # ---------------------------------------------------------------------------

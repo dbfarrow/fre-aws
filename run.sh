@@ -10,6 +10,7 @@
 #   ./run.sh start        - Start the EC2 instance
 #   ./run.sh stop         - Stop the EC2 instance
 #   ./run.sh connect      - Open a shell on the EC2 instance (SSH with agent forwarding)
+#   ./run.sh refresh      - Push updated session_start.sh to the running instance (no down/up needed)
 #   ./run.sh ssm          - Direct SSM shell (fallback when SSH isn't working)
 #   ./run.sh test         - Run BATS tests
 #   ./run.sh shell        - Interactive shell inside the container (for debugging)
@@ -156,6 +157,19 @@ case "${COMMAND}" in
     [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
     docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
     ;;
+  refresh)
+    # Push an updated session_start.sh to the running instance without down/up.
+    # Uses the same SSH+SSM tunnel as connect, so needs the fre-claude key.
+    REFRESH_ARGS=("${DOCKER_ARGS[@]}")
+    REFRESH_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
+    if [[ -S "/run/host-services/ssh-auth.sock" ]]; then
+      REFRESH_ARGS+=(
+        "--volume" "/run/host-services/ssh-auth.sock:/ssh-agent.sock"
+        "--env"    "SSH_AUTH_SOCK=/ssh-agent.sock"
+      )
+    fi
+    docker run "${REFRESH_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/refresh.sh
+    ;;
   ssm)
     # Direct SSM shell — bypasses SSH entirely. Useful when SSH isn't working
     # or for admin tasks that don't need the developer user environment.
@@ -175,7 +189,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|ssm|test|shell}" >&2
+    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
     exit 1
     ;;
 esac
