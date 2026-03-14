@@ -44,7 +44,8 @@ Two options are documented below. Use Option A if you have AWS Organizations ava
 
 | | Option A: IAM Identity Center | Option B: IAM User (Free Tier) |
 |---|---|---|
-| **Requires** | AWS Organizations + AWS CLI on Mac | Nothing beyond Docker and a text editor |
+| **Requires** | AWS Organizations | Nothing beyond Docker and a text editor |
+| **Mac prerequisites** | Docker + git (same as everyone) | Docker + git (same as everyone) |
 | **Credentials** | Short-lived, auto-expiring | Long-lived access keys |
 | **MFA enforcement** | Built-in | Manual (strongly recommended) |
 | **Zero Trust alignment** | ✅ Full | ⚠️ Partial |
@@ -56,7 +57,7 @@ Two options are documented below. Use Option A if you have AWS Organizations ava
 
 IAM Identity Center provides short-lived credentials and enforces MFA by design. It requires AWS Organizations, which is not available on free-tier standalone accounts but is available on any paid account.
 
-**Additional Mac prerequisite for this option:** AWS CLI v2 — [download installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) (pkg installer, no Terminal needed).
+> **No AWS CLI required on your Mac.** Login runs inside the Docker container. Setup only requires creating one text file and using the AWS Console.
 
 **Steps:**
 
@@ -64,30 +65,57 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 2. Search for **IAM Identity Center** and click **Enable**
 
-3. Under **Users**, create a user for yourself using your email address. You will receive an email to set a password.
+3. Under **Users**, create a user for yourself using your email address. You will receive an email to set a password and configure your MFA device.
 
 4. Under **Permission sets**, create a new permission set:
    - Type: **Predefined permission set**
    - Policy: `AdministratorAccess`
    - Name: `AdministratorAccess` (default)
 
-5. Under **AWS accounts**, select your account, click **Assign users or groups**, and assign your user with the `AdministratorAccess` permission set.
+5. Under **AWS accounts**, select your account → **Assign users or groups** → assign your user with the `AdministratorAccess` permission set.
 
-6. Note the **AWS access portal URL** shown on the IAM Identity Center dashboard (looks like `https://xxxxx.awsapps.com/start`).
+6. Collect the following values from the AWS Console — you will need them in the next step:
 
-7. On your Mac, configure the AWS CLI:
+   | Value | Where to find it |
+   |-------|-----------------|
+   | **SSO Start URL** | IAM Identity Center → Dashboard → **AWS access portal URL** (e.g. `https://xxxxx.awsapps.com/start`) |
+   | **SSO Region** | The region shown in IAM Identity Center → Settings → **Identity source** |
+   | **Account ID** | Top-right corner of any AWS Console page (12-digit number) |
+
+7. **Create `~/.aws/config` on your Mac** as a plain text file. Open Terminal and run these commands, replacing the placeholder values with the ones you collected above:
+
    ```bash
-   aws configure sso --profile claude-code
+   mkdir -p ~/.aws
+
+   cat > ~/.aws/config << 'EOF'
+   [profile claude-code]
+   sso_session = fre-aws-sso
+   sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
+   sso_role_name = AdministratorAccess
+   region = us-east-1
+   output = json
+
+   [sso-session fre-aws-sso]
+   sso_start_url = https://YOUR_PORTAL_ID.awsapps.com/start
+   sso_region = us-east-1
+   sso_registration_scopes = sso:account:access
+   EOF
    ```
-   Enter the portal URL, your account ID, the `AdministratorAccess` permission set, region (e.g. `us-east-1`), and output format (`json`).
 
-8. Log in and verify:
+   Replace `us-east-1` in both places with your SSO region if different. If you prefer not to use Terminal, create `~/.aws/config` with a text editor — use **TextEdit → Format → Make Plain Text**. The filename is `config` with no extension.
+
+8. **Log in** using the Docker container:
    ```bash
-   aws sso login --profile claude-code
+   ./run.sh sso-login
+   ```
+   The container will print a URL and a short code. Open the URL in your Mac browser, enter the code, and approve the request. The container will automatically continue once you complete it.
+
+9. **Verify:**
+   ```bash
    ./run.sh verify
    ```
 
-> SSO sessions expire (typically after 8–12 hours). Run `aws sso login --profile claude-code` to refresh when prompted.
+> SSO sessions expire (typically after 8–12 hours). Run `./run.sh sso-login` again when prompted. The token is cached in `~/.aws/` on your Mac and reused by all subsequent commands.
 
 ---
 
@@ -147,6 +175,18 @@ Access keys are long-lived credentials. MFA and key rotation reduce the risk of 
    You should see a table showing your AWS Account ID, user ID, and ARN. If it fails, check that the key values were copied correctly with no extra spaces.
 
 > The scripts in this project use the profile name `claude-code` by default. This can be changed in `config/defaults.env`.
+
+### Upgrading from Option B to Option A
+
+When you move beyond a free-tier single account (e.g. adding team members or a production environment):
+
+1. Enable AWS Organizations
+2. Enable IAM Identity Center and follow the Option A steps above
+3. Delete `~/.aws/credentials` (the IAM user key file)
+4. Create `~/.aws/config` with the SSO profile as shown in Option A
+5. Run `./run.sh sso-login` to authenticate
+
+No changes to the Terraform or scripts are needed — only the credential source changes.
 
 ---
 

@@ -2,6 +2,7 @@
 # run.sh — Host-side wrapper. Runs fre-aws scripts inside the Docker container.
 #
 # Usage:
+#   ./run.sh sso-login    - Log in via IAM Identity Center (SSO) — opens a browser URL/code prompt
 #   ./run.sh verify       - Verify AWS credentials are working
 #   ./run.sh bootstrap    - One-time setup (creates S3, DynamoDB, KMS)
 #   ./run.sh up           - Create / update AWS infrastructure
@@ -17,7 +18,7 @@ IMAGE_NAME="fre-aws"
 COMMAND="${1:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
+  echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
   exit 1
 fi
 
@@ -48,6 +49,24 @@ DOCKER_ARGS=(
 # Dispatch
 # ---------------------------------------------------------------------------
 case "${COMMAND}" in
+  sso-login)
+    # Load the profile name from config if available, fall back to default
+    AWS_PROFILE="claude-code"
+    if [[ -f "$(pwd)/config/defaults.env" ]]; then
+      # shellcheck source=/dev/null
+      source "$(pwd)/config/defaults.env"
+    fi
+    # --use-device-code forces the URL+code flow instead of trying to open a
+    # browser, which doesn't exist inside the container. The user opens the
+    # printed URL in their Mac browser to complete login.
+    # The ~/.aws directory is mounted read-write here so the SSO token cache
+    # can be written back to the host and reused by subsequent commands.
+    docker run --rm --interactive --tty \
+      --volume "${HOME}/.aws:/root/.aws" \
+      --volume "$(pwd)/config:/workspace/config" \
+      "${IMAGE_NAME}" \
+      aws sso login --use-device-code --profile "${AWS_PROFILE}"
+    ;;
   verify)
     # Load the profile name from config if available, fall back to default
     AWS_PROFILE="claude-code"
@@ -84,7 +103,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
+    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
     exit 1
     ;;
 esac
