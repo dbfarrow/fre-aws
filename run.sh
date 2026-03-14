@@ -37,8 +37,10 @@ DOCKER_ARGS=(
   "--rm"
   "--interactive"
   "--tty"
-  # Mount AWS credentials read-only
-  "--volume" "${HOME}/.aws:/root/.aws:ro"
+  # Mount AWS credentials read-write: the CLI writes SSO token cache to
+  # ~/.aws/sso/cache/ and response cache to ~/.aws/cli/cache/ even for
+  # read-only operations like sts get-caller-identity.
+  "--volume" "${HOME}/.aws:/root/.aws"
   # Mount config (read-write so bootstrap.sh can write backend.env)
   "--volume" "$(pwd)/config:/workspace/config"
   # Mount terraform dir (for state cache and .terraform/)
@@ -59,12 +61,7 @@ case "${COMMAND}" in
     # --use-device-code forces the URL+code flow instead of trying to open a
     # browser, which doesn't exist inside the container. The user opens the
     # printed URL in their Mac browser to complete login.
-    # The ~/.aws directory is mounted read-write here so the SSO token cache
-    # can be written back to the host and reused by subsequent commands.
-    docker run --rm --interactive --tty \
-      --volume "${HOME}/.aws:/root/.aws" \
-      --volume "$(pwd)/config:/workspace/config" \
-      "${IMAGE_NAME}" \
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
       aws sso login --use-device-code --profile "${AWS_PROFILE}"
     ;;
   verify)
