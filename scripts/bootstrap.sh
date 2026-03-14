@@ -76,6 +76,22 @@ echo ""
 echo "Creating S3 state bucket: ${BUCKET_NAME}..."
 if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
   echo "  Bucket already exists, skipping creation."
+  # The bucket may have been created in a different region (e.g. us-east-1 during
+  # a prior bootstrap run). Detect the actual location so backend.env is correct.
+  BUCKET_REGION=$(aws --profile "${AWS_PROFILE}" s3api get-bucket-location \
+    --bucket "${BUCKET_NAME}" \
+    --query 'LocationConstraint' \
+    --output text 2>/dev/null)
+  # us-east-1 returns "None" for LocationConstraint
+  if [[ "${BUCKET_REGION}" == "None" || -z "${BUCKET_REGION}" ]]; then
+    BUCKET_REGION="us-east-1"
+  fi
+  if [[ "${BUCKET_REGION}" != "${AWS_REGION}" ]]; then
+    echo "  WARNING: Bucket is in ${BUCKET_REGION}, not ${AWS_REGION}."
+    echo "           backend.env will use ${BUCKET_REGION} for the state backend region."
+    AWS_REGION="${BUCKET_REGION}"
+    AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
+  fi
 else
   if [[ "${AWS_REGION}" == "us-east-1" ]]; then
     $AWS s3api create-bucket --bucket "${BUCKET_NAME}"
