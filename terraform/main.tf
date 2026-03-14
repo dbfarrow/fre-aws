@@ -219,8 +219,13 @@ module "ec2" {
     }
   ]
 
-  user_data                   = file("${path.module}/user_data.sh")
-  user_data_replace_on_change = false # avoid instance replacement on user_data edits
+  user_data = templatefile("${path.module}/user_data.sh", {
+    ssh_public_key = var.ssh_public_key
+    git_user_name  = var.git_user_name
+    git_user_email = var.git_user_email
+    project_name   = var.project_name
+  })
+  user_data_replace_on_change = true
 
   tags = local.owner_tags
 }

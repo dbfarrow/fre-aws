@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# connect.sh — Opens an SSM Session Manager shell on the EC2 instance.
-# No SSH keys or open ports required.
+# connect.sh — Opens an SSH session tunneled through SSM with agent forwarding.
+# No inbound port 22 needed. Local GitHub SSH keys work transparently via -A.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,11 +22,10 @@ INSTANCE_ID=$(terraform -chdir="${TF_DIR}" output -raw instance_id 2>/dev/null) 
   exit 1
 }
 
-# Verify the instance is running before attempting to connect
+# Verify the instance is running
 INSTANCE_STATE=$(aws ec2 describe-instances \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}" \
-  --profile "${AWS_PROFILE}" \
   --query 'Reservations[0].Instances[0].State.Name' \
   --output text 2>/dev/null) || {
   echo "ERROR: Could not describe instance ${INSTANCE_ID}. Check your AWS credentials." >&2
@@ -35,15 +34,26 @@ INSTANCE_STATE=$(aws ec2 describe-instances \
 
 if [[ "${INSTANCE_STATE}" != "running" ]]; then
   echo "ERROR: Instance ${INSTANCE_ID} is '${INSTANCE_STATE}', not running." >&2
-  echo "       Run start.sh first." >&2
+  echo "       Run './run.sh start' first." >&2
   exit 1
 fi
 
-echo "Connecting to ${INSTANCE_ID} via SSM Session Manager..."
-echo "(No SSH key required. Press Ctrl+D or type 'exit' to disconnect.)"
+echo "Connecting to ${INSTANCE_ID} via SSH over SSM..."
+echo "(Your local SSH agent is forwarded — GitHub push/pull works without storing keys on the instance.)"
 echo ""
 
-aws ssm start-session \
-  --target "${INSTANCE_ID}" \
-  --region "${AWS_REGION}" \
-  --profile "${AWS_PROFILE}"
+# Build the SSH options array
+SSH_OPTS=(
+  "-A"                              # Forward SSH agent (GitHub keys work on remote)
+  "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
+  "-o" "UserKnownHostsFile=/dev/null"
+  # Tunnel SSH through SSM — no inbound port 22 needed in security group
+  "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
+)
+
+# Forward env vars to the remote session so session_start.sh can use them
+[[ -n "${GH_TOKEN:-}"       ]] && SSH_OPTS+=("-o" "SendEnv=GH_TOKEN")
+[[ -n "${GIT_USER_NAME:-}"  ]] && SSH_OPTS+=("-o" "SendEnv=GIT_USER_NAME")
+[[ -n "${GIT_USER_EMAIL:-}" ]] && SSH_OPTS+=("-o" "SendEnv=GIT_USER_EMAIL")
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}"

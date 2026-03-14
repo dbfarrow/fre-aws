@@ -60,6 +60,24 @@ variable "owner_email" {
   default     = ""
 }
 
+variable "ssh_public_key" {
+  description = "SSH public key to install for the developer user. Required for SSH agent forwarding. Set SSH_PUBLIC_KEY_FILE in config/defaults.env."
+  type        = string
+  default     = ""
+}
+
+variable "git_user_name" {
+  description = "Git user.name to pre-configure on the instance (e.g. 'Jane Smith'). Also refreshed at each login via SSH env."
+  type        = string
+  default     = ""
+}
+
+variable "git_user_email" {
+  description = "Git user.email to pre-configure on the instance. Also refreshed at each login via SSH env."
+  type        = string
+  default     = ""
+}
+
 # ---- Billing ---------------------------------------------------------------
 
 variable "billing_alert_email" {

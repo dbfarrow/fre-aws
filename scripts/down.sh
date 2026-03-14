@@ -73,7 +73,10 @@ terraform -chdir="${TF_DIR}" destroy \
   -var="monthly_budget_usd=${MONTHLY_BUDGET_USD:-10}" \
   -var="budget_alert_threshold_percent=${BUDGET_ALERT_THRESHOLD_PERCENT:-80}" \
   -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
-  -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}"
+  -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}" \
+  -var="ssh_public_key=" \
+  -var="git_user_name=${GIT_USER_NAME:-}" \
+  -var="git_user_email=${GIT_USER_EMAIL:-}"
 
 echo ""
 echo "=== Infrastructure destroyed ==="

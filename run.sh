@@ -31,6 +31,30 @@ if ! docker image inspect "${IMAGE_NAME}" &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
+# Load config on the host so we can pass SSH key and git identity into the
+# container without needing to mount ~/.ssh for most commands.
+# ---------------------------------------------------------------------------
+SSH_PUBLIC_KEY=""
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+GIT_USER_NAME="${GIT_USER_NAME:-}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-}"
+
+if [[ -f "$(pwd)/config/defaults.env" ]]; then
+  # shellcheck source=/dev/null
+  source "$(pwd)/config/defaults.env"
+
+  # Read SSH public key content on the host (path is a Mac path, not container path)
+  if [[ -n "${SSH_PUBLIC_KEY_FILE:-}" ]]; then
+    EXPANDED_KEY_FILE="${SSH_PUBLIC_KEY_FILE/#\~/$HOME}"
+    if [[ -f "${EXPANDED_KEY_FILE}" ]]; then
+      SSH_PUBLIC_KEY=$(cat "${EXPANDED_KEY_FILE}")
+    else
+      echo "WARNING: SSH_PUBLIC_KEY_FILE '${SSH_PUBLIC_KEY_FILE}' not found." >&2
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Common docker run arguments
 # ---------------------------------------------------------------------------
 DOCKER_ARGS=(
@@ -50,6 +74,10 @@ DOCKER_ARGS=(
   "--volume" "$(pwd)/terraform:/workspace/terraform"
   # Mount scripts so edits take effect without rebuilding the image
   "--volume" "$(pwd)/scripts:/workspace/scripts"
+  # Pass SSH public key and git identity so up.sh can inject them into Terraform
+  "--env" "SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY}"
+  "--env" "GIT_USER_NAME=${GIT_USER_NAME}"
+  "--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}"
 )
 
 # ---------------------------------------------------------------------------
@@ -95,7 +123,23 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
     ;;
   connect)
-    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
+    # Extra args for connect: SSH agent socket forwarding + GitHub token
+    CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+    # Mount ~/.ssh read-only so SSH can find keys and known_hosts
+    CONNECT_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
+    # Forward SSH agent from the Mac into the container so -A works end-to-end.
+    # Docker Desktop for Mac exposes the host agent via this socket.
+    if [[ -S "/run/host-services/ssh-auth.sock" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "/run/host-services/ssh-auth.sock:/ssh-agent.sock"
+        "--env"    "SSH_AUTH_SOCK=/ssh-agent.sock"
+      )
+    fi
+    # Pass GitHub token and git identity so session_start.sh can use them
+    [[ -n "${GITHUB_TOKEN:-}" ]]  && CONNECT_ARGS+=("--env" "GH_TOKEN=${GITHUB_TOKEN}")
+    [[ -n "${GIT_USER_NAME:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
+    [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
+    docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
     ;;
   test)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" bats /workspace/tests/bats/
