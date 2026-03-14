@@ -19,16 +19,12 @@ TF_DIR="${SCRIPT_DIR}/../terraform"
 SESSION_START="${SCRIPT_DIR}/session_start.sh"
 
 # ---------------------------------------------------------------------------
-# Update SSM so new instances get the latest script on first boot
+# Update S3 so new instances get the latest script on first boot
 # ---------------------------------------------------------------------------
-echo "--- updating SSM parameter ---"
-aws ssm put-parameter \
-  --name "/${PROJECT_NAME}/developer/session-start" \
-  --value "$(cat "${SESSION_START}")" \
-  --type String \
-  --overwrite \
-  --region "${AWS_REGION}" \
-  --output text
+echo "--- uploading to S3 ---"
+aws s3 cp "${SESSION_START}" \
+  "s3://${PROJECT_NAME}-tfstate/scripts/session_start.sh" \
+  --region "${AWS_REGION}"
 echo ""
 
 # ---------------------------------------------------------------------------

@@ -104,15 +104,12 @@ mkdir -p /home/developer/repos
 chown developer:developer /home/developer/repos
 
 # ---------------------------------------------------------------------------
-# Session launcher — fetch from SSM and install
+# Session launcher — fetch from S3 and install
 # Edits to scripts/session_start.sh are pushed live via ./run.sh refresh
 # ---------------------------------------------------------------------------
-aws ssm get-parameter \
-  --name "/${PROJECT_NAME}/developer/session-start" \
-  --region "${REGION}" \
-  --query 'Parameter.Value' \
-  --output text \
-  > /home/developer/session_start.sh
+aws s3 cp "s3://${PROJECT_NAME}-tfstate/scripts/session_start.sh" \
+  /home/developer/session_start.sh \
+  --region "${REGION}"
 
 chmod +x /home/developer/session_start.sh
 chown developer:developer /home/developer/session_start.sh

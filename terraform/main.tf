@@ -176,18 +176,25 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
-# Allow the instance to read its own provisioning parameters at boot
+# Allow the instance to read its provisioning parameters and scripts at boot
 resource "aws_iam_role_policy" "ssm_params" {
   name = "${var.project_name}-ssm-params"
   role = aws_iam_role.ec2.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::${var.project_name}-tfstate/scripts/*"
+      }
+    ]
   })
 }
 
@@ -217,10 +224,11 @@ resource "aws_ssm_parameter" "git_user_email" {
   value = var.git_user_email
 }
 
-resource "aws_ssm_parameter" "session_start" {
-  name  = "/${var.project_name}/developer/session-start"
-  type  = "String"
-  value = file("${path.module}/../scripts/session_start.sh")
+resource "aws_s3_object" "session_start" {
+  bucket = "${var.project_name}-tfstate"
+  key    = "scripts/session_start.sh"
+  source = "${path.module}/../scripts/session_start.sh"
+  etag   = filemd5("${path.module}/../scripts/session_start.sh")
 }
 
 # ---------------------------------------------------------------------------
