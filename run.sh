@@ -101,7 +101,13 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" bats /workspace/tests/bats/
     ;;
   shell)
-    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash
+    # Drop into an interactive shell with credentials pre-exported for terraform.
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash -c '
+      source /workspace/config/defaults.env 2>/dev/null || true
+      source /workspace/config/backend.env  2>/dev/null || true
+      eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed '"'"'s/^/export /'"'"')" || true
+      exec /bin/bash
+    '
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
