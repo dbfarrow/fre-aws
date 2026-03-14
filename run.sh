@@ -9,7 +9,8 @@
 #   ./run.sh down         - Destroy AWS infrastructure
 #   ./run.sh start        - Start the EC2 instance
 #   ./run.sh stop         - Stop the EC2 instance
-#   ./run.sh connect      - Open a shell on the EC2 instance
+#   ./run.sh connect      - Open a shell on the EC2 instance (SSH with agent forwarding)
+#   ./run.sh ssm          - Direct SSM shell (fallback when SSH isn't working)
 #   ./run.sh test         - Run BATS tests
 #   ./run.sh shell        - Interactive shell inside the container (for debugging)
 set -euo pipefail
@@ -157,6 +158,11 @@ case "${COMMAND}" in
     [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
     docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
     ;;
+  ssm)
+    # Direct SSM shell — bypasses SSH entirely. Useful when SSH isn't working
+    # or for admin tasks that don't need the developer user environment.
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/ssm.sh
+    ;;
   test)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" bats /workspace/tests/bats/
     ;;
@@ -171,7 +177,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
+    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|ssm|test|shell}" >&2
     exit 1
     ;;
 esac
