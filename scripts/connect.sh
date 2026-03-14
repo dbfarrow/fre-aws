@@ -44,8 +44,9 @@ echo ""
 
 # Build the SSH options array
 SSH_OPTS=(
-  "-A"                              # Forward SSH agent (GitHub keys work on remote)
-  "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
+  "-A"                                # Forward SSH agent (GitHub keys work on remote)
+  "-i" "/root/.ssh/fre-claude"        # Explicit key — SSH won't auto-discover non-default names
+  "-o" "StrictHostKeyChecking=no"     # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"
   # Tunnel SSH through SSM — no inbound port 22 needed in security group
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
