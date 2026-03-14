@@ -123,6 +123,22 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
     ;;
   connect)
+    # Ensure the fre-claude key exists and is loaded in the Mac SSH agent.
+    # The agent socket is then forwarded into the container so -A works end-to-end.
+    FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
+    if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
+      echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
+      echo "       Create it with:" >&2
+      echo "         ssh-keygen -t ed25519 -f ~/.ssh/fre-claude -C 'fre-claude'" >&2
+      echo "       Then re-run './run.sh up' so Terraform can install the public key on the instance." >&2
+      exit 1
+    fi
+    # Add to agent if not already loaded (avoids repeated passphrase prompts)
+    if ! ssh-add -l 2>/dev/null | grep -qF "${FRE_CLAUDE_KEY}"; then
+      echo "Adding fre-claude key to SSH agent..."
+      ssh-add "${FRE_CLAUDE_KEY}"
+    fi
+
     # Extra args for connect: SSH agent socket forwarding + GitHub token
     CONNECT_ARGS=("${DOCKER_ARGS[@]}")
     # Mount ~/.ssh read-only so SSH can find keys and known_hosts
