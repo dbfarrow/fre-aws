@@ -8,6 +8,7 @@ A Docker-packaged toolset for provisioning and managing an EC2-based development
 
 - [What This Project Does](#what-this-project-does)
 - [What You Need Before Starting](#what-you-need-before-starting)
+- [SSH Key Setup](#ssh-key-setup)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -41,6 +42,7 @@ A Docker-packaged toolset for provisioning and managing an EC2-based development
 |-------------|-------|
 | Container runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) |
 | `git` | Pre-installed on macOS, or install via Xcode Command Line Tools: `xcode-select --install` |
+| SSH key (`~/.ssh/fre-claude`) | Used for GitHub access from the EC2 instance. See [SSH Key Setup](#ssh-key-setup) below. |
 
 ### In AWS
 
@@ -55,6 +57,54 @@ Everything in the table below must exist **before running any scripts in this pr
 
 > **What this project creates automatically** (you do not set these up manually):
 > S3 state bucket, DynamoDB lock table, KMS key, VPC, subnets, NAT Gateway, security groups, EC2 instance, IAM instance role, SSM access.
+
+---
+
+## SSH Key Setup
+
+This project connects to your EC2 instance via SSH tunneled through AWS SSM — no open ports, no firewall rules. The SSH key enables **agent forwarding**: your local GitHub SSH key is available on the remote instance without ever copying your private key there.
+
+The key **must be named `fre-claude`**. This is intentional — a dedicated key makes it easy to audit and revoke access without disrupting your other SSH identities.
+
+### Create the key
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/fre-claude -C "fre-claude"
+```
+
+You will be prompted for a passphrase. Setting one is recommended — `./run.sh connect` automatically loads the key into your Mac's SSH agent so you only need to enter it once per session.
+
+### Add the public key to GitHub
+
+This is what allows `git push` and `git pull` to work from your EC2 instance:
+
+1. Copy your public key to the clipboard:
+   ```bash
+   cat ~/.ssh/fre-claude.pub | pbcopy
+   ```
+
+2. In GitHub: **Settings → SSH and GPG keys → New SSH key**
+   - Title: `fre-claude` (or anything recognizable)
+   - Key type: **Authentication Key**
+   - Paste the public key
+
+3. Test that it works (optional):
+   ```bash
+   ssh -i ~/.ssh/fre-claude -T git@github.com
+   ```
+   You should see: `Hi <username>! You've successfully authenticated...`
+
+### How it works at connect time
+
+When you run `./run.sh connect`:
+
+1. `run.sh` checks that `~/.ssh/fre-claude` exists — exits with instructions if not
+2. If the key is not already in your Mac's SSH agent, it runs `ssh-add ~/.ssh/fre-claude` (one passphrase prompt)
+3. The SSH agent socket is forwarded into the Docker container
+4. `connect.sh` opens an SSH session to the EC2 instance with `-A` (agent forwarding)
+5. On the EC2 instance, `git` operations use your forwarded agent — your private key never leaves your Mac
+
+> **`./run.sh up` must be run** (or re-run) after creating this key. Terraform injects the public key content into the EC2 instance during provisioning. If you rotate your key, run `./run.sh down` then `./run.sh up` to reprovision.
 
 ---
 
@@ -256,11 +306,13 @@ There are three ways to configure the network, with different cost and security 
 1. Create AWS account + enable root MFA           ← AWS Console, one time
 2. Set up credentials (Option A or B above)       ← one time
 3. Install Docker on your Mac                     ← one time
-4. Clone this repo                                ← git clone ...
-5. ./run.sh verify                                ← confirm credentials work
-6. ./run.sh bootstrap                             ← creates S3 + DynamoDB for Terraform state
-7. ./run.sh up                                    ← provisions all AWS infrastructure
-8. ./run.sh connect                               ← opens a shell on your EC2 instance
+4. Create SSH key + add public key to GitHub      ← see SSH Key Setup above
+5. Clone this repo                                ← git clone ...
+6. Edit config/defaults.env                       ← set GIT_USER_NAME, GIT_USER_EMAIL, GITHUB_TOKEN
+7. ./run.sh verify                                ← confirm AWS credentials work
+8. ./run.sh bootstrap                             ← creates S3 + DynamoDB for Terraform state
+9. ./run.sh up                                    ← provisions all AWS infrastructure
+10. ./run.sh connect                              ← repo selector launches, then Claude Code
 ```
 
 After first-time setup, daily use is just:
@@ -276,18 +328,24 @@ stop.sh     → stop the instance when done
 
 ```
 Your Mac
-  └── Docker container (terraform + aws-cli + scripts)
+  └── SSH agent (holds fre-claude key)
+  └── Docker container (terraform + aws-cli + ssh + scripts)
         └── AWS account
-              ├── VPC (private subnet + NAT Gateway)
-              │     └── EC2 t3.micro (spot)
+              ├── VPC (public or private subnet)
+              │     └── EC2 t3.micro
               │           ├── Claude Code CLI
-              │           └── SSM Agent (for connect.sh)
+              │           ├── GitHub CLI (gh)
+              │           ├── SSM Agent (tunnels the SSH connection)
+              │           └── sshd (accepts the tunneled SSH connection)
               ├── S3 bucket (Terraform state)
               ├── DynamoDB table (state locking)
               └── KMS key (encryption)
 ```
 
-All access to the EC2 instance goes through **AWS SSM Session Manager** — no SSH keys, no open ports.
+Connections use **SSH tunneled through AWS SSM Session Manager**:
+- No inbound port 22 open in the security group — SSM carries the SSH traffic
+- SSH agent forwarding (`-A`) passes your local GitHub key to the instance
+- Your private key never leaves your Mac
 
 ---
 
@@ -295,8 +353,8 @@ All access to the EC2 instance goes through **AWS SSM Session Manager** — no S
 
 | Control | Status | Notes |
 |---------|--------|-------|
-| No inbound ports on EC2 | ✅ Always | Security group has no ingress rules |
-| No SSH keys | ✅ Always | SSM Session Manager only |
+| No inbound ports on EC2 | ✅ Always | Security group has no ingress rules; SSH is tunneled through SSM |
+| SSH private key stays on Mac | ✅ Always | Agent forwarding used; private key never copied to instance |
 | No public IP on EC2 | ⚠️ Optional | Default (`public` mode) gives EC2 a public IP; switch to `private_nat` for full isolation |
 | IMDSv2 enforced | ✅ Always | Prevents SSRF-based credential theft |
 | Storage encrypted at rest | ✅ Always | KMS-backed EBS and S3 |
