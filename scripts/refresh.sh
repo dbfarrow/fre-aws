@@ -35,7 +35,7 @@ SSH_OPTS=(
 )
 
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "cat > /home/developer/session_start.sh && chmod +x /home/developer/session_start.sh" \
+  "sudo tee /home/developer/session_start.sh > /dev/null && sudo chmod +x /home/developer/session_start.sh && sudo chown developer:developer /home/developer/session_start.sh" \
   < "${SESSION_START}"
 
 echo ""
