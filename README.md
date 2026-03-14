@@ -85,7 +85,11 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 2. Search for **IAM Identity Center** and click **Enable**
 
-3. Under **Users**, create a user for yourself using your email address. You will receive an email to set a password and configure your MFA device.
+3. Under **Users**, create a user for yourself. Two fields matter here:
+   - **Username** — this is what you type at the portal login prompt. Pick something simple and memorable (e.g. your first name). **This is not necessarily your email address**, despite what AWS documentation often implies.
+   - **Email address** — used to send the activation link and for password resets. Must be valid.
+
+   You will receive an email to activate the account and set a password.
 
 4. Under **Permission sets**, create a new permission set:
    - Type: **Predefined permission set**
