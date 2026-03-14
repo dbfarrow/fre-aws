@@ -2,6 +2,7 @@
 # admin.sh — Admin tool for managing the fre-aws Claude Code environment.
 #
 # Usage:
+#   ./admin.sh list                   - List all users and their instance state
 #   ./admin.sh sso-login              - Log in via IAM Identity Center
 #   ./admin.sh verify                 - Verify AWS credentials are working
 #   ./admin.sh bootstrap              - One-time setup (S3, DynamoDB, KMS)
@@ -21,7 +22,7 @@ COMMAND="${1:-}"
 USERNAME="${2:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+  echo "Usage: $0 {list|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
   exit 1
 fi
 
@@ -74,6 +75,9 @@ require_username() {
 # Dispatch
 # ---------------------------------------------------------------------------
 case "${COMMAND}" in
+  list)
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh
+    ;;
   sso-login)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
       aws sso login --use-device-code --profile "${AWS_PROFILE}"
@@ -149,7 +153,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+    echo "Usage: $0 {list|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
     exit 1
     ;;
 esac
