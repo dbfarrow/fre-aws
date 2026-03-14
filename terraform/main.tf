@@ -176,25 +176,18 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
-# Allow the instance to read its provisioning parameters and scripts at boot
+# Allow the instance to read its provisioning parameters at boot
 resource "aws_iam_role_policy" "ssm_params" {
   name = "${var.project_name}-ssm-params"
   role = aws_iam_role.ec2.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "arn:aws:s3:::${var.project_name}-tfstate/scripts/*"
-      }
-    ]
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
+    }]
   })
 }
 
@@ -224,12 +217,6 @@ resource "aws_ssm_parameter" "git_user_email" {
   value = var.git_user_email
 }
 
-resource "aws_s3_object" "session_start" {
-  bucket = "${var.project_name}-tfstate"
-  key    = "scripts/session_start.sh"
-  source = "${path.module}/../scripts/session_start.sh"
-  etag   = filemd5("${path.module}/../scripts/session_start.sh")
-}
 
 # ---------------------------------------------------------------------------
 # EC2 instance
@@ -276,7 +263,20 @@ module "ec2" {
     }
   ]
 
-  user_data                   = file("${path.module}/user_data.sh")
+  # session_start.sh is injected directly from scripts/ — no AWS services needed.
+  # Edit scripts/session_start.sh and run ./run.sh refresh to update in place.
+  user_data = join("\n", [
+    file("${path.module}/user_data_main.sh"),
+    "# ---------------------------------------------------------------------------",
+    "# Session launcher — injected from scripts/session_start.sh at provision time",
+    "# ---------------------------------------------------------------------------",
+    "cat > /home/developer/session_start.sh << 'SESSION_LAUNCHER'",
+    file("${path.module}/../scripts/session_start.sh"),
+    "SESSION_LAUNCHER",
+    "chmod +x /home/developer/session_start.sh",
+    "chown developer:developer /home/developer/session_start.sh",
+    file("${path.module}/user_data_tail.sh"),
+  ])
   user_data_replace_on_change = false
 
   tags = merge(local.owner_tags, {

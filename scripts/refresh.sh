@@ -19,16 +19,7 @@ TF_DIR="${SCRIPT_DIR}/../terraform"
 SESSION_START="${SCRIPT_DIR}/session_start.sh"
 
 # ---------------------------------------------------------------------------
-# Update S3 so new instances get the latest script on first boot
-# ---------------------------------------------------------------------------
-echo "--- uploading to S3 ---"
-aws s3 cp "${SESSION_START}" \
-  "s3://${PROJECT_NAME}-tfstate/scripts/session_start.sh" \
-  --region "${AWS_REGION}"
-echo ""
-
-# ---------------------------------------------------------------------------
-# Push directly to the running instance via SSH over SSM tunnel
+# Push to the running instance via SSH over SSM tunnel
 # ---------------------------------------------------------------------------
 echo "--- pushing to running instance ---"
 INSTANCE_ID=$(terraform -chdir="${TF_DIR}" output -raw instance_id 2>/dev/null) || {
