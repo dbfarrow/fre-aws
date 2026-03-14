@@ -9,6 +9,12 @@ source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
 : "${AWS_REGION:?}" "${AWS_PROFILE:?}"
 
+eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
+  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+  echo "       If using SSO, run './run.sh sso-login' first." >&2
+  exit 1
+}
+
 TF_DIR="${SCRIPT_DIR}/../terraform"
 
 INSTANCE_ID=$(terraform -chdir="${TF_DIR}" output -raw instance_id 2>/dev/null) || {
