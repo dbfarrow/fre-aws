@@ -39,12 +39,18 @@ if [[ "${INSTANCE_STATE}" != "running" ]]; then
 fi
 
 echo "Connecting to ${INSTANCE_ID} via SSH over SSM..."
-echo "(Your local SSH agent is forwarded — GitHub push/pull works without storing keys on the instance.)"
+echo "(Your SSH key will be forwarded — GitHub push/pull works without storing keys on the instance.)"
 echo ""
+
+# Start a fresh ssh-agent inside the container and load the fre-claude key.
+# This gives proper agent forwarding to the EC2 instance via -A without
+# relying on Docker Desktop's unreliable host agent socket bridging.
+eval "$(ssh-agent -s)" > /dev/null
+ssh-add /root/.ssh/fre-claude
 
 # Build the SSH options array
 SSH_OPTS=(
-  "-A"                                # Forward SSH agent (GitHub keys work on remote)
+  "-A"                                # Forward the container's agent to EC2
   "-i" "/root/.ssh/fre-claude"        # Explicit key — SSH won't auto-discover non-default names
   "-o" "StrictHostKeyChecking=no"     # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"

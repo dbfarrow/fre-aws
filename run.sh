@@ -124,8 +124,9 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
     ;;
   connect)
-    # Ensure the fre-claude key exists and is loaded in the Mac SSH agent.
-    # The agent socket is then forwarded into the container so -A works end-to-end.
+    # Verify the fre-claude key exists — connect.sh starts its own ssh-agent
+    # inside the container, adds the key there (one passphrase prompt), and
+    # forwards that agent to the EC2 instance via -A.
     FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
     if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
       echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
@@ -134,25 +135,9 @@ case "${COMMAND}" in
       echo "       Then re-run './run.sh up' so Terraform can install the public key on the instance." >&2
       exit 1
     fi
-    # Add to agent if not already loaded (avoids repeated passphrase prompts)
-    if ! ssh-add -l 2>/dev/null | grep -qF "${FRE_CLAUDE_KEY}"; then
-      echo "Adding fre-claude key to SSH agent..."
-      ssh-add "${FRE_CLAUDE_KEY}"
-    fi
 
-    # Extra args for connect: SSH agent socket forwarding + GitHub token
     CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-    # Mount ~/.ssh read-only so SSH can find keys and known_hosts
     CONNECT_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
-    # Forward SSH agent from the Mac into the container so -A works end-to-end.
-    # Docker Desktop for Mac exposes the host agent via this socket.
-    if [[ -S "/run/host-services/ssh-auth.sock" ]]; then
-      CONNECT_ARGS+=(
-        "--volume" "/run/host-services/ssh-auth.sock:/ssh-agent.sock"
-        "--env"    "SSH_AUTH_SOCK=/ssh-agent.sock"
-      )
-    fi
-    # Pass git identity so session_start.sh can refresh it on login
     [[ -n "${GIT_USER_NAME:-}" ]]  && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
     [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
     docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
