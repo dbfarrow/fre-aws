@@ -10,7 +10,8 @@
 # Cost anomaly detection is free regardless of the number of monitors.
 
 locals {
-  billing_enabled = var.billing_alert_email != ""
+  billing_enabled   = var.billing_alert_email != ""
+  anomaly_enabled   = local.billing_enabled && var.enable_anomaly_detection
 }
 
 # ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ resource "aws_budgets_budget" "zero_spend" {
 # ---------------------------------------------------------------------------
 
 resource "aws_ce_anomaly_monitor" "main" {
-  count = local.billing_enabled ? 1 : 0
+  count = local.anomaly_enabled ? 1 : 0
 
   name              = "${var.project_name}-anomaly-monitor"
   monitor_type      = "DIMENSIONAL"
@@ -86,7 +87,7 @@ resource "aws_ce_anomaly_monitor" "main" {
 }
 
 resource "aws_ce_anomaly_subscription" "main" {
-  count = local.billing_enabled ? 1 : 0
+  count = local.anomaly_enabled ? 1 : 0
 
   name      = "${var.project_name}-anomaly-alerts"
   frequency = "DAILY"

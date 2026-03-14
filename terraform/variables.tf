@@ -49,9 +49,9 @@ variable "network_mode" {
 }
 
 variable "ebs_volume_size_gb" {
-  description = "Root EBS volume size in GB. Free Tier includes 30 GB."
+  description = "Root EBS volume size in GB. Free Tier includes 30 GB. Must be >= the AMI's root snapshot size (typically 30 GB for Amazon Linux 2023)."
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "owner_email" {
@@ -84,4 +84,10 @@ variable "anomaly_threshold_usd" {
   description = "Minimum anomaly impact in USD before a cost anomaly alert is sent. Anomalies below this amount are suppressed."
   type        = number
   default     = 5
+}
+
+variable "enable_anomaly_detection" {
+  description = "Create Cost Explorer anomaly monitor and subscription. AWS limits accounts to one DIMENSIONAL monitor; set to false if your account already has one or hits the limit."
+  type        = bool
+  default     = true
 }
