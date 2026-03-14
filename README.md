@@ -111,60 +111,46 @@ When you run `./run.sh connect`:
 
 ## Configuring GitHub Access
 
-Three settings in `config/defaults.env` control GitHub integration. All three are optional but together they enable the full experience: SSH push/pull, interactive repo listing at login, and properly attributed commits.
+Three settings in `config/defaults.env` enable the full GitHub experience: SSH push/pull, an interactive repo listing at login, and properly attributed commits. All three are optional but recommended.
 
-> `config/defaults.env` is gitignored — tokens and personal settings stored there are never committed. See [Local Configuration](#local-configuration) below.
+> `config/defaults.env` is gitignored — never committed. See [Local Configuration](#local-configuration).
 
-### SSH key for git push/pull
+### 1. SSH key for git push/pull
 
-This is the `fre-claude` key you created in [SSH Key Setup](#ssh-key-setup). Your public key is already installed on the EC2 instance and your private key stays on your Mac via agent forwarding. No additional configuration needed here beyond adding the public key to GitHub:
+Complete the [SSH Key Setup](#ssh-key-setup) section above, then add your public key to GitHub under **Settings → SSH and GPG keys → New SSH key** (key type: **Authentication Key**). That's it — agent forwarding handles the rest at connect time.
 
-1. Copy your public key:
-   ```bash
-   cat ~/.ssh/fre-claude.pub | pbcopy
-   ```
-2. In GitHub: **Settings → SSH and GPG keys → New SSH key**
-   - Title: `fre-claude`
-   - Key type: **Authentication Key**
-   - Paste and save
+### 2. GitHub token for repo listing
 
-Test it (optional):
-```bash
-ssh -i ~/.ssh/fre-claude -T git@github.com
-# Hi <username>! You've successfully authenticated...
+The session launcher shows a menu of your repos at login. It needs a token to call the GitHub API.
+
+1. Go to **[github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained tokens → Generate new token**
+2. Name: `fre-aws session launcher`
+3. Expiration: your preference
+4. Repository access: **All repositories**
+5. Repository permissions:
+   - **Contents**: Read-only (for cloning)
+   - **Metadata**: Read-only (mandatory, for listing — auto-selected)
+6. Click **Generate token** — copy it immediately, it is only shown once
+
+Add it to `config/defaults.env`:
+```
+GITHUB_TOKEN=github_pat_xxxxxxxxxxxxxxxxxxxx
 ```
 
-### GitHub token for repo listing
+> `config/defaults.env` is gitignored and never leaves your Mac — the same protection level as `~/.ssh/`.
 
-The session launcher that runs when you connect shows a menu of your GitHub repos. This requires a personal access token so it can call the GitHub API.
-
-1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) → **Generate new token (classic)**
-2. Note: `fre-aws session launcher`
-3. Expiration: your preference (90 days is a reasonable default)
-4. Scopes: check **`repo`** (required to list and clone private repos)
-5. Click **Generate token** and copy it immediately — it is only shown once
-
-6. Add it to `config/defaults.env`:
-   ```
-   GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-   ```
-
-> **Security note:** `config/defaults.env` is gitignored and never leaves your Mac. It is readable by your user account — the same level of protection as `~/.ssh/`. Storing secrets in shell env files is the standard practice for local development tooling. A future enhancement could integrate with macOS Keychain for additional protection.
-
-### Git identity
-
-Set your name and email so commits are attributed correctly:
+### 3. Git identity
 
 ```
 GIT_USER_NAME=Jane Smith
 GIT_USER_EMAIL=jane@example.com
 ```
 
-These are written to the EC2 instance's git config during provisioning and refreshed at every SSH login, so they stay current even if you change them locally.
+Written to the instance's git config at provisioning time and refreshed at every login.
 
 ### Applying changes
 
-After editing `config/defaults.env`, run `./run.sh up` to push the token and git identity into SSM Parameter Store. They will take effect at the next `./run.sh connect`.
+After editing `config/defaults.env`, run `./run.sh up` to push updated values into SSM Parameter Store. Changes take effect at the next `./run.sh connect`.
 
 ---
 
