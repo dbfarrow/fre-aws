@@ -4,6 +4,26 @@ A Docker-packaged toolset for provisioning and managing an EC2-based development
 
 ---
 
+## Table of Contents
+
+- [What This Project Does](#what-this-project-does)
+- [What You Need Before Starting](#what-you-need-before-starting)
+- [Credential Setup](#credential-setup)
+  - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
+  - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
+  - [Upgrading from Option B to Option A](#upgrading-from-option-b-to-option-a)
+- [Cost Considerations](#cost-considerations)
+  - [What is Free Tier eligible](#what-is-free-tier-eligible)
+  - [What is NOT free](#what-is-not-free-costs-money-from-day-one)
+  - [Network Configuration Options](#network-configuration-options)
+  - [Keeping costs low](#keeping-costs-low)
+- [Order of Operations (First-Time Setup)](#order-of-operations-first-time-setup)
+- [Architecture Overview](#architecture-overview)
+- [Security Model](#security-model)
+- [For Developers](#for-developers)
+
+---
+
 ## What This Project Does
 
 - Provisions a private EC2 instance on AWS using Terraform
