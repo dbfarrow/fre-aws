@@ -37,6 +37,9 @@ DOCKER_ARGS=(
   "--rm"
   "--interactive"
   "--tty"
+  # Disable the AWS CLI pager — less is not installed in the container
+  # and paging makes no sense in a non-interactive Docker context.
+  "--env" "AWS_PAGER="
   # Mount AWS credentials read-write: the CLI writes SSO token cache to
   # ~/.aws/sso/cache/ and response cache to ~/.aws/cli/cache/ even for
   # read-only operations like sts get-caller-identity.
