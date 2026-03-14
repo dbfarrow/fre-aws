@@ -40,44 +40,51 @@ Everything in the table below must exist **before running any scripts in this pr
 
 ## Credential Setup
 
-This project uses **no long-lived access keys** by default. The recommended path is AWS IAM Identity Center (SSO), which gives you short-lived credentials and MFA enforcement.
+### Free tier: IAM user with access keys
 
-### Option A: IAM Identity Center (Recommended)
+AWS IAM Identity Center — the preferred Zero Trust option — **cannot manage AWS account access on a free-tier account without AWS Organizations**. The Account Instance available to standalone free-tier accounts only supports application-level authentication, not AWS CLI/account access. IAM user access keys are therefore the correct approach for free-tier use.
 
-IAM Identity Center is AWS's modern SSO system. It works with a single AWS account — you do not need AWS Organizations.
+Access keys are long-lived credentials. They are a known security tradeoff relative to short-lived SSO credentials. The mitigations documented below (MFA, least-privilege policy, key rotation) reduce but do not eliminate that risk. This is the free-tier reality; see [Upgrade Path](#upgrade-path) when you outgrow it.
 
-1. In the AWS Console, search for **IAM Identity Center** and enable it
-2. Create a **user** for yourself (use your email)
-3. Create a **permission set** — choose the `AdministratorAccess` managed policy for now
-4. Assign the permission set to your user and your account
-5. Note the **AWS access portal URL** shown in the IAM Identity Center dashboard
-6. On your Mac, configure the AWS CLI:
-   ```bash
-   aws configure sso
-   ```
-   You'll be prompted for the portal URL, region, and a profile name. Use `claude-code` as the profile name.
-7. Test it:
-   ```bash
-   aws sso login --profile claude-code
-   aws sts get-caller-identity --profile claude-code
-   ```
+**Steps:**
 
-### Option B: IAM User with Access Keys (Simpler, Less Secure)
+1. **Do not use the root user.** The root account should only be used for initial account setup.
 
-If IAM Identity Center feels like too much setup right now, you can use a traditional IAM user. Be aware that access keys are long-lived credentials — treat them like passwords.
+2. In the AWS Console, go to **IAM → Users → Create user**
+   - Username: your name or `fre-aws-admin`
+   - Do not enable console access (this user is for CLI only)
 
-1. In the AWS Console, go to **IAM → Users → Create user**
-2. Attach the `AdministratorAccess` managed policy
-3. Under **Security credentials**, create an **Access key** (choose "CLI" use case)
-4. Download the CSV — you will not see the secret key again
-5. On your Mac:
+3. On the **Set permissions** page, choose **Attach policies directly** and select `AdministratorAccess`
+
+   > `AdministratorAccess` is broad. It is appropriate while you are building and the only user of this account. Before sharing the account or going to production, replace it with a scoped policy covering only the services this project uses (EC2, VPC, S3, DynamoDB, KMS, IAM, SSM).
+
+4. Complete user creation, then open the user → **Security credentials** tab → **Create access key**
+   - Use case: **Command Line Interface (CLI)**
+   - Download the CSV — **the secret key is shown only once**
+
+5. On your Mac, configure a named profile:
    ```bash
    aws configure --profile claude-code
    ```
-   Enter the access key ID, secret key, default region, and output format (`json`).
-6. Enable MFA on the IAM user (IAM → Users → your user → Security credentials → MFA)
+   Enter: Access Key ID, Secret Access Key, default region (e.g. `us-east-1`), output format (`json`).
 
-> Regardless of which option you choose, use the profile name `claude-code`. The scripts in this project default to that profile name.
+6. **Enable MFA on the IAM user** (same Security credentials tab → MFA → Authenticator app)
+   - MFA protects console access and can be required for sensitive API calls via IAM policy conditions
+   - Without MFA, a leaked access key gives full account access
+
+7. Test the profile:
+   ```bash
+   aws sts get-caller-identity --profile claude-code
+   ```
+
+> The scripts in this project use the profile name `claude-code` by default. This can be changed in `config/defaults.env`.
+
+### Upgrade path
+
+When you move beyond a free-tier single account (e.g. adding team members, creating a production environment, or joining AWS Organizations), replace IAM user access keys with **IAM Identity Center**:
+- Enable AWS Organizations (required for full IAM Identity Center)
+- Migrate to `aws configure sso` with `--profile claude-code`
+- No changes to the Terraform or scripts are needed — only the credential source changes
 
 ---
 
@@ -178,13 +185,15 @@ All access to the EC2 instance goes through **AWS SSM Session Manager** — no S
 
 ## Security Model
 
-- No inbound ports open on EC2
-- No SSH keys used or stored
-- EC2 instance has no public IP (private subnet, default config)
-- All connections via SSM (encrypted, IAM-controlled, auditable)
-- IMDSv2 enforced (prevents credential theft via SSRF)
-- All storage encrypted at rest (KMS)
-- CloudTrail and VPC Flow Logs not enabled by default (cost); enable manually for production use
+| Control | Status | Notes |
+|---------|--------|-------|
+| No inbound ports on EC2 | ✅ Always | Security group has no ingress rules |
+| No SSH keys | ✅ Always | SSM Session Manager only |
+| No public IP on EC2 | ⚠️ Optional | Default (`public` mode) gives EC2 a public IP; switch to `private_nat` for full isolation |
+| IMDSv2 enforced | ✅ Always | Prevents SSRF-based credential theft |
+| Storage encrypted at rest | ✅ Always | KMS-backed EBS and S3 |
+| Short-lived AWS credentials | ❌ Free tier | IAM user access keys are long-lived; mitigate with MFA and key rotation |
+| CloudTrail / VPC Flow Logs | ❌ Deferred | Not enabled by default (cost); add before going to production |
 
 ---
 

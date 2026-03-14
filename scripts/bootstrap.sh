@@ -39,7 +39,9 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "Verifying AWS credentials..."
 CALLER_IDENTITY=$($AWS sts get-caller-identity --output json 2>&1) || {
-  echo "ERROR: AWS credentials not valid. Run 'aws sso login --profile ${AWS_PROFILE}' and try again." >&2
+  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+  echo "       Run 'aws configure --profile ${AWS_PROFILE}' to set up credentials," >&2
+  echo "       or check that your access key is active in the AWS Console (IAM → Users → Security credentials)." >&2
   exit 1
 }
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')

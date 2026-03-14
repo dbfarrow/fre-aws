@@ -13,15 +13,18 @@ This project creates and maintains an AWS environment using Infrastructure as Co
 ## Core Principles
 
 ### Zero Trust Architecture
-This project follows AWS Zero Trust principles throughout:
-- **No SSH / no port 22** — all EC2 access via AWS Systems Manager (SSM) Session Manager
-- **No public IP on EC2** — instances live in private subnets; SSM handles connectivity
-- **No long-lived IAM credentials** — users authenticate via IAM Identity Center (SSO); EC2 uses instance roles
-- **Least-privilege IAM** — every role and policy grants only the minimum required permissions
-- **IMDSv2 enforced** on all EC2 instances (prevents SSRF-based metadata attacks)
-- **Encryption at rest and in transit** on all storage (S3, EBS, DynamoDB)
-- **Security groups: deny by default**, no ingress rules on EC2
-- CloudTrail and VPC Flow Logs are **deferred** — not enabled initially to minimize cost; add when moving to production
+This project applies Zero Trust principles where free-tier AWS constraints allow:
+
+| Principle | Applied | Notes |
+|-----------|---------|-------|
+| No SSH / no port 22 | ✅ | All EC2 access via SSM Session Manager |
+| No EC2 public IP | ⚠️ | Default mode (`public`) gives EC2 a public IP; `private_nat` removes it |
+| No long-lived credentials | ❌ Free-tier compromise | IAM Identity Center requires AWS Organizations, which is not available on a free-tier standalone account. IAM user access keys are used instead. Mitigate with MFA and key rotation. Upgrade to IAM Identity Center when AWS Organizations becomes available. |
+| Least-privilege IAM | ⚠️ | `AdministratorAccess` used initially for the IAM user; EC2 instance role is scoped to SSM only |
+| IMDSv2 enforced | ✅ | `http_tokens = "required"` on all instances |
+| Encryption at rest | ✅ | KMS-backed EBS and S3 |
+| Security groups deny by default | ✅ | No ingress rules on EC2 |
+| Audit logging | ❌ Deferred | CloudTrail and VPC Flow Logs not enabled (cost); add before production |
 
 ### Terraform Module Strategy
 All AWS resource provisioning uses **community modules from [terraform-aws-modules](https://registry.terraform.io/namespaces/terraform-aws-modules)** (maintained by Anton Babenko). Direct resource blocks are only used when no suitable module exists.
