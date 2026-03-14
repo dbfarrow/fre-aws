@@ -33,7 +33,7 @@ if [[ ! -f "$USERS_TFVARS" ]]; then
 fi
 
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
-: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}" "${TF_BACKEND_KMS_KEY_ID:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}"
 
 # ---------------------------------------------------------------------------
 # Export credentials for Terraform
@@ -63,7 +63,6 @@ terraform -chdir="${TF_DIR}" init \
   -backend-config="key=${TF_BACKEND_KEY}" \
   -backend-config="region=${TF_BACKEND_REGION}" \
   -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
-  -backend-config="kms_key_id=${TF_BACKEND_KMS_KEY_ID}" \
   -reconfigure
 echo ""
 

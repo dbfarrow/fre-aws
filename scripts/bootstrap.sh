@@ -91,19 +91,6 @@ if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
     echo "           Switching to ${BUCKET_REGION} for all state backend resources."
     AWS_REGION="${BUCKET_REGION}"
     AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
-    # KMS key was looked up before the region switch — re-look up in the correct region.
-    if $AWS kms describe-key --key-id "${KMS_ALIAS}" &>/dev/null; then
-      KMS_KEY_ID=$($AWS kms describe-key --key-id "${KMS_ALIAS}" --output json | jq -r '.KeyMetadata.KeyId')
-      KMS_KEY_ARN=$($AWS kms describe-key --key-id "${KMS_KEY_ID}" --output json | jq -r '.KeyMetadata.Arn')
-      echo "  KMS key ARN (${AWS_REGION}): ${KMS_KEY_ARN}"
-    else
-      # No KMS alias in bucket's region — read the key from the bucket's encryption config.
-      KMS_KEY_ARN=$(aws --profile "${AWS_PROFILE}" s3api get-bucket-encryption \
-        --bucket "${BUCKET_NAME}" \
-        --query 'ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID' \
-        --output text 2>/dev/null)
-      echo "  KMS key ARN (from bucket encryption): ${KMS_KEY_ARN}"
-    fi
   fi
 else
   if [[ "${AWS_REGION}" == "us-east-1" ]]; then
@@ -173,7 +160,6 @@ TF_BACKEND_BUCKET=${BUCKET_NAME}
 TF_BACKEND_KEY=${PROJECT_NAME}/terraform.tfstate
 TF_BACKEND_REGION=${AWS_REGION}
 TF_BACKEND_DYNAMODB_TABLE=${DYNAMODB_TABLE}
-TF_BACKEND_KMS_KEY_ID=${KMS_KEY_ARN}
 TF_BACKEND_ACCOUNT_ID=${ACCOUNT_ID}
 EOF
 echo "Backend config written to config/backend.env"
