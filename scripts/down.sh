@@ -36,6 +36,19 @@ if [[ "${CONFIRM}" != "${PROJECT_NAME}" ]]; then
 fi
 echo ""
 
+# ---------------------------------------------------------------------------
+# Export credentials for Terraform
+# Terraform's Go SDK cannot consume the AWS CLI SSO token cache directly.
+# Exporting as standard env vars bridges the gap for both SSO and key-based profiles.
+# ---------------------------------------------------------------------------
+echo "--- exporting AWS credentials ---"
+eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
+  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+  echo "       If using SSO, run './run.sh sso-login' first." >&2
+  exit 1
+}
+echo ""
+
 echo "--- terraform init ---"
 terraform -chdir="${TF_DIR}" init \
   -backend-config="bucket=${TF_BACKEND_BUCKET}" \
@@ -43,7 +56,6 @@ terraform -chdir="${TF_DIR}" init \
   -backend-config="region=${TF_BACKEND_REGION}" \
   -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
   -backend-config="kms_key_id=${TF_BACKEND_KMS_KEY_ID}" \
-  -backend-config="profile=${AWS_PROFILE}" \
   -reconfigure
 echo ""
 
