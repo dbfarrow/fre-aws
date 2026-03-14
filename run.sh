@@ -48,6 +48,8 @@ DOCKER_ARGS=(
   "--volume" "$(pwd)/config:/workspace/config"
   # Mount terraform dir (for state cache and .terraform/)
   "--volume" "$(pwd)/terraform:/workspace/terraform"
+  # Mount scripts so edits take effect without rebuilding the image
+  "--volume" "$(pwd)/scripts:/workspace/scripts"
 )
 
 # ---------------------------------------------------------------------------
