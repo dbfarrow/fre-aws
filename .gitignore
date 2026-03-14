@@ -1,0 +1,53 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform variable files that may contain secrets
+*.auto.tfvars
+*.auto.tfvars.json
+# Keep terraform.tfvars.example but ignore actual tfvars
+terraform.tfvars
+terraform.tfvars.json
+
+# AWS credentials and config (should be mounted, never committed)
+.aws/
+*.pem
+*.key
+*_rsa
+*_ed25519
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Docker
+.docker/
+
+# Claude Code local settings
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test output
+*.log
+test-results/
