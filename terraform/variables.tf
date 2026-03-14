@@ -59,3 +59,29 @@ variable "owner_email" {
   type        = string
   default     = ""
 }
+
+# ---- Billing ---------------------------------------------------------------
+
+variable "billing_alert_email" {
+  description = "Email address to receive billing alerts and anomaly notifications. Leave empty to skip all billing resources."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "Monthly spend budget in USD. Alerts fire when actual or forecasted spend exceeds budget_alert_threshold_percent of this value."
+  type        = number
+  default     = 10
+}
+
+variable "budget_alert_threshold_percent" {
+  description = "Percentage of monthly_budget_usd at which budget alerts are sent (applies to both actual and forecasted spend)."
+  type        = number
+  default     = 80
+}
+
+variable "anomaly_threshold_usd" {
+  description = "Minimum anomaly impact in USD before a cost anomaly alert is sent. Anomalies below this amount are suppressed."
+  type        = number
+  default     = 5
+}

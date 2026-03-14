@@ -57,6 +57,10 @@ terraform -chdir="${TF_DIR}" plan \
   -var="network_mode=${NETWORK_MODE:-public}" \
   -var="ebs_volume_size_gb=${EBS_VOLUME_SIZE_GB:-20}" \
   -var="owner_email=${OWNER_EMAIL:-}" \
+  -var="billing_alert_email=${BILLING_ALERT_EMAIL:-}" \
+  -var="monthly_budget_usd=${MONTHLY_BUDGET_USD:-10}" \
+  -var="budget_alert_threshold_percent=${BUDGET_ALERT_THRESHOLD_PERCENT:-80}" \
+  -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
   -out="${TF_DIR}/.tfplan"
 echo ""
 

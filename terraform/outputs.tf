@@ -33,3 +33,14 @@ output "network_mode" {
   description = "Active network mode."
   value       = var.network_mode
 }
+
+output "billing_alerts" {
+  description = "Summary of active billing alert configuration."
+  value = local.billing_enabled ? join("\n", [
+    "  Billing alerts:     enabled",
+    "  Alert email:        ${var.billing_alert_email}",
+    "  Monthly budget:     $${var.monthly_budget_usd} (alert at ${var.budget_alert_threshold_percent}%)",
+    "  Zero-spend alert:   enabled (fires on first $0.01 of charges)",
+    "  Anomaly detection:  enabled (alert threshold: $${var.anomaly_threshold_usd})",
+  ]) : "  Billing alerts: disabled (set BILLING_ALERT_EMAIL in config/defaults.env to enable)"
+}
