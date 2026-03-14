@@ -99,9 +99,9 @@ This is what allows `git push` and `git pull` to work from your EC2 instance:
 
 When you run `./run.sh connect`:
 
-1. `run.sh` checks that `~/.ssh/fre-claude` exists — exits with instructions if not
-2. If the key is not already in your Mac's SSH agent, it runs `ssh-add ~/.ssh/fre-claude` (one passphrase prompt)
-3. The SSH agent socket is forwarded into the Docker container
+1. `run.sh` checks that `~/.ssh/fre-claude` exists on your Mac — exits with instructions if not
+2. The Docker container mounts `~/.ssh` read-only so it can access the key
+3. Inside the container, `connect.sh` starts a fresh `ssh-agent` and runs `ssh-add` — **one passphrase prompt**
 4. `connect.sh` opens an SSH session to the EC2 instance with `-A` (agent forwarding)
 5. On the EC2 instance, `git` operations use your forwarded agent — your private key never leaves your Mac
 
@@ -119,7 +119,11 @@ Two settings in `config/defaults.env` enable the full GitHub experience: SSH pus
 
 Complete the [SSH Key Setup](#ssh-key-setup) section above, then add your public key to GitHub under **Settings → SSH and GPG keys → New SSH key** (key type: **Authentication Key**). That's it — agent forwarding handles the rest at connect time.
 
-When you connect, the session launcher shows a menu of locally-cloned repos in `~/repos`, plus a "new session" option. Authenticating with GitHub and cloning repos is handled by Claude Code itself during the session.
+When you connect, the session launcher shows a menu:
+- **Locally-cloned repos** in `~/repos` — select one to launch Claude Code in that project
+- **Clone a GitHub repo** — prompts for owner/repo (e.g. `myname/myrepo`), clones via SSH using your forwarded key
+- **Create a new project** — prompts for a name, creates a new directory in `~/repos`
+- **Open a shell** — drops into bash without launching Claude Code
 
 ### 2. Git identity
 
@@ -359,7 +363,7 @@ There are three ways to configure the network, with different cost and security 
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/defaults.env.example config/defaults.env      ← create your local config
 7.  Edit config/defaults.env                                ← AWS region, SSH key path,
-                                                               GITHUB_TOKEN, GIT_USER_NAME/EMAIL
+                                                               GIT_USER_NAME/EMAIL
 8.  ./run.sh verify                                         ← confirm AWS credentials work
 9.  ./run.sh bootstrap                                      ← creates S3 + DynamoDB for Terraform state
 10. ./run.sh up                                             ← provisions all AWS infrastructure
@@ -379,13 +383,12 @@ stop.sh     → stop the instance when done
 
 ```
 Your Mac
-  └── SSH agent (holds fre-claude key)
-  └── Docker container (terraform + aws-cli + ssh + scripts)
+  └── Docker container (terraform + aws-cli + ssh + ssh-agent + scripts)
+        │     mounts: ~/.aws (credentials), ~/.ssh (key read-only)
         └── AWS account
               ├── VPC (public or private subnet)
               │     └── EC2 t3.micro
               │           ├── Claude Code CLI
-              │           ├── GitHub CLI (gh)
               │           ├── SSM Agent (tunnels the SSH connection)
               │           └── sshd (accepts the tunneled SSH connection)
               ├── S3 bucket (Terraform state)
