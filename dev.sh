@@ -2,16 +2,21 @@
 # dev.sh — Developer tool for managing your Claude Code environment.
 #
 # Usage:
-#   ./dev.sh start    - Start your EC2 instance
-#   ./dev.sh stop     - Stop your EC2 instance (preserves all your data)
-#   ./dev.sh connect  - Connect to your EC2 instance
+#   ./dev.sh start    [config]  - Start your EC2 instance
+#   ./dev.sh stop     [config]  - Stop your EC2 instance (preserves all your data)
+#   ./dev.sh connect  [config]  - Connect to your EC2 instance
+#
+# config defaults to config/developer.env. Pass an alternate file to test
+# multiple users without editing developer.env:
+#   ./dev.sh connect config/alice.env
 set -euo pipefail
 
 IMAGE_NAME="fre-aws"
 COMMAND="${1:-}"
+CONFIG_ARG="${2:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {start|stop|connect}" >&2
+  echo "Usage: $0 {start|stop|connect} [config-file]" >&2
   exit 1
 fi
 
@@ -26,9 +31,14 @@ fi
 # ---------------------------------------------------------------------------
 # Load developer config
 # ---------------------------------------------------------------------------
-DEV_CONFIG="$(pwd)/config/developer.env"
+if [[ -n "${CONFIG_ARG}" ]]; then
+  DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
+else
+  DEV_CONFIG="$(pwd)/config/developer.env"
+fi
+
 if [[ ! -f "${DEV_CONFIG}" ]]; then
-  echo "ERROR: config/developer.env not found." >&2
+  echo "ERROR: Config file not found: ${DEV_CONFIG}" >&2
   echo "       Copy the example and fill in your values:" >&2
   echo "         cp config/developer.env.example config/developer.env" >&2
   exit 1
@@ -50,8 +60,9 @@ DOCKER_ARGS=(
   "--env" "DEV_USERNAME=${MY_USERNAME}"
   # Mount AWS credentials (read-write: CLI writes SSO token cache)
   "--volume" "${HOME}/.aws:/root/.aws"
-  # Mount config so scripts can read developer.env for PROJECT_NAME, AWS_REGION, etc.
-  "--volume" "$(pwd)/config:/workspace/config"
+  # Mount the config file as developer.env regardless of its name on the host.
+  # This allows alternate config files to be used without editing developer.env.
+  "--volume" "${DEV_CONFIG}:/workspace/config/developer.env:ro"
   # Mount scripts
   "--volume" "$(pwd)/scripts:/workspace/scripts"
 )
