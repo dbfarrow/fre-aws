@@ -9,6 +9,7 @@ A Docker-packaged toolset for provisioning and managing an EC2-based development
 - [What This Project Does](#what-this-project-does)
 - [What You Need Before Starting](#what-you-need-before-starting)
 - [SSH Key Setup](#ssh-key-setup)
+- [Configuring GitHub Access](#configuring-github-access)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -105,6 +106,86 @@ When you run `./run.sh connect`:
 5. On the EC2 instance, `git` operations use your forwarded agent — your private key never leaves your Mac
 
 > **`./run.sh up` must be run** (or re-run) after creating this key. Terraform injects the public key content into the EC2 instance during provisioning. If you rotate your key, run `./run.sh down` then `./run.sh up` to reprovision.
+
+---
+
+## Configuring GitHub Access
+
+Three settings in `config/defaults.env` control GitHub integration. All three are optional but together they enable the full experience: SSH push/pull, interactive repo listing at login, and properly attributed commits.
+
+> `config/defaults.env` is gitignored — tokens and personal settings stored there are never committed. See [Local Configuration](#local-configuration) below.
+
+### SSH key for git push/pull
+
+This is the `fre-claude` key you created in [SSH Key Setup](#ssh-key-setup). Your public key is already installed on the EC2 instance and your private key stays on your Mac via agent forwarding. No additional configuration needed here beyond adding the public key to GitHub:
+
+1. Copy your public key:
+   ```bash
+   cat ~/.ssh/fre-claude.pub | pbcopy
+   ```
+2. In GitHub: **Settings → SSH and GPG keys → New SSH key**
+   - Title: `fre-claude`
+   - Key type: **Authentication Key**
+   - Paste and save
+
+Test it (optional):
+```bash
+ssh -i ~/.ssh/fre-claude -T git@github.com
+# Hi <username>! You've successfully authenticated...
+```
+
+### GitHub token for repo listing
+
+The session launcher that runs when you connect shows a menu of your GitHub repos. This requires a personal access token so it can call the GitHub API.
+
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) → **Generate new token (classic)**
+2. Note: `fre-aws session launcher`
+3. Expiration: your preference (90 days is a reasonable default)
+4. Scopes: check **`repo`** (required to list and clone private repos)
+5. Click **Generate token** and copy it immediately — it is only shown once
+
+6. Add it to `config/defaults.env`:
+   ```
+   GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+   ```
+
+> **Security note:** `config/defaults.env` is gitignored and never leaves your Mac. It is readable by your user account — the same level of protection as `~/.ssh/`. Storing secrets in shell env files is the standard practice for local development tooling. A future enhancement could integrate with macOS Keychain for additional protection.
+
+### Git identity
+
+Set your name and email so commits are attributed correctly:
+
+```
+GIT_USER_NAME=Jane Smith
+GIT_USER_EMAIL=jane@example.com
+```
+
+These are written to the EC2 instance's git config during provisioning and refreshed at every SSH login, so they stay current even if you change them locally.
+
+### Applying changes
+
+After editing `config/defaults.env`, run `./run.sh up` to push the token and git identity into SSM Parameter Store. They will take effect at the next `./run.sh connect`.
+
+---
+
+## Local Configuration
+
+`config/defaults.env` is your personal settings file — it is **gitignored** and never committed. This keeps tokens, email addresses, and other personal values out of the repository.
+
+`config/defaults.env.example` is the tracked template. When new settings are added to the project, they appear in the example file. To pick them up:
+
+```bash
+# See what's new
+diff config/defaults.env.example config/defaults.env
+
+# Add any missing settings to your local copy
+```
+
+**First-time setup:**
+```bash
+cp config/defaults.env.example config/defaults.env
+# Then edit config/defaults.env with your values
+```
 
 ---
 
@@ -303,16 +384,18 @@ There are three ways to configure the network, with different cost and security 
 ## Order of Operations (First-Time Setup)
 
 ```
-1. Create AWS account + enable root MFA           ← AWS Console, one time
-2. Set up credentials (Option A or B above)       ← one time
-3. Install Docker on your Mac                     ← one time
-4. Create SSH key + add public key to GitHub      ← see SSH Key Setup above
-5. Clone this repo                                ← git clone ...
-6. Edit config/defaults.env                       ← set GIT_USER_NAME, GIT_USER_EMAIL, GITHUB_TOKEN
-7. ./run.sh verify                                ← confirm AWS credentials work
-8. ./run.sh bootstrap                             ← creates S3 + DynamoDB for Terraform state
-9. ./run.sh up                                    ← provisions all AWS infrastructure
-10. ./run.sh connect                              ← repo selector launches, then Claude Code
+1.  Create AWS account + enable root MFA                    ← AWS Console, one time
+2.  Set up credentials (Option A or B above)                ← one time
+3.  Install Docker on your Mac                              ← one time
+4.  Create SSH key + add public key to GitHub               ← see SSH Key Setup above
+5.  Clone this repo                                         ← git clone ...
+6.  cp config/defaults.env.example config/defaults.env      ← create your local config
+7.  Edit config/defaults.env                                ← AWS region, SSH key path,
+                                                               GITHUB_TOKEN, GIT_USER_NAME/EMAIL
+8.  ./run.sh verify                                         ← confirm AWS credentials work
+9.  ./run.sh bootstrap                                      ← creates S3 + DynamoDB for Terraform state
+10. ./run.sh up                                             ← provisions all AWS infrastructure
+11. ./run.sh connect                                        ← repo selector launches, then Claude Code
 ```
 
 After first-time setup, daily use is just:

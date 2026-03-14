@@ -30,6 +30,9 @@ terraform.tfvars.json
 .env.*
 !.env.example
 
+# Local config with real credentials — never commit this
+config/defaults.env
+
 # macOS
 .DS_Store
 .AppleDouble

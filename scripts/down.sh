@@ -10,6 +10,8 @@ TF_DIR="${SCRIPT_DIR}/../terraform"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "ERROR: config/defaults.env not found." >&2
+  echo "       Copy the example and fill in your values:" >&2
+  echo "         cp config/defaults.env.example config/defaults.env" >&2
   exit 1
 fi
 source "$CONFIG_FILE"
