@@ -2,6 +2,7 @@
 # run.sh — Host-side wrapper. Runs fre-aws scripts inside the Docker container.
 #
 # Usage:
+#   ./run.sh verify       - Verify AWS credentials are working
 #   ./run.sh bootstrap    - One-time setup (creates S3, DynamoDB, KMS)
 #   ./run.sh up           - Create / update AWS infrastructure
 #   ./run.sh down         - Destroy AWS infrastructure
@@ -16,7 +17,7 @@ IMAGE_NAME="fre-aws"
 COMMAND="${1:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {bootstrap|up|down|start|stop|connect|test|shell}" >&2
+  echo "Usage: $0 {verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
   exit 1
 fi
 
@@ -47,6 +48,16 @@ DOCKER_ARGS=(
 # Dispatch
 # ---------------------------------------------------------------------------
 case "${COMMAND}" in
+  verify)
+    # Load the profile name from config if available, fall back to default
+    AWS_PROFILE="claude-code"
+    if [[ -f "$(pwd)/config/defaults.env" ]]; then
+      # shellcheck source=/dev/null
+      source "$(pwd)/config/defaults.env"
+    fi
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
+      aws sts get-caller-identity --profile "${AWS_PROFILE}" --output table
+    ;;
   bootstrap)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
     ;;
@@ -73,7 +84,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {bootstrap|up|down|start|stop|connect|test|shell}" >&2
+    echo "Usage: $0 {verify|bootstrap|up|down|start|stop|connect|test|shell}" >&2
     exit 1
     ;;
 esac

@@ -44,7 +44,9 @@ Everything in the table below must exist **before running any scripts in this pr
 
 AWS IAM Identity Center — the preferred Zero Trust option — **cannot manage AWS account access on a free-tier account without AWS Organizations**. The Account Instance available to standalone free-tier accounts only supports application-level authentication, not AWS CLI/account access. IAM user access keys are therefore the correct approach for free-tier use.
 
-Access keys are long-lived credentials. They are a known security tradeoff relative to short-lived SSO credentials. The mitigations documented below (MFA, least-privilege policy, key rotation) reduce but do not eliminate that risk. This is the free-tier reality; see [Upgrade Path](#upgrade-path) when you outgrow it.
+Access keys are long-lived credentials. They are a known security tradeoff relative to short-lived SSO credentials. The mitigations below (MFA, least-privilege policy, key rotation) reduce but do not eliminate that risk. See [Upgrade Path](#upgrade-path) when you outgrow it.
+
+> **No AWS CLI required on your Mac.** All AWS operations run inside the Docker container. Credential setup only requires creating two plain text files and using the AWS Console.
 
 **Steps:**
 
@@ -52,30 +54,47 @@ Access keys are long-lived credentials. They are a known security tradeoff relat
 
 2. In the AWS Console, go to **IAM → Users → Create user**
    - Username: your name or `fre-aws-admin`
-   - Do not enable console access (this user is for CLI only)
+   - Leave "Provide user access to the AWS Management Console" **unchecked** (this user is for programmatic access only)
 
 3. On the **Set permissions** page, choose **Attach policies directly** and select `AdministratorAccess`
 
-   > `AdministratorAccess` is broad. It is appropriate while you are building and the only user of this account. Before sharing the account or going to production, replace it with a scoped policy covering only the services this project uses (EC2, VPC, S3, DynamoDB, KMS, IAM, SSM).
+   > `AdministratorAccess` is broad. It is appropriate while you are the sole user of a development account. Before sharing the account or going to production, replace it with a scoped policy covering only EC2, VPC, S3, DynamoDB, KMS, IAM, and SSM.
 
 4. Complete user creation, then open the user → **Security credentials** tab → **Create access key**
    - Use case: **Command Line Interface (CLI)**
-   - Download the CSV — **the secret key is shown only once**
+   - Download the CSV — **the secret key is shown exactly once and cannot be retrieved again**
 
-5. On your Mac, configure a named profile:
-   ```bash
-   aws configure --profile claude-code
-   ```
-   Enter: Access Key ID, Secret Access Key, default region (e.g. `us-east-1`), output format (`json`).
-
-6. **Enable MFA on the IAM user** (same Security credentials tab → MFA → Authenticator app)
-   - MFA protects console access and can be required for sensitive API calls via IAM policy conditions
+5. **Enable MFA on the IAM user** (same Security credentials tab → **MFA → Authenticator app**)
+   - MFA protects the console and can be enforced for API calls via IAM policy conditions
    - Without MFA, a leaked access key gives full account access
 
-7. Test the profile:
+6. **Create the AWS credentials files on your Mac.** Open Terminal and run these commands, replacing the placeholder values with the keys from your CSV:
+
    ```bash
-   aws sts get-caller-identity --profile claude-code
+   mkdir -p ~/.aws
+
+   cat > ~/.aws/credentials << 'EOF'
+   [claude-code]
+   aws_access_key_id = PASTE_YOUR_ACCESS_KEY_ID_HERE
+   aws_secret_access_key = PASTE_YOUR_SECRET_ACCESS_KEY_HERE
+   EOF
+
+   cat > ~/.aws/config << 'EOF'
+   [profile claude-code]
+   region = us-east-1
+   output = json
+   EOF
    ```
+
+   If you prefer not to use Terminal, you can create these as plain text files in `~/.aws/` using any text editor. Use **TextEdit → Format → Make Plain Text** to avoid hidden formatting. The filenames are `credentials` (no extension) and `config` (no extension).
+
+   Change `us-east-1` in `config` to your preferred AWS region if needed.
+
+7. **Verify the credentials work** using the Docker container (no AWS CLI on your Mac required):
+   ```bash
+   ./run.sh verify
+   ```
+   You should see a table showing your AWS Account ID, user ID, and ARN. If it fails, double-check that the access key values were copied correctly with no extra spaces.
 
 > The scripts in this project use the profile name `claude-code` by default. This can be changed in `config/defaults.env`.
 
@@ -83,7 +102,7 @@ Access keys are long-lived credentials. They are a known security tradeoff relat
 
 When you move beyond a free-tier single account (e.g. adding team members, creating a production environment, or joining AWS Organizations), replace IAM user access keys with **IAM Identity Center**:
 - Enable AWS Organizations (required for full IAM Identity Center)
-- Migrate to `aws configure sso` with `--profile claude-code`
+- Replace `~/.aws/credentials` with an SSO-based profile using `aws configure sso --profile claude-code` (this requires the AWS CLI, which you can install at that point)
 - No changes to the Terraform or scripts are needed — only the credential source changes
 
 ---
@@ -146,13 +165,15 @@ There are three ways to configure the network, with different cost and security 
 ## Order of Operations (First-Time Setup)
 
 ```
-1. Create AWS account + enable root MFA          ← manual, one time
-2. Set up IAM credentials (Option A or B above)  ← manual, one time
-3. Install Docker on your Mac                    ← manual, one time
-4. Clone this repo                               ← git clone ...
-5. Run bootstrap.sh                              ← creates S3 + DynamoDB for Terraform state
-6. Run up.sh                                     ← provisions all AWS infrastructure
-7. Run connect.sh                                ← opens a shell on your EC2 instance
+1. Create AWS account + enable root MFA           ← AWS Console, one time
+2. Create IAM user + access keys + enable MFA     ← AWS Console, one time
+3. Create ~/.aws/credentials and ~/.aws/config    ← text files on your Mac, one time
+4. Install Docker on your Mac                     ← one time
+5. Clone this repo                                ← git clone ...
+6. ./run.sh verify                                ← confirm credentials work
+7. ./run.sh bootstrap                             ← creates S3 + DynamoDB for Terraform state
+8. ./run.sh up                                    ← provisions all AWS infrastructure
+9. ./run.sh connect                               ← opens a shell on your EC2 instance
 ```
 
 After first-time setup, daily use is just:
