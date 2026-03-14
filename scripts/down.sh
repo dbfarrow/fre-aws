@@ -43,6 +43,7 @@ terraform -chdir="${TF_DIR}" init \
   -backend-config="region=${TF_BACKEND_REGION}" \
   -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
   -backend-config="kms_key_id=${TF_BACKEND_KMS_KEY_ID}" \
+  -backend-config="profile=${AWS_PROFILE}" \
   -reconfigure
 echo ""
 
