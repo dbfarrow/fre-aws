@@ -48,14 +48,6 @@ npm install -g @anthropic-ai/claude-code
 claude --version || true
 
 # ---------------------------------------------------------------------------
-# GitHub CLI (used by session launcher to list and clone repos)
-# ---------------------------------------------------------------------------
-dnf install -y 'dnf-command(config-manager)'
-dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-dnf install -y gh
-gh --version
-
-# ---------------------------------------------------------------------------
 # Developer user
 # ---------------------------------------------------------------------------
 if ! id "developer" &>/dev/null; then
@@ -87,7 +79,7 @@ su - developer -c "git config --global core.editor vim"
 su - developer -c "git config --global init.defaultBranch main"
 
 # ---------------------------------------------------------------------------
-# SSH server — accept git identity and GitHub token from the SSH client
+# SSH server — accept git identity from the SSH client
 # ---------------------------------------------------------------------------
 cat >> /etc/ssh/sshd_config << 'SSHD_CONF'
 
@@ -98,7 +90,7 @@ PasswordAuthentication no
 ChallengeResponseAuthentication no
 
 # Forward these env vars from the connecting SSH client
-AcceptEnv LANG LC_* GH_TOKEN GIT_USER_NAME GIT_USER_EMAIL
+AcceptEnv LANG LC_* GIT_USER_NAME GIT_USER_EMAIL
 SSHD_CONF
 
 systemctl enable sshd
@@ -117,7 +109,9 @@ chown developer:developer /home/developer/repos
 cat > /home/developer/session_start.sh << 'END_SESSION'
 #!/bin/bash
 # session_start.sh — Interactive Claude Code session launcher.
-# Runs automatically on SSH login. Presents a repo menu then starts Claude.
+# Runs automatically on SSH login. Offers locally-cloned repos, a blank
+# Claude session, or a plain shell. GitHub auth and repo cloning are
+# handled by Claude Code itself.
 
 # Refresh git identity if passed through SSH env
 [[ -n "${GIT_USER_NAME:-}"  ]] && git config --global user.name  "${GIT_USER_NAME}"
@@ -133,43 +127,24 @@ echo "╚═══════════════════════�
 echo ""
 
 # ---------------------------------------------------------------------------
-# Fetch repository list
-# ---------------------------------------------------------------------------
-REPO_LIST=()
-if command -v gh &>/dev/null && [[ -n "${GH_TOKEN:-}" ]]; then
-  echo "Fetching your repositories..."
-  while IFS= read -r repo; do
-    [[ -n "${repo}" ]] && REPO_LIST+=("${repo}")
-  done < <(GH_TOKEN="${GH_TOKEN}" gh repo list --limit 100 \
-             --json nameWithOwner --jq '.[].nameWithOwner' 2>/dev/null || true)
-fi
-
-# ---------------------------------------------------------------------------
-# Display menu
+# Build menu from locally-cloned repos
 # ---------------------------------------------------------------------------
 OPTIONS=()
 IDX=1
-for repo in "${REPO_LIST[@]}"; do
-  LOCAL_DIR="${REPOS_DIR}/$(basename "${repo}")"
-  if [[ -d "${LOCAL_DIR}/.git" ]]; then
-    printf "  %2d) %s  (cloned)\n" "${IDX}" "${repo}"
-  else
-    printf "  %2d) %s\n" "${IDX}" "${repo}"
-  fi
-  OPTIONS+=("${repo}")
+
+while IFS= read -r -d '' dir; do
+  REPO_NAME=$(basename "${dir}")
+  printf "  %2d) %s\n" "${IDX}" "${REPO_NAME}"
+  OPTIONS+=("${dir}")
   (( IDX++ ))
-done
+done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
+           -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
 
-if [[ ${#OPTIONS[@]} -eq 0 && -z "${GH_TOKEN:-}" ]]; then
-  echo "  (Set GITHUB_TOKEN in config/defaults.env to enable repo listing)"
-  echo ""
-fi
-
-printf "  %2d) Open a shell\n" "${IDX}"
-SHELL_OPT=${IDX}
+printf "  %2d) New session (no project)\n" "${IDX}"; NEW_OPT=${IDX}; (( IDX++ ))
+printf "  %2d) Open a shell\n"             "${IDX}"; SHELL_OPT=${IDX}
 echo ""
-read -r -p "Choose [${SHELL_OPT}]: " CHOICE
-CHOICE="${CHOICE:-${SHELL_OPT}}"
+read -r -p "Choose [${NEW_OPT}]: " CHOICE
+CHOICE="${CHOICE:-${NEW_OPT}}"
 
 # ---------------------------------------------------------------------------
 # Shell option
@@ -181,60 +156,32 @@ if [[ "${CHOICE}" == "${SHELL_OPT}" ]]; then
   exec bash
 fi
 
-# Validate
+# ---------------------------------------------------------------------------
+# New session — launch Claude from home, no project pre-selected
+# ---------------------------------------------------------------------------
+if [[ "${CHOICE}" == "${NEW_OPT}" ]]; then
+  echo ""
+  echo "Starting Claude Code..."
+  echo ""
+  cd "${HOME}"
+  exec claude
+fi
+
+# Validate repo choice
 if ! [[ "${CHOICE}" =~ ^[0-9]+$ ]] || (( CHOICE < 1 || CHOICE > ${#OPTIONS[@]} )); then
   echo "Invalid choice. Dropping into shell."
   cd "${HOME}"
   exec bash
 fi
 
+# ---------------------------------------------------------------------------
+# Launch Claude in the selected repo
+# ---------------------------------------------------------------------------
 SELECTED="${OPTIONS[$((CHOICE-1))]}"
-REPO_NAME=$(basename "${SELECTED}")
-LOCAL_DIR="${REPOS_DIR}/${REPO_NAME}"
-
 echo ""
-
-# ---------------------------------------------------------------------------
-# Clone or update
-# ---------------------------------------------------------------------------
-if [[ -d "${LOCAL_DIR}/.git" ]]; then
-  echo "Checking ${REPO_NAME} for updates..."
-  cd "${LOCAL_DIR}"
-  git fetch --quiet origin 2>/dev/null || true
-
-  LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-  REMOTE_SHA=$(git rev-parse "@{u}" 2>/dev/null || echo "")
-
-  if [[ -n "${REMOTE_SHA}" && "${LOCAL_SHA}" != "${REMOTE_SHA}" ]]; then
-    BEHIND=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo "0")
-    echo "  Local copy is ${BEHIND} commit(s) behind origin."
-    read -r -p "  Pull latest? [Y/n]: " PULL
-    if [[ ! "${PULL:-}" =~ ^[Nn]$ ]]; then
-      git pull
-      echo "  Pulled."
-    fi
-  else
-    echo "  Up to date."
-  fi
-else
-  echo "Cloning ${SELECTED}..."
-  mkdir -p "${REPOS_DIR}"
-  if [[ -n "${GH_TOKEN:-}" ]]; then
-    GH_TOKEN="${GH_TOKEN}" gh repo clone "${SELECTED}" "${LOCAL_DIR}"
-  else
-    git clone "git@github.com:${SELECTED}.git" "${LOCAL_DIR}"
-  fi
-  cd "${LOCAL_DIR}"
-  echo "  Done."
-fi
-
-# ---------------------------------------------------------------------------
-# Launch Claude Code
-# ---------------------------------------------------------------------------
+echo "Starting Claude Code in $(basename "${SELECTED}")..."
 echo ""
-echo "Starting Claude Code in ${LOCAL_DIR}..."
-echo ""
-cd "${LOCAL_DIR}"
+cd "${SELECTED}"
 exec claude
 END_SESSION
 

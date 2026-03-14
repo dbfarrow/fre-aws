@@ -52,8 +52,7 @@ SSH_OPTS=(
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
 
-# Forward env vars to the remote session so session_start.sh can use them
-[[ -n "${GH_TOKEN:-}"       ]] && SSH_OPTS+=("-o" "SendEnv=GH_TOKEN")
+# Forward git identity to the remote session so session_start.sh can refresh it
 [[ -n "${GIT_USER_NAME:-}"  ]] && SSH_OPTS+=("-o" "SendEnv=GIT_USER_NAME")
 [[ -n "${GIT_USER_EMAIL:-}" ]] && SSH_OPTS+=("-o" "SendEnv=GIT_USER_EMAIL")
 

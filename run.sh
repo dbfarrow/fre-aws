@@ -36,7 +36,6 @@ fi
 # container without needing to mount ~/.ssh for most commands.
 # ---------------------------------------------------------------------------
 SSH_PUBLIC_KEY=""
-GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 GIT_USER_NAME="${GIT_USER_NAME:-}"
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-}"
 
@@ -152,9 +151,8 @@ case "${COMMAND}" in
         "--env"    "SSH_AUTH_SOCK=/ssh-agent.sock"
       )
     fi
-    # Pass GitHub token and git identity so session_start.sh can use them
-    [[ -n "${GITHUB_TOKEN:-}" ]]  && CONNECT_ARGS+=("--env" "GH_TOKEN=${GITHUB_TOKEN}")
-    [[ -n "${GIT_USER_NAME:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
+    # Pass git identity so session_start.sh can refresh it on login
+    [[ -n "${GIT_USER_NAME:-}" ]]  && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
     [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
     docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
     ;;

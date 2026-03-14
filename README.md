@@ -111,7 +111,7 @@ When you run `./run.sh connect`:
 
 ## Configuring GitHub Access
 
-Three settings in `config/defaults.env` enable the full GitHub experience: SSH push/pull, an interactive repo listing at login, and properly attributed commits. All three are optional but recommended.
+Two settings in `config/defaults.env` enable the full GitHub experience: SSH push/pull and properly attributed commits.
 
 > `config/defaults.env` is gitignored — never committed. See [Local Configuration](#local-configuration).
 
@@ -119,27 +119,9 @@ Three settings in `config/defaults.env` enable the full GitHub experience: SSH p
 
 Complete the [SSH Key Setup](#ssh-key-setup) section above, then add your public key to GitHub under **Settings → SSH and GPG keys → New SSH key** (key type: **Authentication Key**). That's it — agent forwarding handles the rest at connect time.
 
-### 2. GitHub token for repo listing
+When you connect, the session launcher shows a menu of locally-cloned repos in `~/repos`, plus a "new session" option. Authenticating with GitHub and cloning repos is handled by Claude Code itself during the session.
 
-The session launcher shows a menu of your repos at login. It needs a token to call the GitHub API.
-
-1. Go to **[github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained tokens → Generate new token**
-2. Name: `fre-aws session launcher`
-3. Expiration: your preference
-4. Repository access: **All repositories**
-5. Repository permissions:
-   - **Contents**: Read-only (for cloning)
-   - **Metadata**: Read-only (mandatory, for listing — auto-selected)
-6. Click **Generate token** — copy it immediately, it is only shown once
-
-Add it to `config/defaults.env`:
-```
-GITHUB_TOKEN=github_pat_xxxxxxxxxxxxxxxxxxxx
-```
-
-> `config/defaults.env` is gitignored and never leaves your Mac — the same protection level as `~/.ssh/`.
-
-### 3. Git identity
+### 2. Git identity
 
 ```
 GIT_USER_NAME=Jane Smith
