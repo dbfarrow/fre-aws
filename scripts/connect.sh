@@ -4,23 +4,48 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../config/defaults.env"
+
+# Load config: developer.env takes precedence (developer path); fall back to defaults.env (admin path)
+if [[ -f "${SCRIPT_DIR}/../config/developer.env" ]]; then
+  source "${SCRIPT_DIR}/../config/developer.env"
+elif [[ -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
+  source "${SCRIPT_DIR}/../config/defaults.env"
+else
+  echo "ERROR: No config found. Expected config/developer.env or config/defaults.env." >&2
+  exit 1
+fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}"
+: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+
+# DEV_USERNAME: set by admin.sh (command arg) or developer.env (MY_USERNAME)
+DEV_USERNAME="${DEV_USERNAME:-${MY_USERNAME:-}}"
+if [[ -z "${DEV_USERNAME}" ]]; then
+  echo "ERROR: DEV_USERNAME not set. Use './admin.sh connect <username>' or set MY_USERNAME in config/developer.env." >&2
+  exit 1
+fi
 
 eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
-  echo "       If using SSO, run './run.sh sso-login' first." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
 
-TF_DIR="${SCRIPT_DIR}/../terraform"
+# Resolve instance ID by Username tag
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --filters \
+    "Name=tag:Username,Values=${DEV_USERNAME}" \
+    "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+    "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+  --query 'Reservations[0].Instances[0].InstanceId' \
+  --region "${AWS_REGION}" \
+  --output text 2>/dev/null)
 
-INSTANCE_ID=$(terraform -chdir="${TF_DIR}" output -raw instance_id 2>/dev/null) || {
-  echo "ERROR: Could not read instance_id from Terraform state. Has up.sh been run?" >&2
+if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
+  echo "ERROR: No instance found for user '${DEV_USERNAME}' in project '${PROJECT_NAME}'." >&2
+  echo "       Has './admin.sh up' been run?" >&2
   exit 1
-}
+fi
 
 # Verify the instance is running
 INSTANCE_STATE=$(aws ec2 describe-instances \
@@ -34,11 +59,11 @@ INSTANCE_STATE=$(aws ec2 describe-instances \
 
 if [[ "${INSTANCE_STATE}" != "running" ]]; then
   echo "ERROR: Instance ${INSTANCE_ID} is '${INSTANCE_STATE}', not running." >&2
-  echo "       Run './run.sh start' first." >&2
+  echo "       Run './dev.sh start'  (or: ./admin.sh start ${DEV_USERNAME}) first." >&2
   exit 1
 fi
 
-echo "Connecting to ${INSTANCE_ID} via SSH over SSM..."
+echo "Connecting to ${INSTANCE_ID} (${DEV_USERNAME}) via SSH over SSM..."
 echo "(Your SSH key will be forwarded — GitHub push/pull works without storing keys on the instance.)"
 echo ""
 

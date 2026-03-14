@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # down.sh — Destroys all AWS infrastructure managed by Terraform.
-# WARNING: This deletes your EC2 instance and all associated resources.
+# WARNING: This deletes all user EC2 instances and associated resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/../config/defaults.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
+USERS_TFVARS="${SCRIPT_DIR}/../config/users.tfvars"
 TF_DIR="${SCRIPT_DIR}/../terraform"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -22,10 +23,16 @@ if [[ ! -f "$BACKEND_CONFIG_FILE" ]]; then
 fi
 source "$BACKEND_CONFIG_FILE"
 
+if [[ ! -f "$USERS_TFVARS" ]]; then
+  echo "ERROR: config/users.tfvars not found." >&2
+  echo "       Terraform needs this to know which user instances to destroy." >&2
+  exit 1
+fi
+
 echo "=== fre-aws down ==="
 echo ""
-echo "WARNING: This will DESTROY your EC2 instance and all associated AWS resources."
-echo "         Your EBS data will be permanently deleted."
+echo "WARNING: This will DESTROY all user EC2 instances and all associated AWS resources."
+echo "         All user EBS data will be permanently deleted."
 echo ""
 echo "  Project: ${PROJECT_NAME}"
 echo "  Region:  ${AWS_REGION}"
@@ -40,13 +47,11 @@ echo ""
 
 # ---------------------------------------------------------------------------
 # Export credentials for Terraform
-# Terraform's Go SDK cannot consume the AWS CLI SSO token cache directly.
-# Exporting as standard env vars bridges the gap for both SSO and key-based profiles.
 # ---------------------------------------------------------------------------
 echo "--- exporting AWS credentials ---"
 eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
-  echo "       If using SSO, run './run.sh sso-login' first." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
 echo ""
@@ -69,16 +74,14 @@ terraform -chdir="${TF_DIR}" destroy \
   -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \
   -var="use_spot=${USE_SPOT:-true}" \
   -var="network_mode=${NETWORK_MODE:-public}" \
-  -var="ebs_volume_size_gb=${EBS_VOLUME_SIZE_GB:-20}" \
+  -var="ebs_volume_size_gb=${EBS_VOLUME_SIZE_GB:-30}" \
   -var="owner_email=${OWNER_EMAIL:-}" \
   -var="billing_alert_email=${BILLING_ALERT_EMAIL:-}" \
   -var="monthly_budget_usd=${MONTHLY_BUDGET_USD:-10}" \
   -var="budget_alert_threshold_percent=${BUDGET_ALERT_THRESHOLD_PERCENT:-80}" \
   -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
   -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}" \
-  -var="ssh_public_key=" \
-  -var="git_user_name=${GIT_USER_NAME:-}" \
-  -var="git_user_email=${GIT_USER_EMAIL:-}"
+  -var-file="${USERS_TFVARS}"
 
 echo ""
 echo "=== Infrastructure destroyed ==="

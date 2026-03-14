@@ -130,7 +130,7 @@ module "ssm_endpoint_sg" {
 }
 
 # ---------------------------------------------------------------------------
-# Security Group for EC2 — no ingress, all egress
+# Security Group for EC2 — no ingress, all egress (shared across all users)
 # ---------------------------------------------------------------------------
 
 module "ec2_sg" {
@@ -149,12 +149,13 @@ module "ec2_sg" {
 }
 
 # ---------------------------------------------------------------------------
-# IAM role for EC2 — SSM access only
+# Per-user IAM roles and EC2 instances
 # ---------------------------------------------------------------------------
 
-resource "aws_iam_role" "ec2" {
-  name        = "${var.project_name}-ec2-role"
-  description = "EC2 instance role: SSM access + minimal permissions"
+resource "aws_iam_role" "user_ec2" {
+  for_each    = var.users
+  name        = "${var.project_name}-${each.key}-ec2-role"
+  description = "EC2 instance role for ${each.key}: SSM access only"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -167,66 +168,23 @@ resource "aws_iam_role" "ec2" {
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.ec2.name
+  for_each   = var.users
+  role       = aws_iam_role.user_ec2[each.key].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_instance_profile" "ec2" {
-  name = "${var.project_name}-ec2-profile"
-  role = aws_iam_role.ec2.name
+resource "aws_iam_instance_profile" "user_ec2" {
+  for_each = var.users
+  name     = "${var.project_name}-${each.key}-ec2-profile"
+  role     = aws_iam_role.user_ec2[each.key].name
 }
 
-# Allow the instance to read its provisioning parameters at boot
-resource "aws_iam_role_policy" "ssm_params" {
-  name = "${var.project_name}-ssm-params"
-  role = aws_iam_role.ec2.id
+module "user_ec2" {
+  for_each = var.users
+  source   = "terraform-aws-modules/ec2-instance/aws"
+  version  = "~> 5.0"
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/developer/*"
-    }]
-  })
-}
-
-# ---------------------------------------------------------------------------
-# SSM parameters — provisioning values for user_data.sh
-# Stored here so user_data.sh stays a plain bash file (no templatefile escaping).
-# ---------------------------------------------------------------------------
-
-resource "aws_ssm_parameter" "ssh_public_key" {
-  count = var.ssh_public_key != "" ? 1 : 0
-  name  = "/${var.project_name}/developer/ssh-public-key"
-  type  = "String"
-  value = var.ssh_public_key
-}
-
-resource "aws_ssm_parameter" "git_user_name" {
-  count = var.git_user_name != "" ? 1 : 0
-  name  = "/${var.project_name}/developer/git-user-name"
-  type  = "String"
-  value = var.git_user_name
-}
-
-resource "aws_ssm_parameter" "git_user_email" {
-  count = var.git_user_email != "" ? 1 : 0
-  name  = "/${var.project_name}/developer/git-user-email"
-  type  = "String"
-  value = var.git_user_email
-}
-
-
-# ---------------------------------------------------------------------------
-# EC2 instance
-# ---------------------------------------------------------------------------
-
-module "ec2" {
-  source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "~> 5.0"
-
-  name = "${var.project_name}-dev"
+  name = "${var.project_name}-${each.key}-dev"
 
   ami           = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
@@ -237,14 +195,13 @@ module "ec2" {
   vpc_security_group_ids      = [module.ec2_sg.security_group_id]
 
   # IAM
-  iam_instance_profile = aws_iam_instance_profile.ec2.name
+  iam_instance_profile = aws_iam_instance_profile.user_ec2[each.key].name
 
   # Spot instance — uses dedicated module variables (not instance_market_options)
   create_spot_instance                = var.use_spot
   spot_instance_interruption_behavior = "stop" # preserve EBS data on interruption
 
   # IMDSv2 (Zero Trust: prevents SSRF-based credential theft)
-  # instance_metadata_tags lets user_data.sh discover the project name at boot
   metadata_options = {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -263,10 +220,26 @@ module "ec2" {
     }
   ]
 
-  # session_start.sh is injected directly from scripts/ — no AWS services needed.
-  # Edit scripts/session_start.sh and run ./run.sh refresh to update in place.
+  # Provisioning variables are injected directly — no SSM parameter reads at boot.
+  # SSH key and git identity come from users.tfvars; session_start.sh from scripts/.
+  # To update session_start.sh on a running instance: ./admin.sh refresh <username>
   user_data = join("\n", [
+    "#!/usr/bin/env bash",
+    "# EC2 user data for ${var.project_name} / ${each.key}",
+    "set -euo pipefail",
+    "exec > >(tee /var/log/user-data.log | logger -t user-data) 2>&1",
+    "echo '=== Claude Code environment bootstrap starting ==='",
+    "",
+    "# Provisioning variables injected by Terraform at provision time",
+    "DEV_USERNAME='${each.key}'",
+    "REGION='${var.aws_region}'",
+    "PROJECT_NAME='${var.project_name}'",
+    "SSH_PUBLIC_KEY='${each.value.ssh_public_key}'",
+    "GIT_USER_NAME='${each.value.git_user_name}'",
+    "GIT_USER_EMAIL='${each.value.git_user_email}'",
+    "",
     file("${path.module}/user_data_main.sh"),
+    "",
     "# ---------------------------------------------------------------------------",
     "# Session launcher — injected from scripts/session_start.sh at provision time",
     "# ---------------------------------------------------------------------------",
@@ -281,5 +254,6 @@ module "ec2" {
 
   tags = merge(local.owner_tags, {
     ProjectName = var.project_name
+    Username    = each.key
   })
 }

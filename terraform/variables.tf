@@ -60,22 +60,14 @@ variable "owner_email" {
   default     = ""
 }
 
-variable "ssh_public_key" {
-  description = "SSH public key to install for the developer user. Required for SSH agent forwarding. Set SSH_PUBLIC_KEY_FILE in config/defaults.env."
-  type        = string
-  default     = ""
-}
-
-variable "git_user_name" {
-  description = "Git user.name to pre-configure on the instance (e.g. 'Jane Smith'). Also refreshed at each login via SSH env."
-  type        = string
-  default     = ""
-}
-
-variable "git_user_email" {
-  description = "Git user.email to pre-configure on the instance. Also refreshed at each login via SSH env."
-  type        = string
-  default     = ""
+variable "users" {
+  description = "Map of usernames to per-user configuration. Each entry creates a dedicated EC2 instance. See config/users.tfvars.example."
+  type = map(object({
+    ssh_public_key = string
+    git_user_name  = string
+    git_user_email = string
+  }))
+  default = {}
 }
 
 # ---- Billing ---------------------------------------------------------------

@@ -1,0 +1,29 @@
+# config/users.tfvars — Per-user provisioning configuration.
+#
+# Copy to config/users.tfvars and fill in real values:
+#   cp config/users.tfvars.example config/users.tfvars
+#
+# config/users.tfvars is gitignored — it contains SSH public keys.
+# This example file is tracked and shows the required format.
+#
+# Each key in the map (e.g. "alice") becomes:
+#   - The Username tag on the EC2 instance
+#   - The argument to admin.sh commands: ./admin.sh start alice
+#
+# To add a user:  add an entry here, then run ./admin.sh up
+# To remove a user: delete their entry, then run ./admin.sh up
+#   (their EC2 instance and EBS data will be destroyed)
+
+users = {
+  alice = {
+    ssh_public_key = "ssh-ed25519 AAAA... alice@company.com"
+    git_user_name  = "Alice Smith"
+    git_user_email = "alice@company.com"
+  }
+
+  # bob = {
+  #   ssh_public_key = "ssh-ed25519 AAAA... bob@company.com"
+  #   git_user_name  = "Bob Jones"
+  #   git_user_email = "bob@company.com"
+  # }
+}

@@ -1,0 +1,26 @@
+# AWS CLI config for developers using IAM Identity Center (SSO)
+#
+# HOW TO USE:
+#   1. Copy this file to ~/.aws/config  (no file extension)
+#   2. Replace every value in UPPER_CASE with your own values
+#      (your admin will provide these — ask them if unsure)
+#   3. Run: ./dev.sh start   (first time will prompt for SSO login)
+#
+# WHERE TO FIND EACH VALUE:
+#   YOUR_12_DIGIT_ACCOUNT_ID  — top-right corner of any AWS Console page
+#   YOUR_PORTAL_ID            — the SSO start URL your admin gave you
+#                               (e.g. https://d-abc123.awsapps.com/start — use just "d-abc123")
+#   YOUR_SSO_REGION           — the region in your SSO start URL, or ask your admin
+#   YOUR_DEPLOY_REGION        — the region in your config/developer.env (AWS_REGION)
+
+[profile claude-code]
+sso_session = fre-aws-sso
+sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
+sso_role_name = DeveloperAccess
+region = YOUR_DEPLOY_REGION
+output = json
+
+[sso-session fre-aws-sso]
+sso_start_url = https://YOUR_PORTAL_ID.awsapps.com/start
+sso_region = YOUR_SSO_REGION
+sso_registration_scopes = sso:account:access

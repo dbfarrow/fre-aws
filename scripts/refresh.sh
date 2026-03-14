@@ -1,31 +1,53 @@
 #!/usr/bin/env bash
-# refresh.sh — Push an updated session_start.sh to the running instance.
-# Faster than down/up: updates SSM and overwrites the file in place via SSH.
+# refresh.sh — Push an updated session_start.sh to a running instance.
+# Faster than down/up: overwrites the file in place via SSH over SSM.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../config/defaults.env"
+
+# Load config: developer.env takes precedence (developer path); fall back to defaults.env (admin path)
+if [[ -f "${SCRIPT_DIR}/../config/developer.env" ]]; then
+  source "${SCRIPT_DIR}/../config/developer.env"
+elif [[ -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
+  source "${SCRIPT_DIR}/../config/defaults.env"
+else
+  echo "ERROR: No config found. Expected config/developer.env or config/defaults.env." >&2
+  exit 1
+fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
-: "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
+: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+
+# DEV_USERNAME: set by admin.sh (command arg)
+DEV_USERNAME="${DEV_USERNAME:-}"
+if [[ -z "${DEV_USERNAME}" ]]; then
+  echo "ERROR: DEV_USERNAME not set. Use './admin.sh refresh <username>'." >&2
+  exit 1
+fi
 
 eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
-  echo "       If using SSO, run './run.sh sso-login' first." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
 
-TF_DIR="${SCRIPT_DIR}/../terraform"
 SESSION_START="${SCRIPT_DIR}/session_start.sh"
 
-# ---------------------------------------------------------------------------
-# Push to the running instance via SSH over SSM tunnel
-# ---------------------------------------------------------------------------
-echo "--- pushing to running instance ---"
-INSTANCE_ID=$(terraform -chdir="${TF_DIR}" output -raw instance_id 2>/dev/null) || {
-  echo "ERROR: Could not read instance_id from Terraform state. Has up.sh been run?" >&2
+# Resolve instance ID by Username tag
+echo "--- resolving instance for '${DEV_USERNAME}' ---"
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --filters \
+    "Name=tag:Username,Values=${DEV_USERNAME}" \
+    "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+    "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+  --query 'Reservations[0].Instances[0].InstanceId' \
+  --region "${AWS_REGION}" \
+  --output text 2>/dev/null)
+
+if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
+  echo "ERROR: No instance found for user '${DEV_USERNAME}' in project '${PROJECT_NAME}'." >&2
   exit 1
-}
+fi
 
 SSH_OPTS=(
   "-i" "/root/.ssh/fre-claude"
@@ -34,10 +56,11 @@ SSH_OPTS=(
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
 
+echo "--- pushing session_start.sh to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /home/developer/session_start.sh > /dev/null && sudo chmod +x /home/developer/session_start.sh && sudo chown developer:developer /home/developer/session_start.sh" \
   < "${SESSION_START}"
 
 echo ""
-echo "=== session_start.sh updated on ${INSTANCE_ID} ==="
-echo "    Changes take effect on the next ./run.sh connect"
+echo "=== session_start.sh updated on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
+echo "    Changes take effect on the next connect"
