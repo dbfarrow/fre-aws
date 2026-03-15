@@ -61,6 +61,19 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /home/developer/session_start.sh > /dev/null && sudo chmod +x /home/developer/session_start.sh && sudo chown developer:developer /home/developer/session_start.sh" \
   < "${SESSION_START}"
 
+# Also ensure .bash_profile has the stdin-is-terminal guard (-t 0).
+# Older instances only check SSH_TTY, which is inherited by child processes and
+# causes session_start.sh to be triggered by git hooks and other login shells.
+echo "--- patching .bash_profile on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
+  if grep -q "SSH_TTY" ~/.bash_profile && ! grep -q "\-t 0" ~/.bash_profile; then
+    sed -i "s/\[\[ -n \"\${SSH_TTY:-}\" \]\]/[[ -n \"\${SSH_TTY:-}\" \&\& -t 0 ]]/" ~/.bash_profile
+    echo "  .bash_profile updated."
+  else
+    echo "  .bash_profile already up to date."
+  fi
+'
+
 echo ""
-echo "=== session_start.sh updated on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
+echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
 echo "    Changes take effect on the next connect"

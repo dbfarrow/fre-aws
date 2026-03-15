@@ -7,6 +7,12 @@
 # To update this script on a running instance without down/up:
 #   ./run.sh refresh
 
+# Only run interactively. If stdin is not a terminal (e.g. a git hook or other
+# tool spawned a login shell), exit cleanly so the intended command can run.
+if [[ ! -t 0 ]]; then
+  exit 0
+fi
+
 # Refresh git identity if passed through SSH env
 [[ -n "${GIT_USER_NAME:-}"  ]] && git config --global user.name  "${GIT_USER_NAME}"
 [[ -n "${GIT_USER_EMAIL:-}" ]] && git config --global user.email "${GIT_USER_EMAIL}"
