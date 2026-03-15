@@ -73,7 +73,6 @@ echo "--- terraform plan ---"
 terraform -chdir="${TF_DIR}" plan \
   -var="project_name=${PROJECT_NAME}" \
   -var="aws_region=${AWS_REGION}" \
-  -var="aws_profile=${AWS_PROFILE}" \
   -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \
   -var="use_spot=${USE_SPOT:-true}" \
   -var="network_mode=${NETWORK_MODE:-public}" \

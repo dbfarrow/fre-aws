@@ -62,7 +62,6 @@ terraform -chdir="${TF_DIR}" init \
   -backend-config="key=${TF_BACKEND_KEY}" \
   -backend-config="region=${TF_BACKEND_REGION}" \
   -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
-  -backend-config="kms_key_id=${TF_BACKEND_KMS_KEY_ID}" \
   -reconfigure
 echo ""
 
@@ -70,7 +69,6 @@ echo "--- terraform destroy ---"
 terraform -chdir="${TF_DIR}" destroy \
   -var="project_name=${PROJECT_NAME}" \
   -var="aws_region=${AWS_REGION}" \
-  -var="aws_profile=${AWS_PROFILE}" \
   -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \
   -var="use_spot=${USE_SPOT:-true}" \
   -var="network_mode=${NETWORK_MODE:-public}" \

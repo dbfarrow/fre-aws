@@ -14,11 +14,6 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "aws_profile" {
-  description = "AWS CLI profile to use for authentication (IAM Identity Center or named profile)."
-  type        = string
-  default     = "claude-code"
-}
 
 variable "instance_type" {
   description = "EC2 instance type. t3.micro is Free Tier eligible for the first 12 months."
