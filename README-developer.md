@@ -180,8 +180,30 @@ Your instance may be stopped. Run `./dev.sh start`, wait about 30 seconds, then 
 **`ERROR: Could not export credentials`**
 Your AWS SSO session has expired. Run `./dev.sh connect` again — it will prompt you to log in through your browser.
 
+**`ForbiddenException: No access` after SSO login**
+The browser login succeeded but your AWS user hasn't been granted access to the account. This is an admin-side setup step — contact your admin and ask them to verify:
+- You are assigned to the AWS account (not just the IAM Identity Center directory) with the `DeveloperAccess` permission set
+- The `sso_role_name` in your `~/.aws/config` matches the permission set name exactly
+
+While waiting, you and your admin can confirm which accounts and roles your SSO token can actually see. Inside `./admin.sh shell` (or anywhere with the AWS CLI):
+```bash
+TOKEN=$(jq -r 'select(.accessToken) | .accessToken' ~/.aws/sso/cache/*.json | head -1)
+aws sso list-accounts --access-token "$TOKEN"
+```
+If your account appears, check the available role names:
+```bash
+aws sso list-account-roles --account-id <account-id> --access-token "$TOKEN"
+```
+The `roleName` returned must match `sso_role_name` in your `~/.aws/config`.
+
 **`ERROR: SSH key not found at ~/.ssh/fre-claude`**
 Complete Step 2 (create the SSH key) and make sure it's saved at `~/.ssh/fre-claude`.
+
+**`kex_exchange_identification: Connection closed by remote host`**
+The SSH tunnel through SSM failed to establish. Most common causes:
+1. AWS credentials aren't valid — run `./dev.sh connect` fresh to trigger a new SSO login
+2. Your instance isn't running — run `./dev.sh start` first
+3. Contact your admin to verify your instance is healthy: `./admin.sh ssm <username>`
 
 **Instance feels slow or unresponsive**
 Some projects (especially those involving browser automation or large builds) need more RAM than the default instance provides. Let your admin know — they can resize your instance.

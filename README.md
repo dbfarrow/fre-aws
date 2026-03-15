@@ -23,6 +23,7 @@ A Docker-packaged toolset for provisioning and managing EC2-based development en
 - [Managing Users](#managing-users)
 - [Developer Onboarding](#developer-onboarding)
 - [Security Model](#security-model)
+- [Troubleshooting](#troubleshooting)
 - [For Developers](#for-developers)
 
 ---
@@ -274,12 +275,7 @@ cp config/defaults.env.example config/defaults.env
 # Edit config/defaults.env with your values
 ```
 
-`config/users.tfvars` defines the users to provision — **gitignored** (contains SSH public keys):
-
-```bash
-cp config/users.tfvars.example config/users.tfvars
-# Edit config/users.tfvars with each user's details
-```
+User configuration is stored in S3 (not as a local file) and managed through the CLI — see [Managing Users](#managing-users).
 
 ---
 
@@ -329,35 +325,37 @@ Controlled by `NETWORK_MODE` in `config/defaults.env`. Applies to all user insta
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/defaults.env.example config/defaults.env      ← create your admin config
 7.  Edit config/defaults.env                                ← set AWS region, project name, etc.
-8.  cp config/users.tfvars.example config/users.tfvars      ← create user list
-9.  Edit config/users.tfvars                                ← add at least one user
-10. ./admin.sh verify                                       ← confirm AWS credentials work
-11. ./admin.sh bootstrap                                    ← creates S3 + DynamoDB for Terraform state
-12. ./admin.sh up                                           ← provisions all AWS infrastructure
-13. ./admin.sh connect <username>                           ← test that it works
+8.  ./admin.sh verify                                       ← confirm AWS credentials work
+9.  ./admin.sh bootstrap                                    ← creates S3 + DynamoDB + user registry
+10. ./admin.sh add-user                                     ← interactive prompt, adds first user
+11. ./admin.sh up                                           ← provisions all AWS infrastructure
+12. ./admin.sh connect <username>                           ← test that it works
 ```
 
 ---
 
 ## Managing Users
 
+User configuration is stored in S3 (`<project>-tfstate/<project>/users.json`) and shared across all admins. The CLI keeps the registry in sync — no manual file editing.
+
 ### Adding a user
 
 1. Get their SSH public key (`~/.ssh/fre-claude.pub` from their Mac)
-2. Add an entry to `config/users.tfvars`:
-   ```hcl
-   alice = {
-     ssh_public_key = "ssh-ed25519 AAAA... alice@company.com"
-     git_user_name  = "Alice Smith"
-     git_user_email = "alice@company.com"
-   }
+2. Run the interactive wizard:
+   ```bash
+   ./admin.sh add-user
    ```
-3. Run `./admin.sh up` — provisions a new EC2 instance for Alice
+   It will prompt for username, SSH public key, git name, and git email.
+3. Run `./admin.sh up` — provisions a new EC2 instance for them
 
 ### Removing a user
 
-1. Delete their entry from `config/users.tfvars`
-2. Run `./admin.sh up` — destroys their EC2 instance and EBS data
+1. Run:
+   ```bash
+   ./admin.sh remove-user <username>
+   ```
+   You'll be warned that their instance and EBS data will be destroyed, and asked to confirm by typing their username.
+2. Run `./admin.sh up` — destroys their EC2 instance and EBS volume
 3. Revoke their IAM Identity Center access in the AWS Console
 
 ### Updating session_start.sh for a user
@@ -371,6 +369,9 @@ No down/up needed. Changes take effect on their next connect.
 ### Admin commands
 
 ```bash
+./admin.sh add-user             # interactive wizard: add a user to the registry
+./admin.sh remove-user <name>   # remove a user (destroys instance on next up)
+./admin.sh list                 # list all users and their instance state
 ./admin.sh start   <username>   # start a stopped instance
 ./admin.sh stop    <username>   # stop a running instance
 ./admin.sh connect <username>   # SSH into an instance (admin access)
@@ -387,15 +388,28 @@ No down/up needed. Changes take effect on their next connect.
 
 When a new developer is ready to use their environment:
 
-1. **You (admin) provision their instance** (see [Adding a user](#adding-a-user) above)
+1. **Get their SSH public key** — they run `cat ~/.ssh/fre-claude.pub` and send it to you
 
-2. **Create an IAM Identity Center user** for them with the `DeveloperAccess` permission set
+2. **Add them to the registry**:
+   ```bash
+   ./admin.sh add-user
+   ```
 
-3. **Send them**:
+3. **Provision their instance**:
+   ```bash
+   ./admin.sh up
+   ```
+
+4. **Create an IAM Identity Center user** for them:
+   - IAM Identity Center → Users → Add user
+   - Under **AWS accounts**, assign them to your account with the `DeveloperAccess` permission set
+   - ⚠️ Adding to the directory is not enough — the account assignment is a separate step
+
+5. **Send them**:
    - A link to **`README-developer.md`** in this repo
-   - The SSO Start URL (from IAM Identity Center → Dashboard)
+   - The SSO Start URL (IAM Identity Center → Dashboard → AWS access portal URL)
    - Their IAM Identity Center username
-   - Their `MY_USERNAME` (the key you used in `users.tfvars`)
+   - Their `MY_USERNAME` (what you entered in `add-user`)
    - The `AWS_REGION` and `PROJECT_NAME` from your `config/defaults.env`
 
 That's it. The developer README walks them through everything from there.
@@ -415,6 +429,47 @@ That's it. The developer README walks them through everything from there.
 | Storage encrypted at rest | ✅ Always | KMS-backed EBS and S3 |
 | Short-lived AWS credentials | ❌ Free tier only | IAM user access keys are long-lived; mitigate with MFA and key rotation |
 | CloudTrail / VPC Flow Logs | ❌ Deferred | Not enabled by default (cost); add before going to production |
+
+---
+
+## Troubleshooting
+
+### `ForbiddenException: No access` (GetRoleCredentials)
+
+**Symptom:** `./admin.sh verify` (or a developer's `./dev.sh connect`) fails with:
+```
+An error occurred (ForbiddenException) when calling the GetRoleCredentials operation: No access
+```
+
+The SSO login browser flow completed successfully — the token is valid — but the user isn't assigned to the AWS account with the required permission set. Being in the IAM Identity Center directory is not enough; access must be granted at the account level.
+
+**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign the correct permission set (`AdministratorAccess` for admins, `DeveloperAccess` for developers).
+
+**Diagnostic** (run inside `./admin.sh shell`):
+```bash
+# Step 1: confirm which accounts the token can see
+TOKEN=$(jq -r 'select(.accessToken) | .accessToken' ~/.aws/sso/cache/*.json | head -1)
+aws sso list-accounts --access-token "$TOKEN"
+
+# Step 2: if the account appears, check what roles are actually assigned
+aws sso list-account-roles --account-id <account-id> --access-token "$TOKEN"
+```
+The `roleName` returned must exactly match `sso_role_name` in `~/.aws/config`.
+
+---
+
+### Developer connect fails silently
+
+**Symptom:** `./dev.sh connect` exits without a clear error.
+
+**Most likely cause:** Expired or invalid SSO credentials. Since the fix in commit `1531fd9`, credential failures now print a clear error message. If the developer sees:
+```
+ERROR: Could not export credentials for profile 'claude-code'.
+       If using SSO, run './dev.sh sso-login' first.
+```
+→ they need to re-run the SSO login flow.
+
+If they see `kex_exchange_identification: Connection closed by remote host`, the SSH tunnel through SSM failed — use `./admin.sh ssm <username>` to verify the instance is reachable, and check the instance's SSM agent is running.
 
 ---
 
