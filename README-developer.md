@@ -6,6 +6,16 @@ Your AWS development environment is already set up — your admin has provisione
 
 ---
 
+## Setup Steps at a Glance
+
+1. [Clone this repository](#step-1--clone-this-repository)
+2. [Create your SSH key](#step-2--create-your-ssh-key) — and send the public key to your admin
+3. [Set up AWS credentials](#step-3--set-up-aws-credentials)
+4. [Create your developer config](#step-4--create-your-developer-config)
+5. [Connect](#step-5--connect)
+
+---
+
 ## What You Need
 
 | Requirement | Notes |
