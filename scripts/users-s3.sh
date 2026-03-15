@@ -18,25 +18,35 @@ _users_s3_key() {
 # ---------------------------------------------------------------------------
 # users_s3_download <dest_file>
 # Downloads users.json from S3 to dest_file.
-# If the object does not exist, writes '{}' to dest_file instead of failing.
+# If the object does not exist (404), writes '{}' to dest_file.
+# Any other error (auth, network, wrong region) is fatal — never silently
+# returns '{}' for a real failure.
 # ---------------------------------------------------------------------------
 users_s3_download() {
   local dest="${1:?dest_file required}"
   local key
   key=$(_users_s3_key)
 
-  if aws s3api head-object \
-      --bucket "${TF_BACKEND_BUCKET}" \
-      --key "${key}" \
-      --region "${TF_BACKEND_REGION}" \
-      --profile "${AWS_PROFILE}" &>/dev/null; then
-    aws s3 cp \
-      "s3://${TF_BACKEND_BUCKET}/${key}" \
-      "${dest}" \
-      --region "${TF_BACKEND_REGION}" \
-      --profile "${AWS_PROFILE}" >/dev/null
-  else
+  local err
+  err=$(aws s3 cp \
+    "s3://${TF_BACKEND_BUCKET}/${key}" \
+    "${dest}" \
+    --region "${TF_BACKEND_REGION}" \
+    --profile "${AWS_PROFILE}" 2>&1)
+  local exit_code=$?
+
+  if [[ ${exit_code} -eq 0 ]]; then
+    return 0
+  fi
+
+  # 404 / NoSuchKey means the registry hasn't been initialised yet — treat as empty
+  if echo "${err}" | grep -qE "404|NoSuchKey|does not exist"; then
     echo '{}' > "${dest}"
+  else
+    echo "ERROR: Failed to download user registry from S3." >&2
+    echo "       Bucket: ${TF_BACKEND_BUCKET}  Key: ${key}" >&2
+    echo "       ${err}" >&2
+    exit 1
   fi
 }
 

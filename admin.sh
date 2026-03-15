@@ -106,6 +106,11 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/up.sh
     ;;
   down)
+    if [[ -n "${USERNAME}" ]]; then
+      echo "ERROR: 'down' destroys ALL infrastructure — it does not accept a username." >&2
+      echo "       To remove one user's instance: ./admin.sh remove-user ${USERNAME} && ./admin.sh up" >&2
+      exit 1
+    fi
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
     ;;
   add-user)
