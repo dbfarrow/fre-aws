@@ -10,6 +10,10 @@
 #   - The Username tag on the EC2 instance
 #   - The argument to admin.sh commands: ./admin.sh start alice
 #
+# Key naming: use simple alphanumeric names where possible (alice, bob).
+# If the username contains dots, hyphens, or other special characters,
+# wrap it in quotes: "farrow.daveb" = { ... }
+#
 # To add a user:  add an entry here, then run ./admin.sh up
 # To remove a user: delete their entry, then run ./admin.sh up
 #   (their EC2 instance and EBS data will be destroyed)
@@ -21,9 +25,10 @@ users = {
     git_user_email = "alice@company.com"
   }
 
-  # bob = {
-  #   ssh_public_key = "ssh-ed25519 AAAA... bob@company.com"
-  #   git_user_name  = "Bob Jones"
-  #   git_user_email = "bob@company.com"
+  # Keys with dots or other special characters must be quoted:
+  # "farrow.daveb" = {
+  #   ssh_public_key = "ssh-ed25519 AAAA... farrow.daveb@company.com"
+  #   git_user_name  = "Dave Farrow"
+  #   git_user_email = "farrow.daveb@company.com"
   # }
 }
