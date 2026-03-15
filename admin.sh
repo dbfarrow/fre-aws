@@ -2,19 +2,21 @@
 # admin.sh — Admin tool for managing the fre-aws Claude Code environment.
 #
 # Usage:
-#   ./admin.sh list                   - List all users and their instance state
-#   ./admin.sh sso-login              - Log in via IAM Identity Center
-#   ./admin.sh verify                 - Verify AWS credentials are working
-#   ./admin.sh bootstrap              - One-time setup (S3, DynamoDB, KMS)
-#   ./admin.sh up                     - Create / update AWS infrastructure
-#   ./admin.sh down                   - Destroy AWS infrastructure
-#   ./admin.sh start   [username]     - Start a user's EC2 instance (omit username to start all)
-#   ./admin.sh stop    [username]     - Stop a user's EC2 instance (omit username to stop all)
-#   ./admin.sh connect <username>     - Open a shell on a user's EC2 instance
-#   ./admin.sh refresh <username>     - Push updated session_start.sh to a running instance
-#   ./admin.sh ssm     <username>     - Direct SSM shell (fallback when SSH isn't working)
-#   ./admin.sh test                   - Run BATS tests
-#   ./admin.sh shell                  - Interactive shell inside the container (for debugging)
+#   ./admin.sh list                      - List all users and their instance state
+#   ./admin.sh add-user                  - Interactive wizard to add a user
+#   ./admin.sh remove-user <username>    - Remove a user (destroys instance on next up)
+#   ./admin.sh sso-login                 - Log in via IAM Identity Center
+#   ./admin.sh verify                    - Verify AWS credentials are working
+#   ./admin.sh bootstrap                 - One-time setup (S3, DynamoDB, KMS)
+#   ./admin.sh up                        - Create / update AWS infrastructure
+#   ./admin.sh down                      - Destroy AWS infrastructure
+#   ./admin.sh start   [username]        - Start a user's EC2 instance (omit username to start all)
+#   ./admin.sh stop    [username]        - Stop a user's EC2 instance (omit username to stop all)
+#   ./admin.sh connect <username>        - Open a shell on a user's EC2 instance
+#   ./admin.sh refresh <username>        - Push updated session_start.sh to a running instance
+#   ./admin.sh ssm     <username>        - Direct SSM shell (fallback when SSH isn't working)
+#   ./admin.sh test                      - Run BATS tests
+#   ./admin.sh shell                     - Interactive shell inside the container (for debugging)
 set -euo pipefail
 
 IMAGE_NAME="fre-aws"
@@ -22,7 +24,7 @@ COMMAND="${1:-}"
 USERNAME="${2:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {list|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+  echo "Usage: $0 {list|add-user|remove-user|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
   exit 1
 fi
 
@@ -61,6 +63,17 @@ DOCKER_ARGS=(
   "--volume" "$(pwd)/scripts:/workspace/scripts"
 )
 
+# Non-interactive variant — used when capturing stdout (e.g. list-users.sh).
+# No --tty or --interactive so output can be captured cleanly.
+DOCKER_ARGS_QUIET=(
+  "--rm"
+  "--env" "AWS_PAGER="
+  "--volume" "${HOME}/.aws:/root/.aws"
+  "--volume" "$(pwd)/config:/workspace/config"
+  "--volume" "$(pwd)/terraform:/workspace/terraform"
+  "--volume" "$(pwd)/scripts:/workspace/scripts"
+)
+
 # ---------------------------------------------------------------------------
 # Helper: require a username argument for per-user commands
 # ---------------------------------------------------------------------------
@@ -95,15 +108,24 @@ case "${COMMAND}" in
   down)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
     ;;
+  add-user)
+    docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/add-user.sh
+    ;;
+  remove-user)
+    require_username
+    docker run "${DOCKER_ARGS[@]}" \
+      --env "DEV_USERNAME=${USERNAME}" \
+      "${IMAGE_NAME}" /workspace/scripts/remove-user.sh
+    ;;
   start)
     if [[ -n "${USERNAME}" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/start.sh
     else
-      CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{gsub(/"/, "", $1); print $1}')
+      CONFIGURED_USERS=$(docker run "${DOCKER_ARGS_QUIET[@]}" "${IMAGE_NAME}" /workspace/scripts/list-users.sh)
       if [[ -z "${CONFIGURED_USERS}" ]]; then
-        echo "No users configured in config/users.tfvars." >&2; exit 1
+        echo "No users registered. Run './admin.sh add-user' first." >&2; exit 1
       fi
       for user in ${CONFIGURED_USERS}; do
         docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" "${IMAGE_NAME}" /workspace/scripts/start.sh
@@ -116,9 +138,9 @@ case "${COMMAND}" in
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/stop.sh
     else
-      CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{gsub(/"/, "", $1); print $1}')
+      CONFIGURED_USERS=$(docker run "${DOCKER_ARGS_QUIET[@]}" "${IMAGE_NAME}" /workspace/scripts/list-users.sh)
       if [[ -z "${CONFIGURED_USERS}" ]]; then
-        echo "No users configured in config/users.tfvars." >&2; exit 1
+        echo "No users registered. Run './admin.sh add-user' first." >&2; exit 1
       fi
       for user in ${CONFIGURED_USERS}; do
         docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
@@ -171,7 +193,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {list|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+    echo "Usage: $0 {list|add-user|remove-user|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
     exit 1
     ;;
 esac

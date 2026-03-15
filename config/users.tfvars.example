@@ -1,22 +1,20 @@
-# config/users.tfvars — Per-user provisioning configuration.
+# config/users.tfvars — Rendered per-user provisioning configuration.
 #
-# Copy to config/users.tfvars and fill in real values:
-#   cp config/users.tfvars.example config/users.tfvars
+# NOTE: This file is auto-generated at runtime from S3.
+# Do NOT edit it manually — use the CLI instead:
 #
-# config/users.tfvars is gitignored — it contains SSH public keys.
-# This example file is tracked and shows the required format.
+#   ./admin.sh add-user              — interactive wizard to add a user
+#   ./admin.sh remove-user <name>    — remove a user (destroys instance on next up)
+#
+# The source of truth is: s3://<project>-tfstate/<project>/users.json
+# It is written by add-user.sh / remove-user.sh and downloaded by up.sh / down.sh.
+#
+# This example file is tracked in git to show the rendered HCL format.
+# config/users.tfvars itself is gitignored (it contains SSH public keys).
 #
 # Each key in the map (e.g. "alice") becomes:
 #   - The Username tag on the EC2 instance
 #   - The argument to admin.sh commands: ./admin.sh start alice
-#
-# Key naming: use simple alphanumeric names where possible (alice, bob).
-# If the username contains dots, hyphens, or other special characters,
-# wrap it in quotes: "farrow.daveb" = { ... }
-#
-# To add a user:  add an entry here, then run ./admin.sh up
-# To remove a user: delete their entry, then run ./admin.sh up
-#   (their EC2 instance and EBS data will be destroyed)
 
 users = {
   alice = {

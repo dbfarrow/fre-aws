@@ -6,7 +6,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/../config/defaults.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
-USERS_TFVARS="${SCRIPT_DIR}/../config/users.tfvars"
 TF_DIR="${SCRIPT_DIR}/../terraform"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -18,16 +17,25 @@ fi
 source "$CONFIG_FILE"
 
 if [[ ! -f "$BACKEND_CONFIG_FILE" ]]; then
-  echo "ERROR: config/backend.env not found. Run bootstrap.sh first." >&2
+  echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2
   exit 1
 fi
 source "$BACKEND_CONFIG_FILE"
 
-if [[ ! -f "$USERS_TFVARS" ]]; then
-  echo "ERROR: config/users.tfvars not found." >&2
-  echo "       Terraform needs this to know which user instances to destroy." >&2
-  exit 1
-fi
+# shellcheck source=scripts/users-s3.sh
+source "${SCRIPT_DIR}/users-s3.sh"
+
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+
+# ---------------------------------------------------------------------------
+# Download user registry from S3 and render to tfvars
+# ---------------------------------------------------------------------------
+USERS_JSON=$(mktemp)
+USERS_TFVARS=$(mktemp)
+trap 'rm -f "${USERS_JSON}" "${USERS_TFVARS}"' EXIT
+
+users_s3_download "${USERS_JSON}"
+users_render_tfvars "${USERS_JSON}" "${USERS_TFVARS}"
 
 echo "=== fre-aws down ==="
 echo ""

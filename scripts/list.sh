@@ -4,17 +4,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../config/defaults.env"
-source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
-
-USERS_TFVARS="${SCRIPT_DIR}/../config/users.tfvars"
-if [[ ! -f "${USERS_TFVARS}" ]]; then
-  echo "ERROR: config/users.tfvars not found." >&2
-  echo "       Copy the example and add your users:" >&2
-  echo "         cp config/users.tfvars.example config/users.tfvars" >&2
+if [[ ! -f "${SCRIPT_DIR}/../config/backend.env" ]]; then
+  echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2
   exit 1
 fi
+source "${SCRIPT_DIR}/../config/backend.env"
+
+# shellcheck source=scripts/users-s3.sh
+source "${SCRIPT_DIR}/users-s3.sh"
+
+: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>&1) || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
@@ -23,11 +24,15 @@ CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env
 }
 eval "$(echo "${CREDS}" | sed 's/^/export /')"
 
-# Extract usernames from users.tfvars — matches lines like:   alice = {
-CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "${USERS_TFVARS}" | awk '{gsub(/"/, "", $1); print $1}' | sort)
+# Download user registry from S3
+USERS_JSON=$(mktemp)
+trap 'rm -f "${USERS_JSON}"' EXIT
+
+users_s3_download "${USERS_JSON}"
+CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" | sort)
 
 if [[ -z "${CONFIGURED_USERS}" ]]; then
-  echo "No users configured in config/users.tfvars."
+  echo "No users registered. Run './admin.sh add-user' to add one."
   exit 0
 fi
 

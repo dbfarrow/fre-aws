@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/../config/defaults.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
-USERS_TFVARS="${SCRIPT_DIR}/../config/users.tfvars"
 TF_DIR="${SCRIPT_DIR}/../terraform"
 
 # ---------------------------------------------------------------------------
@@ -20,20 +19,16 @@ fi
 source "$CONFIG_FILE"
 
 if [[ ! -f "$BACKEND_CONFIG_FILE" ]]; then
-  echo "ERROR: config/backend.env not found. Run bootstrap.sh first." >&2
+  echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2
   exit 1
 fi
 source "$BACKEND_CONFIG_FILE"
 
-if [[ ! -f "$USERS_TFVARS" ]]; then
-  echo "ERROR: config/users.tfvars not found." >&2
-  echo "       Copy the example and add your users:" >&2
-  echo "         cp config/users.tfvars.example config/users.tfvars" >&2
-  exit 1
-fi
+# shellcheck source=scripts/users-s3.sh
+source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
-: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
 # Export credentials for Terraform
@@ -47,6 +42,16 @@ eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env
   exit 1
 }
 echo ""
+
+# ---------------------------------------------------------------------------
+# Download user registry from S3 and render to tfvars
+# ---------------------------------------------------------------------------
+USERS_JSON=$(mktemp)
+USERS_TFVARS=$(mktemp)
+trap 'rm -f "${USERS_JSON}" "${USERS_TFVARS}"' EXIT
+
+users_s3_download "${USERS_JSON}"
+users_render_tfvars "${USERS_JSON}" "${USERS_TFVARS}"
 
 echo "=== fre-aws up ==="
 echo "  Project:  ${PROJECT_NAME}"

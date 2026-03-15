@@ -151,6 +151,19 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Initialize user registry in S3 (if not already present)
+# ---------------------------------------------------------------------------
+USERS_KEY="${PROJECT_NAME}/users.json"
+echo "Initializing user registry..."
+if $AWS s3api head-object --bucket "${BUCKET_NAME}" --key "${USERS_KEY}" &>/dev/null; then
+  echo "  User registry already exists, skipping."
+else
+  echo '{}' | $AWS s3 cp - "s3://${BUCKET_NAME}/${USERS_KEY}" >/dev/null
+  echo "  User registry initialized (s3://${BUCKET_NAME}/${USERS_KEY})."
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
 # Write backend config for up.sh to consume
 # ---------------------------------------------------------------------------
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
@@ -167,4 +180,6 @@ echo ""
 
 echo "=== Bootstrap complete ==="
 echo ""
-echo "Next step: run up.sh to provision your AWS environment."
+echo "Next steps:"
+echo "  1. Run './admin.sh add-user' to register users."
+echo "  2. Run './admin.sh up' to provision AWS infrastructure."
