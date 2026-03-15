@@ -31,8 +31,8 @@ terraform.tfvars.json
 !.env.example
 
 # Local config with real credentials — never commit these
-config/defaults.env
-config/developer.env
+# All *.env files under config/ are gitignored; only *.example files are tracked.
+config/*.env
 config/users.tfvars
 config/backend.env
 
