@@ -16,11 +16,12 @@ if [[ ! -f "${USERS_TFVARS}" ]]; then
   exit 1
 fi
 
-eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
+CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>&1) || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
-  echo "       If using SSO, run './admin.sh sso-login' first." >&2
+  echo "       Run './admin.sh sso-login' first." >&2
   exit 1
 }
+eval "$(echo "${CREDS}" | sed 's/^/export /')"
 
 # Extract usernames from users.tfvars — matches lines like:   alice = {
 CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "${USERS_TFVARS}" | awk '{gsub(/"/, "", $1); print $1}' | sort)
