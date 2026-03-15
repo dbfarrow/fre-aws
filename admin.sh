@@ -101,7 +101,7 @@ case "${COMMAND}" in
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/start.sh
     else
-      CONFIGURED_USERS=$(grep -E '^\s+[a-zA-Z0-9_-]+ = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{print $1}')
+      CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{gsub(/"/, "", $1); print $1}')
       if [[ -z "${CONFIGURED_USERS}" ]]; then
         echo "No users configured in config/users.tfvars." >&2; exit 1
       fi
@@ -116,7 +116,7 @@ case "${COMMAND}" in
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/stop.sh
     else
-      CONFIGURED_USERS=$(grep -E '^\s+[a-zA-Z0-9_-]+ = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{print $1}')
+      CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "$(pwd)/config/users.tfvars" 2>/dev/null | awk '{gsub(/"/, "", $1); print $1}')
       if [[ -z "${CONFIGURED_USERS}" ]]; then
         echo "No users configured in config/users.tfvars." >&2; exit 1
       fi

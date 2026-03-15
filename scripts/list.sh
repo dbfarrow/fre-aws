@@ -23,7 +23,7 @@ eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env
 }
 
 # Extract usernames from users.tfvars — matches lines like:   alice = {
-CONFIGURED_USERS=$(grep -E '^\s+[a-zA-Z0-9_-]+ = \{' "${USERS_TFVARS}" | awk '{print $1}' | sort)
+CONFIGURED_USERS=$(grep -E '^\s+"?[a-zA-Z0-9_.@-]+"? = \{' "${USERS_TFVARS}" | awk '{gsub(/"/, "", $1); print $1}' | sort)
 
 if [[ -z "${CONFIGURED_USERS}" ]]; then
   echo "No users configured in config/users.tfvars."
