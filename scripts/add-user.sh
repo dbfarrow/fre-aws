@@ -274,7 +274,37 @@ if [[ -z "${PS_ARN}" ]]; then
   exit 1
 fi
 
-# Create account assignment
+# Remove any existing assignments for the OTHER known permission sets so
+# the user ends up with exactly one role on this account.
+for OTHER_PS_NAME in "DeveloperAccess" "ProjectAdminAccess"; do
+  [[ "${OTHER_PS_NAME}" == "${PS_NAME}" ]] && continue
+  OTHER_PS_ARN=$(_find_ps_arn "${OTHER_PS_NAME}")
+  [[ -z "${OTHER_PS_ARN}" ]] && continue
+
+  ALREADY_ASSIGNED=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-account-assignments \
+    --instance-arn "${SSO_INSTANCE_ARN}" \
+    --account-id "${TF_BACKEND_ACCOUNT_ID}" \
+    --permission-set-arn "${OTHER_PS_ARN}" \
+    --query 'AccountAssignments' --output json 2>/dev/null \
+    | jq --arg uid "${SSO_USER_ID}" \
+        '[.[] | select(.PrincipalType=="USER" and .PrincipalId==$uid)] | length')
+
+  if [[ "${ALREADY_ASSIGNED}" -gt 0 ]]; then
+    echo "  Removing existing '${OTHER_PS_NAME}' assignment..."
+    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin delete-account-assignment \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --target-id "${TF_BACKEND_ACCOUNT_ID}" \
+      --target-type AWS_ACCOUNT \
+      --permission-set-arn "${OTHER_PS_ARN}" \
+      --principal-type USER \
+      --principal-id "${SSO_USER_ID}" >/dev/null
+    echo "  Removed '${OTHER_PS_NAME}' from ${NEW_USERNAME}."
+  fi
+done
+
+# Assign the target permission set
 aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
   sso-admin create-account-assignment \
   --instance-arn "${SSO_INSTANCE_ARN}" \
