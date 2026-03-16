@@ -10,6 +10,8 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+terraform/.tfplan*
+terraform/imports_repair.tf
 
 # Terraform variable files that may contain secrets
 *.auto.tfvars
