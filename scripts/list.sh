@@ -2,7 +2,17 @@
 # list.sh — Lists the union of registered users and EC2 instances in the VPC.
 # Instances that exist in AWS but are absent from the S3 registry are shown
 # separately so orphaned resources are visible.
+#
+# Usage: list.sh [--verbose|-v]
 set -euo pipefail
+
+VERBOSE=false
+for arg in "$@"; do
+  case "${arg}" in
+    --verbose|-v) VERBOSE=true ;;
+    *) echo "ERROR: Unknown option: ${arg}" >&2; exit 1 ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../config/admin.env"
@@ -51,10 +61,43 @@ INSTANCES=$(aws ec2 describe-instances \
 # ---------------------------------------------------------------------------
 echo "=== ${PROJECT_NAME} users ==="
 echo ""
-printf "  %-20s %-22s %-12s %s\n" "USERNAME" "INSTANCE ID" "STATE" "TYPE"
-printf "  %-20s %-22s %-12s %s\n" "--------" "-----------" "-----" "----"
 
-if [[ -n "${CONFIGURED_USERS}" ]]; then
+if [[ -z "${CONFIGURED_USERS}" ]]; then
+  echo "  (no registered users — run './admin.sh add-user')"
+elif [[ "${VERBOSE}" == true ]]; then
+  while IFS= read -r username; do
+    instance_info=$(echo "${INSTANCES}" | jq -r --arg user "${username}" '
+      .[] | select(.Tags // [] | any(.Key == "Username" and .Value == $user))
+      | "\(.InstanceId)\t\(.State.Name)\t\(.InstanceType)"
+    ' | head -1)
+
+    echo "  ${username}"
+
+    if [[ -n "${instance_info}" ]]; then
+      IFS=$'\t' read -r instance_id state type <<< "${instance_info}"
+      printf "    %-16s %s  %s  %s\n" "instance:" "${instance_id}" "${state}" "${type}"
+    else
+      printf "    %-16s %s\n" "instance:" "(not provisioned — run ./admin.sh up)"
+    fi
+
+    # Pull attributes from registry
+    user_email=$(jq -r --arg u "${username}" '.[$u].user_email   // "-"' "${USERS_JSON}")
+    role=$(      jq -r --arg u "${username}" '.[$u].role         // "-"' "${USERS_JSON}")
+    git_name=$(  jq -r --arg u "${username}" '.[$u].git_user_name  // "-"' "${USERS_JSON}")
+    git_email=$( jq -r --arg u "${username}" '.[$u].git_user_email // "-"' "${USERS_JSON}")
+    ssh_key=$(   jq -r --arg u "${username}" '.[$u].ssh_public_key // "-"' "${USERS_JSON}")
+    ssh_key_short="${ssh_key:0:50}..."
+
+    printf "    %-16s %s\n" "email:"    "${user_email}"
+    printf "    %-16s %s\n" "role:"     "${role}"
+    printf "    %-16s %s\n" "git name:" "${git_name}"
+    printf "    %-16s %s\n" "git email:""${git_email}"
+    printf "    %-16s %s\n" "ssh key:"  "${ssh_key_short}"
+    echo ""
+  done <<< "${CONFIGURED_USERS}"
+else
+  printf "  %-20s %-22s %-12s %s\n" "USERNAME" "INSTANCE ID" "STATE" "TYPE"
+  printf "  %-20s %-22s %-12s %s\n" "--------" "-----------" "-----" "----"
   while IFS= read -r username; do
     instance_info=$(echo "${INSTANCES}" | jq -r --arg user "${username}" '
       .[] | select(.Tags // [] | any(.Key == "Username" and .Value == $user))
@@ -68,8 +111,6 @@ if [[ -n "${CONFIGURED_USERS}" ]]; then
       printf "  %-20s %-22s %-12s %s\n" "${username}" "(not provisioned)" "" "run ./admin.sh up"
     fi
   done <<< "${CONFIGURED_USERS}"
-else
-  echo "  (no registered users — run './admin.sh add-user')"
 fi
 
 # ---------------------------------------------------------------------------
