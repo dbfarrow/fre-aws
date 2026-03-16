@@ -11,10 +11,21 @@
 #   YOUR_SSO_REGION           — IAM Identity Center → Settings → Identity source
 #   YOUR_DEPLOY_REGION        — the region you set in config/admin.env (e.g. us-east-1)
 
+# Admin profile — used by admin.sh (ProjectAdminAccess)
 [profile claude-code]
 sso_session = fre-aws-sso
 sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
-sso_role_name = AdministratorAccess
+sso_role_name = ProjectAdminAccess
+region = YOUR_DEPLOY_REGION
+output = json
+
+# Optional: developer profile for admins testing user operations locally.
+# Both profiles share the same sso-session token — one sso-login covers both.
+# Real (non-admin) users only need the claude-code profile with DeveloperAccess.
+[profile claude-code-dev]
+sso_session = fre-aws-sso
+sso_account_id = YOUR_12_DIGIT_ACCOUNT_ID
+sso_role_name = DeveloperAccess
 region = YOUR_DEPLOY_REGION
 output = json
 
