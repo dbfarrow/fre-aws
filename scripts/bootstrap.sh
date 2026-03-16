@@ -164,6 +164,176 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# IAM Identity Center permission sets (only if SSO_REGION is configured)
+# Creates DeveloperAccess and ProjectAdminAccess permission sets idempotently.
+# ---------------------------------------------------------------------------
+if [[ -n "${SSO_REGION:-}" ]]; then
+  echo "Setting up IAM Identity Center permission sets (region: ${SSO_REGION})..."
+
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-instances \
+    --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
+
+  if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
+    echo "  WARNING: No IAM Identity Center instance found in region ${SSO_REGION}."
+    echo "           Verify SSO_REGION in config/defaults.env and re-run bootstrap."
+    echo ""
+  else
+    echo "  Instance: ${SSO_INSTANCE_ARN}"
+    echo ""
+
+    # Find an existing permission set ARN by name; echoes ARN or empty string.
+    _find_ps_arn() {
+      local target="$1"
+      local found=""
+      while IFS= read -r arn; do
+        [[ -z "${arn}" ]] && continue
+        local name
+        name=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          sso-admin describe-permission-set \
+          --instance-arn "${SSO_INSTANCE_ARN}" \
+          --permission-set-arn "${arn}" \
+          --query 'PermissionSet.Name' --output text 2>/dev/null || echo "")
+        if [[ "${name}" == "${target}" ]]; then
+          found="${arn}"
+          break
+        fi
+      done < <(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        sso-admin list-permission-sets \
+        --instance-arn "${SSO_INSTANCE_ARN}" \
+        --max-results 100 \
+        --query 'PermissionSets[]' --output text 2>/dev/null | tr '\t' '\n')
+      echo "${found}"
+    }
+
+    # Create a permission set if it doesn't exist; echoes the ARN either way.
+    _ensure_ps() {
+      local name="$1" description="$2"
+      local arn
+      arn=$(_find_ps_arn "${name}")
+      if [[ -n "${arn}" ]]; then
+        echo "  '${name}': already exists." >&2
+      else
+        arn=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          sso-admin create-permission-set \
+          --instance-arn "${SSO_INSTANCE_ARN}" \
+          --name "${name}" \
+          --description "${description}" \
+          --session-duration "PT8H" \
+          --query 'PermissionSet.PermissionSetArn' --output text)
+        echo "  '${name}': created." >&2
+      fi
+      echo "${arn}"
+    }
+
+    # ---- DeveloperAccess ------------------------------------------------
+    # Scoped policy: developer can only start/stop/connect to their own instance.
+    DEV_PS_ARN=$(_ensure_ps "DeveloperAccess" \
+      "Scoped ${PROJECT_NAME} developer access: connect to own instance only")
+
+    POLICY_FILE=$(mktemp)
+    cat > "${POLICY_FILE}" << 'POLICY'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:StartInstances", "ec2:StopInstances"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${aws:username}"}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${aws:username}"}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
+      "Resource": "arn:aws:ssm:*:*:session/${aws:username}-*"
+    }
+  ]
+}
+POLICY
+    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin put-inline-policy-to-permission-set \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --permission-set-arn "${DEV_PS_ARN}" \
+      --inline-policy "file://${POLICY_FILE}" >/dev/null
+    echo "  'DeveloperAccess': policy applied."
+    rm -f "${POLICY_FILE}"
+
+    # ---- ProjectAdminAccess ---------------------------------------------
+    # PowerUserAccess (all services except IAM) plus the specific IAM
+    # permissions Terraform needs to create and manage EC2 instance roles.
+    ADMIN_PS_ARN=$(_ensure_ps "ProjectAdminAccess" \
+      "${PROJECT_NAME} admin: run bootstrap/up/down, manage users and infrastructure")
+
+    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin attach-managed-policy-to-permission-set \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --permission-set-arn "${ADMIN_PS_ARN}" \
+      --managed-policy-arn "arn:aws:iam::aws:policy/PowerUserAccess" 2>/dev/null \
+      && echo "  'ProjectAdminAccess': attached PowerUserAccess." \
+      || echo "  'ProjectAdminAccess': PowerUserAccess already attached."
+
+    POLICY_FILE=$(mktemp)
+    cat > "${POLICY_FILE}" << 'POLICY'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TerraformIAM",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole",
+        "iam:TagRole", "iam:UntagRole", "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:CreateInstanceProfile", "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile", "iam:TagInstanceProfile",
+        "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile",
+        "iam:PassRole",
+        "iam:CreatePolicy", "iam:CreatePolicyVersion",
+        "iam:DeletePolicy", "iam:DeletePolicyVersion",
+        "iam:GetPolicy", "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions", "iam:TagPolicy",
+        "iam:GetRolePolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+POLICY
+    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin put-inline-policy-to-permission-set \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --permission-set-arn "${ADMIN_PS_ARN}" \
+      --inline-policy "file://${POLICY_FILE}" >/dev/null
+    echo "  'ProjectAdminAccess': IAM policy applied."
+    rm -f "${POLICY_FILE}"
+
+    echo ""
+    echo "  Assign permission sets in IAM Identity Center → AWS accounts:"
+    echo "    Admins:      ProjectAdminAccess"
+    echo "    Developers:  DeveloperAccess"
+    echo "  Then update sso_role_name in ~/.aws/config to match."
+    echo ""
+  fi
+else
+  echo "SSO_REGION not set — skipping IAM Identity Center permission sets."
+  echo "  To automate this, add SSO_REGION=<region> to config/defaults.env."
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
 # Write backend config for up.sh to consume
 # ---------------------------------------------------------------------------
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
