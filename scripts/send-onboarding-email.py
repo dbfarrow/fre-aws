@@ -22,10 +22,10 @@ Usage:
 """
 
 import argparse
+import base64
 import os
 import subprocess
 import sys
-import tempfile
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -33,7 +33,8 @@ from email.mime.text import MIMEText
 
 def build_body(username: str, project: str, role: str,
                aws_profile: str, aws_region: str,
-               has_private_key: bool) -> str:
+               has_private_key: bool,
+               sso_start_url: str, user_email: str) -> str:
     lines = [
         f"Hi {username},",
         "",
@@ -46,13 +47,29 @@ def build_body(username: str, project: str, role: str,
         lines.append("  - fre-claude       : your SSH private key")
     lines += [
         "  - aws-config       : your AWS CLI configuration",
-        "  - user.env    : your environment settings",
+        "  - user.env         : your environment settings",
         "",
         "Setup instructions:",
         "",
     ]
 
     step = 1
+
+    # Account activation must come first — the user cannot log in until
+    # they set a password via the SSO portal's Forgot password flow.
+    lines += [
+        f"  {step}. Activate your AWS account:",
+        f"     a. Go to: {sso_start_url}",
+        "     b. Click \"Forgot password\"",
+        f"     c. Enter your email address: {user_email}",
+        "     d. Check your inbox for a verification email from AWS and",
+        "        follow the link to set your password.",
+        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
+        "           You will need this when logging in after activation.",
+        "",
+    ]
+    step += 1
+
     if has_private_key:
         lines += [
             f"  {step}. Save your SSH key:",
@@ -129,28 +146,20 @@ def build_message(to_addr: str, from_addr: str, subject: str,
 
 def send_via_ses(msg: MIMEMultipart, ses_region: str,
                  aws_cli_profile: str) -> None:
-    raw_bytes = msg.as_bytes()
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".eml") as tmp:
-        tmp.write(raw_bytes)
-        tmp_path = tmp.name
-
-    try:
-        result = subprocess.run(
-            [
-                "aws", "ses", "send-raw-email",
-                "--region", ses_region,
-                "--profile", aws_cli_profile,
-                "--raw-message", f"Data=fileb://{tmp_path}",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"ERROR: SES send-raw-email failed:\n{result.stderr}", file=sys.stderr)
-            sys.exit(1)
-    finally:
-        os.unlink(tmp_path)
+    raw_b64 = base64.b64encode(msg.as_bytes()).decode("ascii")
+    result = subprocess.run(
+        [
+            "aws", "ses", "send-raw-email",
+            "--region", ses_region,
+            "--profile", aws_cli_profile,
+            "--raw-message", f"Data={raw_b64}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"ERROR: SES send-raw-email failed:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
 
 
 def parse_attachment(value: str) -> tuple:
@@ -179,6 +188,10 @@ def main() -> None:
                         help="AWS CLI profile to use for SES API call")
     parser.add_argument("--ses-region", required=True,
                         help="AWS region where SES is configured")
+    parser.add_argument("--sso-start-url", required=True,
+                        help="IAM Identity Center portal URL for account activation")
+    parser.add_argument("--user-email", required=True,
+                        help="User's email address (shown in activation instructions)")
     parser.add_argument("--attachment", action="append", default=[],
                         metavar="PATH:FILENAME",
                         help="File attachment as path:filename (repeatable)")
@@ -201,6 +214,8 @@ def main() -> None:
         aws_profile=args.aws_profile,
         aws_region=args.aws_region,
         has_private_key=has_private_key,
+        sso_start_url=args.sso_start_url,
+        user_email=args.user_email,
     )
 
     msg = build_message(args.to, args.from_addr, subject, body, attachments)

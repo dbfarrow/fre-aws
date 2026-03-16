@@ -70,4 +70,73 @@ users_s3_upload "${USERS_JSON}"
 
 echo ""
 echo "User '${DEV_USERNAME}' removed from registry."
+
+# ---------------------------------------------------------------------------
+# IAM Identity Center: remove account assignment and delete user
+# ---------------------------------------------------------------------------
+if [[ -z "${SSO_REGION:-}" ]]; then
+  echo ""
+  echo "SSO_REGION not set — skipping IAM Identity Center cleanup."
+  echo "  Delete the user manually in the IAM Identity Center console if needed."
+else
+  echo ""
+  echo "Cleaning up IAM Identity Center..."
+
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-instances \
+    --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
+
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-instances \
+    --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
+
+  if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
+    echo "  WARNING: No IAM Identity Center instance found in region ${SSO_REGION}. Skipping."
+  else
+    SSO_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      identitystore list-users \
+      --identity-store-id "${IDENTITY_STORE_ID}" \
+      --filters "AttributePath=UserName,AttributeValue=${DEV_USERNAME}" \
+      --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
+
+    if [[ -z "${SSO_USER_ID}" || "${SSO_USER_ID}" == "None" ]]; then
+      echo "  User '${DEV_USERNAME}' not found in Identity Center — nothing to remove."
+    else
+      # Remove all account assignments for this user
+      ASSIGNMENTS=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        sso-admin list-account-assignments-for-principal \
+        --instance-arn "${SSO_INSTANCE_ARN}" \
+        --principal-id "${SSO_USER_ID}" \
+        --principal-type USER \
+        --query 'AccountAssignments[].{account:AccountId,ps:PermissionSetArn}' \
+        --output json 2>/dev/null || echo "[]")
+
+      ASSIGNMENT_COUNT=$(echo "${ASSIGNMENTS}" | jq 'length')
+      if [[ "${ASSIGNMENT_COUNT}" -gt 0 ]]; then
+        while IFS= read -r assignment; do
+          ACCT=$(echo "${assignment}" | jq -r '.account')
+          PS_ARN=$(echo "${assignment}" | jq -r '.ps')
+          aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+            sso-admin delete-account-assignment \
+            --instance-arn "${SSO_INSTANCE_ARN}" \
+            --target-id "${ACCT}" \
+            --target-type AWS_ACCOUNT \
+            --permission-set-arn "${PS_ARN}" \
+            --principal-type USER \
+            --principal-id "${SSO_USER_ID}" >/dev/null
+          echo "  Removed account assignment (account: ${ACCT})."
+        done < <(echo "${ASSIGNMENTS}" | jq -c '.[]')
+      fi
+
+      # Delete the identity store user
+      aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        identitystore delete-user \
+        --identity-store-id "${IDENTITY_STORE_ID}" \
+        --user-id "${SSO_USER_ID}"
+      echo "  Deleted Identity Center user '${DEV_USERNAME}' (id: ${SSO_USER_ID})."
+    fi
+  fi
+fi
+
+echo ""
 echo "Run './admin.sh up' to destroy their EC2 instance and EBS volume."

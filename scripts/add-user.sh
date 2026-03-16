@@ -39,94 +39,142 @@ echo "=== Add User ==="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Prompt: username
+# Optional: load user details from a file (skips interactive prompts)
+# Usage: add-user.sh /path/to/file.env
+# Recognised variables: NEW_USERNAME, FULL_NAME, USER_EMAIL,
+#   ROLE (user|admin, default: user), SSH_PUBLIC_KEY (auto-generated if omitted),
+#   GIT_USER_NAME (default: FULL_NAME), GIT_USER_EMAIL (default: USER_EMAIL)
 # ---------------------------------------------------------------------------
-while true; do
-  read -r -p "Username (letters, numbers, dots, hyphens, underscores): " NEW_USERNAME
-  if [[ -z "${NEW_USERNAME}" ]]; then
-    echo "  Username cannot be empty." >&2
-    continue
+USER_FILE="${1:-}"
+if [[ -n "${USER_FILE}" ]]; then
+  if [[ ! -f "${USER_FILE}" ]]; then
+    echo "ERROR: User file not found: ${USER_FILE}" >&2
+    exit 1
   fi
+  # shellcheck source=/dev/null
+  source "${USER_FILE}"
+  echo "Loading user details from: ${USER_FILE}"
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
+# Username
+# ---------------------------------------------------------------------------
+if [[ -z "${NEW_USERNAME:-}" ]]; then
+  while true; do
+    read -r -p "Username (letters, numbers, dots, hyphens, underscores): " NEW_USERNAME
+    if [[ -z "${NEW_USERNAME}" ]]; then
+      echo "  Username cannot be empty." >&2; continue
+    fi
+    if ! [[ "${NEW_USERNAME}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      echo "  Invalid username. Use only letters, numbers, dots, hyphens, underscores." >&2; continue
+    fi
+    break
+  done
+else
   if ! [[ "${NEW_USERNAME}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-    echo "  Invalid username. Use only letters, numbers, dots, hyphens, underscores." >&2
-    continue
+    echo "ERROR: Invalid NEW_USERNAME '${NEW_USERNAME}': use only letters, numbers, dots, hyphens, underscores." >&2
+    exit 1
   fi
-  break
-done
+fi
 
 # ---------------------------------------------------------------------------
-# Prompt: full name
+# Full name
 # ---------------------------------------------------------------------------
-while true; do
-  read -r -p "Full name (e.g. Alice Smith): " FULL_NAME
-  if [[ -z "${FULL_NAME}" ]]; then
-    echo "  Full name cannot be empty." >&2
-    continue
-  fi
-  break
-done
+if [[ -z "${FULL_NAME:-}" ]]; then
+  while true; do
+    read -r -p "Full name (e.g. Alice Smith): " FULL_NAME
+    if [[ -z "${FULL_NAME}" ]]; then
+      echo "  Full name cannot be empty." >&2; continue
+    fi
+    break
+  done
+fi
 
 # ---------------------------------------------------------------------------
-# Prompt: email address
+# Email address
 # ---------------------------------------------------------------------------
-while true; do
-  read -r -p "Email address: " USER_EMAIL
-  if [[ -z "${USER_EMAIL}" ]]; then
-    echo "  Email cannot be empty." >&2
-    continue
-  fi
-  break
-done
+if [[ -z "${USER_EMAIL:-}" ]]; then
+  while true; do
+    read -r -p "Email address: " USER_EMAIL
+    if [[ -z "${USER_EMAIL}" ]]; then
+      echo "  Email cannot be empty." >&2; continue
+    fi
+    break
+  done
+fi
 
 # ---------------------------------------------------------------------------
-# Prompt: role
+# Role
 # ---------------------------------------------------------------------------
-echo ""
-echo "Role:"
-echo "  1) user   (DeveloperAccess — scoped to own instance)  [default]"
-echo "  2) admin  (ProjectAdminAccess — full project access)"
-read -r -p "Select role [1]: " ROLE_CHOICE
-ROLE_CHOICE="${ROLE_CHOICE:-1}"
-
-case "${ROLE_CHOICE}" in
-  1|user)  ROLE="user";  PS_NAME="DeveloperAccess" ;;
-  2|admin) ROLE="admin"; PS_NAME="ProjectAdminAccess" ;;
-  *)
-    echo "  Invalid choice. Defaulting to user." >&2
-    ROLE="user"; PS_NAME="DeveloperAccess"
-    ;;
-esac
+if [[ -z "${ROLE:-}" ]]; then
+  echo ""
+  echo "Role:"
+  echo "  1) user   (DeveloperAccess — scoped to own instance)  [default]"
+  echo "  2) admin  (ProjectAdminAccess — full project access)"
+  read -r -p "Select role [1]: " ROLE_CHOICE
+  ROLE_CHOICE="${ROLE_CHOICE:-1}"
+  case "${ROLE_CHOICE}" in
+    1|user)  ROLE="user";  PS_NAME="DeveloperAccess" ;;
+    2|admin) ROLE="admin"; PS_NAME="ProjectAdminAccess" ;;
+    *)
+      echo "  Invalid choice. Defaulting to user." >&2
+      ROLE="user"; PS_NAME="DeveloperAccess"
+      ;;
+  esac
+else
+  case "${ROLE}" in
+    user)  PS_NAME="DeveloperAccess" ;;
+    admin) PS_NAME="ProjectAdminAccess" ;;
+    *)
+      echo "ERROR: Invalid ROLE '${ROLE}': must be 'user' or 'admin'." >&2
+      exit 1
+      ;;
+  esac
+fi
 echo "  Role: ${ROLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# SSH key: generate or supply
-# Admins must supply their own key. Developers can choose.
+# SSH key
 # ---------------------------------------------------------------------------
 SSH_PRIVATE_KEY_FILE=""
 
-if [[ "${ROLE}" == "admin" ]]; then
+if [[ -n "${SSH_PUBLIC_KEY:-}" ]]; then
+  echo "SSH public key provided."
+  echo ""
+elif [[ -n "${USER_FILE}" ]]; then
+  # File mode, no key supplied — auto-generate
+  PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
+  rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
+  ssh-keygen -t ed25519 -N "" \
+    -f "${PRIV_KEY_PATH}" \
+    -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
+  SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
+  SSH_PRIVATE_KEY_FILE="${PRIV_KEY_PATH}"
+  echo "SSH key: auto-generated (${PRIV_KEY_PATH})"
+  echo ""
+elif [[ "${ROLE}" == "admin" ]]; then
   echo "Admins must supply their own SSH public key (no private key generated or stored)."
   while true; do
     read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
     if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
-      echo "  SSH public key cannot be empty." >&2
-      continue
+      echo "  SSH public key cannot be empty." >&2; continue
     fi
     if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
       echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
     fi
     break
   done
+  echo ""
 else
   echo "SSH key:"
   echo "  1) Generate automatically (recommended)  [default]"
   echo "  2) Provide my own public key"
   read -r -p "Select option [1]: " KEY_CHOICE
   KEY_CHOICE="${KEY_CHOICE:-1}"
-
   case "${KEY_CHOICE}" in
-    1|generate)
+    1|generate|*)
       PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
       rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
       ssh-keygen -t ed25519 -N "" \
@@ -140,8 +188,7 @@ else
       while true; do
         read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
         if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
-          echo "  SSH public key cannot be empty." >&2
-          continue
+          echo "  SSH public key cannot be empty." >&2; continue
         fi
         if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
           echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
@@ -149,31 +196,21 @@ else
         break
       done
       ;;
-    *)
-      echo "  Invalid choice. Defaulting to generate." >&2
-      PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
-      rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
-      ssh-keygen -t ed25519 -N "" \
-        -f "${PRIV_KEY_PATH}" \
-        -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
-      SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
-      SSH_PRIVATE_KEY_FILE="${PRIV_KEY_PATH}"
-      echo "  Generated: ${PRIV_KEY_PATH}"
-      ;;
   esac
+  echo ""
 fi
-echo ""
 
 # ---------------------------------------------------------------------------
-# Prompt: git name (default: full name)
+# Git identity
 # ---------------------------------------------------------------------------
-read -r -p "Git user name [${FULL_NAME}]: " GIT_USER_NAME
+if [[ -z "${GIT_USER_NAME:-}" ]]; then
+  read -r -p "Git user name [${FULL_NAME}]: " GIT_USER_NAME
+fi
 GIT_USER_NAME="${GIT_USER_NAME:-${FULL_NAME}}"
 
-# ---------------------------------------------------------------------------
-# Prompt: git email (default: email address)
-# ---------------------------------------------------------------------------
-read -r -p "Git user email [${USER_EMAIL}]: " GIT_USER_EMAIL
+if [[ -z "${GIT_USER_EMAIL:-}" ]]; then
+  read -r -p "Git user email [${USER_EMAIL}]: " GIT_USER_EMAIL
+fi
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-${USER_EMAIL}}"
 
 echo ""
@@ -219,16 +256,29 @@ if [[ "${FAMILY_NAME}" == "${FULL_NAME}" ]]; then
   FAMILY_NAME=""
 fi
 
-# Check if user already exists in identity store
+# Check if user already exists in identity store (by username)
 EXISTING_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
   identitystore list-users \
   --identity-store-id "${IDENTITY_STORE_ID}" \
   --filters "AttributePath=UserName,AttributeValue=${NEW_USERNAME}" \
   --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
 
+# Also check if the email is already in use by any user
+EXISTING_EMAIL_USER=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  identitystore list-users \
+  --identity-store-id "${IDENTITY_STORE_ID}" \
+  --filters "AttributePath=Emails.Value,AttributeValue=${USER_EMAIL}" \
+  --query 'Users[0]' --output json 2>/dev/null || echo "null")
+EXISTING_EMAIL_USER_ID=$(echo "${EXISTING_EMAIL_USER}" | jq -r '.UserId // empty')
+EXISTING_EMAIL_USERNAME=$(echo "${EXISTING_EMAIL_USER}" | jq -r '.UserName // empty')
+
 if [[ -n "${EXISTING_USER_ID}" && "${EXISTING_USER_ID}" != "None" ]]; then
   echo "  IAM Identity Center user '${NEW_USERNAME}' already exists (id: ${EXISTING_USER_ID})."
   SSO_USER_ID="${EXISTING_USER_ID}"
+elif [[ -n "${EXISTING_EMAIL_USER_ID}" ]]; then
+  echo "ERROR: Email '${USER_EMAIL}' is already in use by Identity Center user '${EXISTING_EMAIL_USERNAME}'." >&2
+  echo "       Use a different email address, or remove the existing user first." >&2
+  exit 1
 else
   EMAILS_JSON="[{\"Value\": \"${USER_EMAIL}\", \"Type\": \"work\", \"Primary\": true}]"
   NAME_JSON="{\"GivenName\": \"${GIVEN_NAME}\", \"FamilyName\": \"${FAMILY_NAME}\", \"Formatted\": \"${FULL_NAME}\"}"
@@ -237,6 +287,7 @@ else
     identitystore create-user \
     --identity-store-id "${IDENTITY_STORE_ID}" \
     --user-name "${NEW_USERNAME}" \
+    --display-name "${FULL_NAME}" \
     --name "${NAME_JSON}" \
     --emails "${EMAILS_JSON}" \
     --query 'UserId' --output text)
@@ -320,6 +371,7 @@ echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT
 # ---------------------------------------------------------------------------
 AWS_PROFILE_FOR_DEV="claude-code"
 DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
+PROJECT_NAME=${PROJECT_NAME}
 AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
 AWS_REGION=${AWS_REGION}
 "
@@ -403,6 +455,8 @@ python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
   --aws-region "${AWS_REGION}" \
   --aws-cli-profile "${AWS_PROFILE}" \
   --ses-region "${AWS_REGION}" \
+  --sso-start-url "${SSO_START_URL}" \
+  --user-email "${USER_EMAIL}" \
   "${ATTACHMENT_ARGS[@]}"
 
 echo ""
