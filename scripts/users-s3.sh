@@ -2,7 +2,7 @@
 # users-s3.sh — Shared library for managing the user registry in S3.
 # Source this file; do not execute directly.
 #
-# Required environment (loaded by callers from defaults.env + backend.env):
+# Required environment (loaded by callers from admin.env + backend.env):
 #   PROJECT_NAME       — used as S3 key prefix
 #   AWS_PROFILE        — AWS CLI profile
 #   TF_BACKEND_BUCKET  — S3 bucket name (same bucket as Terraform state)

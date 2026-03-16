@@ -9,10 +9,8 @@ Your AWS development environment is already set up — your admin has provisione
 ## Setup Steps at a Glance
 
 1. [Clone this repository](#step-1--clone-this-repository)
-2. [Create your SSH key](#step-2--create-your-ssh-key) — and send the public key to your admin
-3. [Set up AWS credentials](#step-3--set-up-aws-credentials)
-4. [Create your developer config](#step-4--create-your-developer-config)
-5. [Connect](#step-5--connect)
+2. [Save the files from your onboarding email](#step-2--save-your-onboarding-files)
+3. [Connect](#step-3--connect)
 
 ---
 
@@ -23,7 +21,7 @@ Your AWS development environment is already set up — your admin has provisione
 | **Mac** | These instructions are Mac-specific |
 | **Container runtime** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — install one if you haven't already |
 | **`git`** | Pre-installed on macOS. If missing: `xcode-select --install` |
-| **From your admin** | SSO Start URL, your username, AWS region, project name |
+| **From your admin** | An onboarding email with your SSH key, AWS config, and user.env attached |
 
 ---
 
@@ -36,90 +34,39 @@ cd fre-aws
 
 ---
 
-## Step 2 — Create your SSH key
+## Step 2 — Save your onboarding files
 
-This key gives you SSH access to your EC2 instance and lets git push/pull to GitHub work from the instance — without ever storing your private key on the remote machine.
+Your admin sends you an email with three attachments. Save them as follows:
 
+**SSH key** (if included — skip if you supplied your own public key):
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/fre-claude -C "fre-claude"
+cp ~/Downloads/fre-claude ~/.ssh/fre-claude
+chmod 600 ~/.ssh/fre-claude
 ```
 
-You'll be prompted for a passphrase. Setting one is recommended — you'll only need to enter it once per session when connecting.
+Then add the public key to GitHub so git push/pull works from your instance:
+1. Copy the public key: `ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy`
+2. In GitHub: **Settings → SSH and GPG keys → New SSH key** → paste it
 
-### Add the public key to GitHub
-
-This is what enables `git clone`, `git push`, and `git pull` from your EC2 instance:
-
-1. Copy your public key to the clipboard:
-   ```bash
-   cat ~/.ssh/fre-claude.pub | pbcopy
-   ```
-
-2. In GitHub: **Settings → SSH and GPG keys → New SSH key**
-   - Title: `fre-claude`
-   - Key type: **Authentication Key**
-   - Paste the key and save
-
-### Send the public key to your admin
-
-Your admin needs your public key to install it on your EC2 instance.
-
+**AWS config:**
 ```bash
-cat ~/.ssh/fre-claude.pub
+mkdir -p ~/.aws
+cp ~/Downloads/aws-config ~/.aws/config
 ```
 
-Copy that output and send it to your admin. They'll confirm when your instance is ready.
-
----
-
-## Step 3 — Set up AWS credentials
-
-Your admin will give you a **SSO Start URL** and a username for the AWS access portal.
-
-1. Create your AWS config file from the provided template:
-   ```bash
-   mkdir -p ~/.aws
-   cp config/aws-config-sso-developer.example ~/.aws/config
-   ```
-
-2. Open `~/.aws/config` in any text editor and replace the four `UPPER_CASE` values:
-
-   | Placeholder | What to put there |
-   |-------------|-------------------|
-   | `YOUR_12_DIGIT_ACCOUNT_ID` | Your admin's AWS account ID (they'll provide this) |
-   | `YOUR_PORTAL_ID` | The ID from your SSO Start URL (e.g. `d-abc12345` from `https://d-abc12345.awsapps.com/start`) |
-   | `YOUR_SSO_REGION` | The region in your SSO URL, or ask your admin |
-   | `YOUR_DEPLOY_REGION` | The AWS region your admin deployed to (e.g. `us-west-2`) |
-
-   > **Important:** The `[profile claude-code]` line must start at the very beginning of the line with no leading spaces. If you use TextEdit, choose **Format → Make Plain Text** before saving.
-
----
-
-## Step 4 — Create your developer config
-
+**User config:**
 ```bash
-cp config/developer.env.example config/developer.env
-```
-
-Open `config/developer.env` and fill in your values:
-
-```bash
-MY_USERNAME=yourname        # ← the username your admin told you
-AWS_PROFILE=claude-code     # leave as-is (matches ~/.aws/config)
-AWS_REGION=us-west-2        # ← the region your admin told you
-PROJECT_NAME=fre-aws        # ← the project name your admin told you
-GIT_USER_NAME=Your Name     # ← your name for git commits
-GIT_USER_EMAIL=you@co.com   # ← your email for git commits
+cp ~/Downloads/user.env config/user.env
 ```
 
 ---
 
-## Step 5 — Connect
+## Step 3 — Connect
 
-Once your admin confirms your instance is ready:
+Once your admin confirms your instance is ready (they'll run `./admin.sh up` after adding you):
 
 ```bash
-./dev.sh connect
+./user.sh connect
 ```
 
 The first time you run this, you'll be prompted to log in to AWS:
@@ -150,9 +97,9 @@ Enter choice [1]:
 ## Daily use
 
 ```bash
-./dev.sh start      # start your instance (if it's stopped)
-./dev.sh connect    # connect to your instance
-./dev.sh stop       # stop your instance when done for the day
+./user.sh start      # start your instance (if it's stopped)
+./user.sh connect    # connect to your instance
+./user.sh stop       # stop your instance when done for the day
 ```
 
 **Stop your instance when you're not using it.** A stopped instance doesn't incur compute charges, but your data is preserved on disk.
@@ -175,10 +122,10 @@ When you choose "Clone a GitHub repo", your local SSH key is forwarded to the EC
 ## Troubleshooting
 
 **`ERROR: No instance found for user '...'`**
-Your instance may be stopped. Run `./dev.sh start`, wait about 30 seconds, then try `./dev.sh connect` again.
+Your instance may be stopped. Run `./user.sh start`, wait about 30 seconds, then try `./user.sh connect` again.
 
 **`ERROR: Could not export credentials`**
-Your AWS SSO session has expired. Run `./dev.sh connect` again — it will prompt you to log in through your browser.
+Your AWS SSO session has expired. Run `./user.sh connect` again — it will prompt you to log in through your browser.
 
 **`ForbiddenException: No access` after SSO login**
 The browser login succeeded but your AWS user hasn't been granted access to the account. This is an admin-side setup step — contact your admin and ask them to verify:
@@ -201,8 +148,8 @@ Complete Step 2 (create the SSH key) and make sure it's saved at `~/.ssh/fre-cla
 
 **`kex_exchange_identification: Connection closed by remote host`**
 The SSH tunnel through SSM failed to establish. Most common causes:
-1. AWS credentials aren't valid — run `./dev.sh connect` fresh to trigger a new SSO login
-2. Your instance isn't running — run `./dev.sh start` first
+1. AWS credentials aren't valid — run `./user.sh connect` fresh to trigger a new SSO login
+2. Your instance isn't running — run `./user.sh start` first
 3. Contact your admin to verify your instance is healthy: `./admin.sh ssm <username>`
 
 **Instance feels slow or unresponsive**

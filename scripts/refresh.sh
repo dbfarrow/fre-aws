@@ -5,13 +5,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load config: developer.env takes precedence (developer path); fall back to defaults.env (admin path)
-if [[ -f "${SCRIPT_DIR}/../config/developer.env" ]]; then
-  source "${SCRIPT_DIR}/../config/developer.env"
-elif [[ -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
-  source "${SCRIPT_DIR}/../config/defaults.env"
+# Load config: user.env takes precedence (user path); fall back to admin.env (admin path)
+if [[ -f "${SCRIPT_DIR}/../config/user.env" ]]; then
+  source "${SCRIPT_DIR}/../config/user.env"
+elif [[ -f "${SCRIPT_DIR}/../config/admin.env" ]]; then
+  source "${SCRIPT_DIR}/../config/admin.env"
 else
-  echo "ERROR: No config found. Expected config/developer.env or config/defaults.env." >&2
+  echo "ERROR: No config found. Expected config/user.env or config/admin.env." >&2
   exit 1
 fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true

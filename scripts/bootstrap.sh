@@ -4,21 +4,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/../config/defaults.env"
+CONFIG_FILE="${SCRIPT_DIR}/../config/admin.env"
 
 # ---------------------------------------------------------------------------
 # Load config
 # ---------------------------------------------------------------------------
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo "ERROR: config/defaults.env not found. Copy config/defaults.env.example and edit it." >&2
+  echo "ERROR: config/admin.env not found. Copy config/admin.env.example and edit it." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-: "${PROJECT_NAME:?PROJECT_NAME must be set in config/defaults.env}"
-: "${AWS_REGION:?AWS_REGION must be set in config/defaults.env}"
-: "${AWS_PROFILE:?AWS_PROFILE must be set in config/defaults.env}"
+: "${PROJECT_NAME:?PROJECT_NAME must be set in config/admin.env}"
+: "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
+: "${AWS_PROFILE:?AWS_PROFILE must be set in config/admin.env}"
 
 BUCKET_NAME="${PROJECT_NAME}-tfstate"
 DYNAMODB_TABLE="${PROJECT_NAME}-tflock"
@@ -187,7 +187,7 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
 else
   echo "SENDER_EMAIL not set — skipping SES sender verification."
   echo "  To enable automated onboarding emails, add SENDER_EMAIL=you@example.com"
-  echo "  to config/defaults.env, then re-run bootstrap."
+  echo "  to config/admin.env, then re-run bootstrap."
   echo ""
 fi
 
@@ -204,7 +204,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
   if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
     echo "  WARNING: No IAM Identity Center instance found in region ${SSO_REGION}."
-    echo "           Verify SSO_REGION in config/defaults.env and re-run bootstrap."
+    echo "           Verify SSO_REGION in config/admin.env and re-run bootstrap."
     echo ""
   else
     echo "  Instance: ${SSO_INSTANCE_ARN}"
@@ -257,7 +257,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
     # ---- DeveloperAccess ------------------------------------------------
     # Scoped policy: developer can only start/stop/connect to their own instance.
     DEV_PS_ARN=$(_ensure_ps "DeveloperAccess" \
-      "Scoped ${PROJECT_NAME} developer access: connect to own instance only")
+      "Scoped ${PROJECT_NAME} user access: connect to own instance only")
 
     POLICY_FILE=$(mktemp)
     cat > "${POLICY_FILE}" << 'POLICY'
@@ -357,7 +357,7 @@ POLICY
   fi
 else
   echo "SSO_REGION not set — skipping IAM Identity Center permission sets."
-  echo "  To automate this, add SSO_REGION=<region> to config/defaults.env."
+  echo "  To automate this, add SSO_REGION=<region> to config/admin.env."
   echo ""
 fi
 

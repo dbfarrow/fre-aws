@@ -36,6 +36,9 @@ config/*.env
 config/users.tfvars
 config/backend.env
 
+# Onboarding bundles contain SSH private keys — never commit these
+config/onboarding/
+
 # macOS
 .DS_Store
 .AppleDouble

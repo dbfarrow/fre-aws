@@ -5,29 +5,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load config: developer.env takes precedence (developer path); fall back to defaults.env (admin path)
-if [[ -f "${SCRIPT_DIR}/../config/developer.env" ]]; then
-  source "${SCRIPT_DIR}/../config/developer.env"
-elif [[ -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
-  source "${SCRIPT_DIR}/../config/defaults.env"
+# Load config: user.env takes precedence (user path); fall back to admin.env (admin path)
+if [[ -f "${SCRIPT_DIR}/../config/user.env" ]]; then
+  source "${SCRIPT_DIR}/../config/user.env"
+elif [[ -f "${SCRIPT_DIR}/../config/admin.env" ]]; then
+  source "${SCRIPT_DIR}/../config/admin.env"
 else
-  echo "ERROR: No config found. Expected config/developer.env or config/defaults.env." >&2
+  echo "ERROR: No config found. Expected config/user.env or config/admin.env." >&2
   exit 1
 fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
 : "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
 
-# DEV_USERNAME: set by admin.sh (command arg) or developer.env (MY_USERNAME)
+# DEV_USERNAME: set by admin.sh (command arg) or user.env (MY_USERNAME)
 DEV_USERNAME="${DEV_USERNAME:-${MY_USERNAME:-}}"
 if [[ -z "${DEV_USERNAME}" ]]; then
-  echo "ERROR: DEV_USERNAME not set. Use './admin.sh connect <username>' or set MY_USERNAME in config/developer.env." >&2
+  echo "ERROR: DEV_USERNAME not set. Use './admin.sh connect <username>' or set MY_USERNAME in config/user.env." >&2
   exit 1
 fi
 
 CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
-  echo "       If using SSO, run './dev.sh sso-login' first." >&2
+  echo "       If using SSO, run './user.sh sso-login' first." >&2
   exit 1
 }
 eval "$(echo "${CREDS}" | sed 's/^/export /')"
@@ -60,7 +60,7 @@ INSTANCE_STATE=$(aws ec2 describe-instances \
 
 if [[ "${INSTANCE_STATE}" != "running" ]]; then
   echo "ERROR: Instance ${INSTANCE_ID} is '${INSTANCE_STATE}', not running." >&2
-  echo "       Run './dev.sh start'  (or: ./admin.sh start ${DEV_USERNAME}) first." >&2
+  echo "       Run './user.sh start'  (or: ./admin.sh start ${DEV_USERNAME}) first." >&2
   exit 1
 fi
 

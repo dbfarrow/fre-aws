@@ -68,7 +68,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── stop.sh                 # Stop running EC2 instance
 │   └── connect.sh              # Open SSM Session Manager session (no SSH)
 ├── config/
-│   └── defaults.env            # Default variables: region, instance type, project name
+│   └── admin.env               # Admin variables: region, instance type, project name (gitignored)
 ├── README.md
 └── CLAUDE.md
 ```

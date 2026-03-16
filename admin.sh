@@ -41,9 +41,9 @@ fi
 # Load admin config on the host so we can pass settings into the container.
 # ---------------------------------------------------------------------------
 AWS_PROFILE="claude-code"
-if [[ -f "$(pwd)/config/defaults.env" ]]; then
+if [[ -f "$(pwd)/config/admin.env" ]]; then
   # shellcheck source=/dev/null
-  source "$(pwd)/config/defaults.env"
+  source "$(pwd)/config/admin.env"
 fi
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ case "${COMMAND}" in
     ;;
   shell)
     docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash -c '
-      source /workspace/config/defaults.env 2>/dev/null || true
+      source /workspace/config/admin.env 2>/dev/null || true
       source /workspace/config/backend.env  2>/dev/null || true
       eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed '"'"'s/^/export /'"'"')" || true
       exec /bin/bash

@@ -1,6 +1,6 @@
 # Claude Code AWS Environment — Admin Guide
 
-A Docker-packaged toolset for provisioning and managing EC2-based development environments on AWS. Each developer gets their own dedicated EC2 instance running the Claude Code CLI. The admin provisions and manages the environment; developers use a single command (`./dev.sh connect`) to get to work.
+A Docker-packaged toolset for provisioning and managing EC2-based development environments on AWS. Each user gets their own dedicated EC2 instance running the Claude Code CLI. The admin provisions and manages the environment; users connect with a single command (`./user.sh connect`).
 
 ---
 
@@ -22,10 +22,10 @@ A Docker-packaged toolset for provisioning and managing EC2-based development en
   - [Keeping costs low](#keeping-costs-low)
 - [First-Time Setup](#first-time-setup)
 - [Managing Users](#managing-users)
-- [Developer Onboarding](#developer-onboarding)
+- [User Onboarding](#user-onboarding)
 - [Security Model](#security-model)
 - [Troubleshooting](#troubleshooting)
-- [For Developers](#for-developers)
+- [For Users](#for-users)
 
 ---
 
@@ -234,15 +234,15 @@ No changes to Terraform or scripts needed — only the credential source changes
 
 ### Email Setup (AWS SES)
 
-`add-user` delivers SSH keys and AWS configs to new developers via email. To enable it:
+`add-user` delivers SSH keys and AWS configs to new users via email. To enable it:
 
-1. Add `SENDER_EMAIL=you@example.com` and `SSO_START_URL=https://d-...awsapps.com/start` to `config/defaults.env`
+1. Add `SENDER_EMAIL=you@example.com` and `SSO_START_URL=https://d-...awsapps.com/start` to `config/admin.env`
 2. Run `./admin.sh bootstrap` — it triggers the SES verification email automatically
 3. Click the link in the verification email from AWS
 
-**SES sandbox**: New AWS accounts can only send to verified addresses. To send to any developer:
+**SES sandbox**: New AWS accounts can only send to verified addresses. To send to any user:
 - AWS Console → SES → Account dashboard → **Request production access**
-- Takes 24–48 hours; required before onboarding external developers
+- Takes 24–48 hours; required before onboarding external users
 
 > If `SENDER_EMAIL` is not set, `add-user` still completes but skips the email step. Credentials are saved to `config/onboarding/<username>/` and the admin must forward the files manually.
 
@@ -250,11 +250,11 @@ No changes to Terraform or scripts needed — only the credential source changes
 
 ## Local Configuration
 
-`config/defaults.env` is your personal admin settings file — **gitignored**, never committed.
+`config/admin.env` is your personal admin settings file — **gitignored**, never committed.
 
 ```bash
-cp config/defaults.env.example config/defaults.env
-# Edit config/defaults.env with your values
+cp config/admin.env.example config/admin.env
+# Edit config/admin.env with your values
 ```
 
 User configuration is stored in S3 (not as a local file) and managed through the CLI — see [Managing Users](#managing-users).
@@ -280,7 +280,7 @@ User configuration is stored in S3 (not as a local file) and managed through the
 
 ### Network Configuration Options
 
-Controlled by `NETWORK_MODE` in `config/defaults.env`. Applies to all user instances.
+Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all user instances.
 
 | Mode | Cost | Security | Notes |
 |------|------|----------|-------|
@@ -305,8 +305,8 @@ Controlled by `NETWORK_MODE` in `config/defaults.env`. Applies to all user insta
 3.  Install Docker on your Mac                              ← one time
 4.  Create SSH key + add public key to GitHub               ← see SSH Key Setup above
 5.  Clone this repo                                         ← git clone ...
-6.  cp config/defaults.env.example config/defaults.env      ← create your admin config
-7.  Edit config/defaults.env                                ← set AWS_REGION, PROJECT_NAME, SSO_REGION,
+6.  cp config/admin.env.example config/admin.env      ← create your admin config
+7.  Edit config/admin.env                                ← set AWS_REGION, PROJECT_NAME, SSO_REGION,
                                                             ←   SSO_START_URL, SENDER_EMAIL, etc.
 8.  ./admin.sh verify                                       ← confirm AWS credentials work
 9.  ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS, permission sets,
@@ -333,22 +333,22 @@ Run the interactive wizard:
 ```bash
 ./admin.sh add-user
 ```
-It prompts for: username, full name, email, role (developer/admin), SSH key (generate or provide), git name, and git email.
+It prompts for: username, full name, email, role (user/admin), SSH key (generate or provide), git name, and git email.
 
 The wizard automatically:
 - Creates an IAM Identity Center user and assigns the appropriate permission set
 - Generates (or accepts) an SSH key pair for EC2 access
-- Generates `developer.env` and `~/.aws/config` files ready for the developer to use
+- Generates `user.env` and `~/.aws/config` files ready for the user
 - Saves an onboarding bundle to `config/onboarding/<username>/`
-- Emails credentials to the developer via SES (if `SENDER_EMAIL` is set)
+- Emails credentials to the user via SES (if `SENDER_EMAIL` is set)
 
 After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 
-**Prerequisites**: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` must all be set in `config/defaults.env` before running `add-user`. See [Email Setup (AWS SES)](#email-setup-aws-ses) above.
+**Prerequisites**: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` must all be set in `config/admin.env` before running `add-user`. See [Email Setup (AWS SES)](#email-setup-aws-ses) above.
 
 ### Updating a user's SSH key
 
-If a developer wants to use their own SSH key after initial onboarding:
+If a user wants to use their own SSH key after initial onboarding:
 
 ```bash
 ./admin.sh update-user-key <username>
@@ -393,16 +393,16 @@ No down/up needed. Changes take effect on their next connect.
 
 ---
 
-## Developer Onboarding
+## User Onboarding
 
-When a new developer is ready to use their environment, the entire flow is automated via `./admin.sh add-user`.
+When a new user is ready to use their environment, the entire flow is automated via `./admin.sh add-user`.
 
 **Prerequisites** (one-time admin setup):
-1. Set `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` in `config/defaults.env`
+1. Set `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` in `config/admin.env`
 2. Run `./admin.sh bootstrap` — triggers SES email verification
 3. Click the verification link in the email from AWS
 
-**Onboarding a developer:**
+**Onboarding a user:**
 
 1. **Run the wizard**:
    ```bash
@@ -411,18 +411,18 @@ When a new developer is ready to use their environment, the entire flow is autom
    The wizard prompts for username, full name, email, role, and SSH key preference. It then:
    - Creates their IAM Identity Center user and assigns the `DeveloperAccess` permission set
    - Optionally generates an SSH key pair (ed25519, no passphrase) for EC2 access
-   - Generates a ready-to-use `~/.aws/config` and `developer.env`
+   - Generates a ready-to-use `~/.aws/config` and `user.env`
    - Saves everything to `config/onboarding/<username>/`
-   - Emails credentials to the developer
+   - Emails credentials to the user
 
 2. **Provision their instance**:
    ```bash
    ./admin.sh up
    ```
 
-The developer receives an email with their SSH key (if generated), AWS config, and developer.env, plus step-by-step setup instructions. They follow the instructions, run `./dev.sh sso-login`, then `./dev.sh connect`.
+The user receives an email with their SSH key (if generated), AWS config, and user.env, plus step-by-step setup instructions. They follow the instructions, run `./user.sh sso-login`, then `./user.sh connect`.
 
-**Key swap**: If a developer later wants to use their own SSH key instead of the generated one:
+**Key swap**: If a user later wants to use their own SSH key instead of the generated one:
 ```bash
 ./admin.sh update-user-key <username>
 ./admin.sh up
@@ -450,14 +450,14 @@ The developer receives an email with their SSH key (if generated), AWS config, a
 
 ### `ForbiddenException: No access` (GetRoleCredentials)
 
-**Symptom:** `./admin.sh verify` (or a developer's `./dev.sh connect`) fails with:
+**Symptom:** `./admin.sh verify` (or a user's `./user.sh connect`) fails with:
 ```
 An error occurred (ForbiddenException) when calling the GetRoleCredentials operation: No access
 ```
 
 The SSO login browser flow completed successfully — the token is valid — but the user isn't assigned to the AWS account with the required permission set. Being in the IAM Identity Center directory is not enough; access must be granted at the account level.
 
-**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign the correct permission set (`ProjectAdminAccess` for admins, `DeveloperAccess` for developers).
+**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign the correct permission set (`ProjectAdminAccess` for admins, `DeveloperAccess` for users).
 
 **Diagnostic** (run inside `./admin.sh shell`):
 ```bash
@@ -472,14 +472,14 @@ The `roleName` returned must exactly match `sso_role_name` in `~/.aws/config`.
 
 ---
 
-### Developer connect fails silently
+### User connect fails silently
 
-**Symptom:** `./dev.sh connect` exits without a clear error.
+**Symptom:** `./user.sh connect` exits without a clear error.
 
-**Most likely cause:** Expired or invalid SSO credentials. Since the fix in commit `1531fd9`, credential failures now print a clear error message. If the developer sees:
+**Most likely cause:** Expired or invalid SSO credentials. Since the fix in commit `1531fd9`, credential failures now print a clear error message. If the user sees:
 ```
 ERROR: Could not export credentials for profile 'claude-code'.
-       If using SSO, run './dev.sh sso-login' first.
+       If using SSO, run './user.sh sso-login' first.
 ```
 → they need to re-run the SSO login flow.
 
@@ -487,6 +487,6 @@ If they see `kex_exchange_identification: Connection closed by remote host`, the
 
 ---
 
-## For Developers
+## For Users
 
 See [CLAUDE.md](CLAUDE.md) for architecture decisions, Terraform module conventions, testing strategy, and development workflow.

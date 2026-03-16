@@ -18,7 +18,7 @@ Usage:
     --ses-region us-east-1 \\
     [--attachment /path/to/fre-claude:fre-claude] \\
     --attachment /path/to/aws-config:aws-config \\
-    --attachment /path/to/developer.env:developer.env
+    --attachment /path/to/user.env:user.env
 """
 
 import argparse
@@ -46,7 +46,7 @@ def build_body(username: str, project: str, role: str,
         lines.append("  - fre-claude       : your SSH private key")
     lines += [
         "  - aws-config       : your AWS CLI configuration",
-        "  - developer.env    : your developer environment settings",
+        "  - user.env    : your environment settings",
         "",
         "Setup instructions:",
         "",
@@ -71,24 +71,24 @@ def build_body(username: str, project: str, role: str,
     step += 1
 
     lines += [
-        f"  {step}. Save your developer environment file:",
-        "     cp developer.env <project-repo>/config/developer.env",
+        f"  {step}. Save your environment file:",
+        "     cp user.env <project-repo>/config/user.env",
         "",
     ]
     step += 1
 
     lines += [
         f"  {step}. Log in to AWS SSO (a browser window will open):",
-        "     ./dev.sh sso-login",
+        "     ./user.sh sso-login",
         "",
     ]
     step += 1
 
     lines += [
         f"  {step}. Connect to your development instance:",
-        "     ./dev.sh connect",
+        "     ./user.sh connect",
         "",
-        "For full documentation, see README-developer.md in the project repository.",
+        "For full documentation, see README-user.md in the project repository.",
         "",
     ]
 
@@ -164,13 +164,13 @@ def parse_attachment(value: str) -> tuple:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Send developer onboarding email via SES")
+    parser = argparse.ArgumentParser(description="Send user onboarding email via SES")
     parser.add_argument("--to", required=True, help="Developer email address")
     parser.add_argument("--from", dest="from_addr", required=True,
                         help="Verified SES sender email")
     parser.add_argument("--username", required=True, help="Developer username")
     parser.add_argument("--project", required=True, help="Project name")
-    parser.add_argument("--role", required=True, choices=["developer", "admin"],
+    parser.add_argument("--role", required=True, choices=["user", "admin"],
                         help="Developer role")
     parser.add_argument("--aws-profile", required=True,
                         help="AWS profile name for the developer")

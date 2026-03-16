@@ -9,7 +9,7 @@
 #   YOUR_12_DIGIT_ACCOUNT_ID  — top-right corner of any AWS Console page
 #   YOUR_PORTAL_ID            — IAM Identity Center → Dashboard → "AWS access portal URL"
 #   YOUR_SSO_REGION           — IAM Identity Center → Settings → Identity source
-#   YOUR_DEPLOY_REGION        — the region you set in config/defaults.env (e.g. us-east-1)
+#   YOUR_DEPLOY_REGION        — the region you set in config/admin.env (e.g. us-east-1)
 
 [profile claude-code]
 sso_session = fre-aws-sso

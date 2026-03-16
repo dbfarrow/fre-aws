@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# dev.sh — Developer tool for managing your Claude Code environment.
+# user.sh — User tool for managing your Claude Code environment.
 #
 # Usage:
-#   ./dev.sh start    [config]  - Start your EC2 instance
-#   ./dev.sh stop     [config]  - Stop your EC2 instance (preserves all your data)
-#   ./dev.sh connect  [config]  - Connect to your EC2 instance
+#   ./user.sh start    [config]  - Start your EC2 instance
+#   ./user.sh stop     [config]  - Stop your EC2 instance (preserves all your data)
+#   ./user.sh connect  [config]  - Connect to your EC2 instance
 #
-# config defaults to config/developer.env. Pass an alternate file to test
-# multiple users without editing developer.env:
-#   ./dev.sh connect config/alice.env
+# config defaults to config/user.env. Pass an alternate file to test
+# multiple users without editing user.env:
+#   ./user.sh connect config/alice.env
 set -euo pipefail
 
 IMAGE_NAME="fre-aws"
@@ -29,25 +29,24 @@ if ! docker image inspect "${IMAGE_NAME}" &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
-# Load developer config
+# Load user config
 # ---------------------------------------------------------------------------
 if [[ -n "${CONFIG_ARG}" ]]; then
   DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
 else
-  DEV_CONFIG="$(pwd)/config/developer.env"
+  DEV_CONFIG="$(pwd)/config/user.env"
 fi
 
 if [[ ! -f "${DEV_CONFIG}" ]]; then
   echo "ERROR: Config file not found: ${DEV_CONFIG}" >&2
-  echo "       Copy the example and fill in your values:" >&2
-  echo "         cp config/developer.env.example config/developer.env" >&2
+  echo "       Your admin will email you a user.env — save it to config/user.env" >&2
   exit 1
 fi
 # shellcheck source=/dev/null
 source "${DEV_CONFIG}"
 
-: "${MY_USERNAME:?MY_USERNAME must be set in config/developer.env}"
-: "${AWS_PROFILE:?AWS_PROFILE must be set in config/developer.env}"
+: "${MY_USERNAME:?MY_USERNAME must be set in config/user.env}"
+: "${AWS_PROFILE:?AWS_PROFILE must be set in config/user.env}"
 
 # ---------------------------------------------------------------------------
 # Common docker run arguments
@@ -60,9 +59,9 @@ DOCKER_ARGS=(
   "--env" "DEV_USERNAME=${MY_USERNAME}"
   # Mount AWS credentials (read-write: CLI writes SSO token cache)
   "--volume" "${HOME}/.aws:/root/.aws"
-  # Mount the config file as developer.env regardless of its name on the host.
-  # This allows alternate config files to be used without editing developer.env.
-  "--volume" "${DEV_CONFIG}:/workspace/config/developer.env:ro"
+  # Mount the config file as user.env regardless of its name on the host.
+  # This allows alternate config files to be used without editing user.env.
+  "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
   # Mount scripts
   "--volume" "$(pwd)/scripts:/workspace/scripts"
 )
@@ -82,7 +81,7 @@ case "${COMMAND}" in
     FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
     if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
       echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
-      echo "       Follow the SSH Key Setup section in README-developer.md" >&2
+      echo "       Follow the SSH Key Setup section in README-user.md" >&2
       exit 1
     fi
 

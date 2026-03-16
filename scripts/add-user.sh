@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # add-user.sh — Interactive wizard to add a user to the fre-aws environment.
 # Collects username, full name, email, role, SSH key, git name, and git email.
-# Creates an IAM Identity Center user, generates developer credentials, saves an
+# Creates an IAM Identity Center user, generates user credentials, saves an
 # onboarding bundle to config/onboarding/<username>/, and emails it via SES.
 set -euo pipefail
 
@@ -10,11 +10,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # Load config
 # ---------------------------------------------------------------------------
-if [[ ! -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
-  echo "ERROR: config/defaults.env not found." >&2
+if [[ ! -f "${SCRIPT_DIR}/../config/admin.env" ]]; then
+  echo "ERROR: config/admin.env not found." >&2
   exit 1
 fi
-source "${SCRIPT_DIR}/../config/defaults.env"
+source "${SCRIPT_DIR}/../config/admin.env"
 
 if [[ ! -f "${SCRIPT_DIR}/../config/backend.env" ]]; then
   echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2
@@ -26,14 +26,14 @@ source "${SCRIPT_DIR}/../config/backend.env"
 source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
-: "${AWS_REGION:?AWS_REGION must be set in config/defaults.env}"
+: "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
 
 # ---------------------------------------------------------------------------
 # Prerequisite checks — fail fast with clear messages
 # ---------------------------------------------------------------------------
-: "${SSO_REGION:?SSO_REGION must be set in config/defaults.env (IAM Identity Center region)}"
-: "${SSO_START_URL:?SSO_START_URL must be set in config/defaults.env (IAM Identity Center portal URL)}"
-: "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/defaults.env (verified SES sender address)}"
+: "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
+: "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
+: "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
 
 echo "=== Add User ==="
 echo ""
@@ -83,17 +83,17 @@ done
 # ---------------------------------------------------------------------------
 echo ""
 echo "Role:"
-echo "  1) developer  (DeveloperAccess — scoped to own instance)  [default]"
-echo "  2) admin      (ProjectAdminAccess — full project access)"
+echo "  1) user   (DeveloperAccess — scoped to own instance)  [default]"
+echo "  2) admin  (ProjectAdminAccess — full project access)"
 read -r -p "Select role [1]: " ROLE_CHOICE
 ROLE_CHOICE="${ROLE_CHOICE:-1}"
 
 case "${ROLE_CHOICE}" in
-  1|developer) ROLE="developer"; PS_NAME="DeveloperAccess" ;;
-  2|admin)     ROLE="admin";     PS_NAME="ProjectAdminAccess" ;;
+  1|user)  ROLE="user";  PS_NAME="DeveloperAccess" ;;
+  2|admin) ROLE="admin"; PS_NAME="ProjectAdminAccess" ;;
   *)
-    echo "  Invalid choice. Defaulting to developer." >&2
-    ROLE="developer"; PS_NAME="DeveloperAccess"
+    echo "  Invalid choice. Defaulting to user." >&2
+    ROLE="user"; PS_NAME="DeveloperAccess"
     ;;
 esac
 echo "  Role: ${ROLE}"
@@ -204,7 +204,7 @@ SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
 
 if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
   echo "ERROR: No IAM Identity Center instance found in region ${SSO_REGION}." >&2
-  echo "       Verify SSO_REGION in config/defaults.env and re-run." >&2
+  echo "       Verify SSO_REGION in config/admin.env and re-run." >&2
   exit 1
 fi
 
@@ -316,7 +316,7 @@ aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
 echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
 
 # ---------------------------------------------------------------------------
-# Generate developer.env
+# Generate user.env
 # ---------------------------------------------------------------------------
 AWS_PROFILE_FOR_DEV="claude-code"
 DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
@@ -352,7 +352,7 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
 fi
 
 printf '%s' "${AWS_CONFIG}" > "${BUNDLE_DIR}/aws-config"
-printf '%s' "${DEVELOPER_ENV}" > "${BUNDLE_DIR}/developer.env"
+printf '%s' "${DEVELOPER_ENV}" > "${BUNDLE_DIR}/user.env"
 
 echo ""
 echo "Onboarding bundle saved to: config/onboarding/${NEW_USERNAME}/"
@@ -391,7 +391,7 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
   ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/fre-claude:fre-claude")
 fi
 ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/aws-config:aws-config")
-ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/developer.env:developer.env")
+ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/user.env:user.env")
 
 python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
   --to "${USER_EMAIL}" \

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../config/defaults.env"
+source "${SCRIPT_DIR}/../config/admin.env"
 
 if [[ ! -f "${SCRIPT_DIR}/../config/backend.env" ]]; then
   echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2

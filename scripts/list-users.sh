@@ -8,11 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # Load config
 # ---------------------------------------------------------------------------
-if [[ ! -f "${SCRIPT_DIR}/../config/defaults.env" ]]; then
-  echo "ERROR: config/defaults.env not found." >&2
+if [[ ! -f "${SCRIPT_DIR}/../config/admin.env" ]]; then
+  echo "ERROR: config/admin.env not found." >&2
   exit 1
 fi
-source "${SCRIPT_DIR}/../config/defaults.env"
+source "${SCRIPT_DIR}/../config/admin.env"
 
 if [[ ! -f "${SCRIPT_DIR}/../config/backend.env" ]]; then
   echo "ERROR: config/backend.env not found. Run './admin.sh bootstrap' first." >&2

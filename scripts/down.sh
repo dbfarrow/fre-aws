@@ -4,14 +4,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/../config/defaults.env"
+CONFIG_FILE="${SCRIPT_DIR}/../config/admin.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
 TF_DIR="${SCRIPT_DIR}/../terraform"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo "ERROR: config/defaults.env not found." >&2
+  echo "ERROR: config/admin.env not found." >&2
   echo "       Copy the example and fill in your values:" >&2
-  echo "         cp config/defaults.env.example config/defaults.env" >&2
+  echo "         cp config/admin.env.example config/admin.env" >&2
   exit 1
 fi
 source "$CONFIG_FILE"
