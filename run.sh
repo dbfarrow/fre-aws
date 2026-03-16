@@ -40,12 +40,16 @@ user management:
   remove-user <user>    Remove a user (destroys instance on next up)
   update-user-key <user>
                         Replace a user's SSH public key
-  list                  List all users and their instance state
+  list [-v|--verbose]   List all users and their instance state
+                        -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
   bootstrap             One-time setup (S3, DynamoDB, KMS, SES verification)
   up                    Create / update all AWS infrastructure
   down                  Destroy all AWS infrastructure
+  repair-state [--dry-run] [user]
+                        Import resources that exist in AWS but are missing from
+                        Terraform state (fixes EntityAlreadyExists errors)
 
 instance lifecycle:
   start [user]          Start an EC2 instance (omit user to start all)
@@ -59,8 +63,10 @@ connection:
 authentication:
   sso-login             Log in via IAM Identity Center
   verify                Verify AWS credentials are active
+  verify-email <addr>   Pre-verify an SES recipient address (sandbox mode only)
 
 development:
+  build                 Build (or rebuild) the Docker image
   test                  Run BATS tests
   shell                 Interactive container shell for debugging
 EOF
@@ -192,20 +198,39 @@ fi
 if [[ "${MODE}" == "admin" ]]; then
   case "${COMMAND}" in
     list)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh "${@:2}"
       ;;
     sso-login)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
     verify)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/verify.sh
+      ;;
+    verify-email)
+      if [[ -z "${USERNAME}" ]]; then
+        echo "Usage: admin.sh verify-email <email-address>" >&2
+        exit 1
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
-        aws sts get-caller-identity --profile "${AWS_PROFILE}" --output table
+        aws ses verify-email-identity \
+          --email-address "${USERNAME}" \
+          --region "${AWS_REGION}" \
+          --profile "${AWS_PROFILE}"
+      echo "Verification email sent to ${USERNAME}. Click the link before running add-user."
+      ;;
+    repair-state)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/repair-state.sh "${@:2}"
       ;;
     bootstrap)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
       ;;
     up)
+      if [[ -n "${USERNAME}" ]]; then
+        echo "ERROR: 'up' provisions ALL users — it does not accept a username." >&2
+        echo "       To add one user: ./admin.sh add-user, then ./admin.sh up" >&2
+        exit 1
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/up.sh
       ;;
     down)
@@ -217,7 +242,12 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
       ;;
     add-user)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/add-user.sh
+      if [[ -n "${USERNAME}" ]]; then
+        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
+          /workspace/scripts/add-user.sh "/workspace/${USERNAME}"
+      else
+        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/add-user.sh
+      fi
       ;;
     remove-user)
       require_username
@@ -273,6 +303,7 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --volume "${HOME}/.ssh:/root/.ssh:ro" \
         --env "DEV_USERNAME=${USERNAME}" \
+        --env "AWS_PROFILE=${AWS_PROFILE}" \
         "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;
     refresh)
@@ -285,6 +316,7 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --volume "${HOME}/.ssh:/root/.ssh:ro" \
         --env "DEV_USERNAME=${USERNAME}" \
+        --env "AWS_PROFILE=${AWS_PROFILE}" \
         "${IMAGE_NAME}" /workspace/scripts/refresh.sh
       ;;
     ssm)
@@ -292,6 +324,9 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/ssm.sh
+      ;;
+    build)
+      docker build -t "${IMAGE_NAME}" "$(dirname "$0")"
       ;;
     test)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" bats /workspace/tests/bats/
@@ -322,8 +357,7 @@ if [[ "${MODE}" == "user" ]]; then
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
     verify)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
-        aws sts get-caller-identity --profile "${AWS_PROFILE}" --output table
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/verify.sh
       ;;
     start)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/start.sh
