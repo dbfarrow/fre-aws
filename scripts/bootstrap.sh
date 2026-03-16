@@ -22,9 +22,9 @@ source "$CONFIG_FILE"
 
 BUCKET_NAME="${PROJECT_NAME}-tfstate"
 DYNAMODB_TABLE="${PROJECT_NAME}-tflock"
-KMS_ALIAS="alias/${PROJECT_NAME}/terraform-state"
 
 AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
+STATE_REGION="${AWS_REGION}"   # tracks state-backend region; may diverge from AWS_REGION
 
 echo "=== fre-aws bootstrap ==="
 echo "  Project:  ${PROJECT_NAME}"
@@ -50,28 +50,8 @@ echo "  Account ID: ${ACCOUNT_ID}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# KMS key for state encryption
-# ---------------------------------------------------------------------------
-echo "Creating KMS key..."
-if $AWS kms describe-key --key-id "${KMS_ALIAS}" &>/dev/null; then
-  echo "  KMS key already exists, skipping."
-  KMS_KEY_ID=$($AWS kms describe-key --key-id "${KMS_ALIAS}" --output json | jq -r '.KeyMetadata.KeyId')
-else
-  KMS_KEY_ID=$($AWS kms create-key \
-    --description "${PROJECT_NAME} Terraform state encryption" \
-    --output json | jq -r '.KeyMetadata.KeyId')
-  $AWS kms create-alias \
-    --alias-name "${KMS_ALIAS}" \
-    --target-key-id "${KMS_KEY_ID}"
-  $AWS kms enable-key-rotation --key-id "${KMS_KEY_ID}"
-  echo "  Created KMS key: ${KMS_KEY_ID}"
-fi
-KMS_KEY_ARN=$($AWS kms describe-key --key-id "${KMS_KEY_ID}" --output json | jq -r '.KeyMetadata.Arn')
-echo "  KMS key ARN: ${KMS_KEY_ARN}"
-echo ""
-
-# ---------------------------------------------------------------------------
-# S3 bucket for Terraform state
+# S3 bucket — detect or create
+# Must run before KMS so STATE_REGION is correct before key creation.
 # ---------------------------------------------------------------------------
 echo "Creating S3 state bucket: ${BUCKET_NAME}..."
 if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
@@ -86,40 +66,42 @@ if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
   if [[ "${BUCKET_REGION}" == "None" || -z "${BUCKET_REGION}" ]]; then
     BUCKET_REGION="us-east-1"
   fi
-  if [[ "${BUCKET_REGION}" != "${AWS_REGION}" ]]; then
-    echo "  WARNING: Bucket is in ${BUCKET_REGION}, not ${AWS_REGION}."
-    echo "           Switching to ${BUCKET_REGION} for all state backend resources."
-    AWS_REGION="${BUCKET_REGION}"
-    AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
+  if [[ "${BUCKET_REGION}" != "${STATE_REGION}" ]]; then
+    echo "  WARNING: Bucket is in ${BUCKET_REGION}, not ${STATE_REGION}."
+    echo "           Switching STATE_REGION to ${BUCKET_REGION} for state backend resources."
+    STATE_REGION="${BUCKET_REGION}"
+    AWS="aws --region ${STATE_REGION} --profile ${AWS_PROFILE}"
   fi
 else
-  if [[ "${AWS_REGION}" == "us-east-1" ]]; then
+  if [[ "${STATE_REGION}" == "us-east-1" ]]; then
     $AWS s3api create-bucket --bucket "${BUCKET_NAME}"
   else
     $AWS s3api create-bucket --bucket "${BUCKET_NAME}" \
-      --create-bucket-configuration LocationConstraint="${AWS_REGION}"
+      --create-bucket-configuration LocationConstraint="${STATE_REGION}"
   fi
   echo "  Bucket created."
 fi
 
+
+# ---------------------------------------------------------------------------
+# S3 bucket — configure versioning, encryption, access block
+# ---------------------------------------------------------------------------
 # Versioning
 $AWS s3api put-bucket-versioning \
   --bucket "${BUCKET_NAME}" \
   --versioning-configuration Status=Enabled
 echo "  Versioning enabled."
 
-# Encryption
+# Encryption (SSE-S3, AWS-managed key — no customer KMS required)
 $AWS s3api put-bucket-encryption \
   --bucket "${BUCKET_NAME}" \
-  --server-side-encryption-configuration "{
-    \"Rules\": [{
-      \"ApplyServerSideEncryptionByDefault\": {
-        \"SSEAlgorithm\": \"aws:kms\",
-        \"KMSMasterKeyID\": \"${KMS_KEY_ARN}\"
-      },
-      \"BucketKeyEnabled\": true
+  --server-side-encryption-configuration '{
+    "Rules": [{
+      "ApplyServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+      }
     }]
-  }"
+  }'
 echo "  Encryption enabled."
 
 # Block all public access
@@ -142,7 +124,6 @@ else
     --attribute-definitions AttributeName=LockID,AttributeType=S \
     --key-schema AttributeName=LockID,KeyType=HASH \
     --billing-mode PAY_PER_REQUEST \
-    --sse-specification Enabled=true,SSEType=KMS,KMSMasterKeyId="${KMS_KEY_ARN}" \
     --output json > /dev/null
   echo "  Table created."
   echo "  Waiting for table to become active..."
@@ -268,7 +249,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       "Effect": "Allow",
       "Action": ["ec2:StartInstances", "ec2:StopInstances"],
       "Resource": "*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${aws:username}"}}
+      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${sts:RoleSessionName}"}}
     },
     {
       "Effect": "Allow",
@@ -279,12 +260,12 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       "Effect": "Allow",
       "Action": "ssm:StartSession",
       "Resource": "*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${aws:username}"}}
+      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${sts:RoleSessionName}"}}
     },
     {
       "Effect": "Allow",
       "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
-      "Resource": "arn:aws:ssm:*:*:session/${aws:username}-*"
+      "Resource": "arn:aws:ssm:*:*:session/${sts:RoleSessionName}-*"
     }
   ]
 }
@@ -333,7 +314,7 @@ POLICY
         "iam:DeletePolicy", "iam:DeletePolicyVersion",
         "iam:GetPolicy", "iam:GetPolicyVersion",
         "iam:ListPolicyVersions", "iam:TagPolicy",
-        "iam:GetRolePolicy"
+        "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy"
       ],
       "Resource": "*"
     }
@@ -348,11 +329,92 @@ POLICY
     echo "  'ProjectAdminAccess': IAM policy applied."
     rm -f "${POLICY_FILE}"
 
+    # -------------------------------------------------------------------------
+    # Provision both permission sets to the account.
+    # Without this step the role never appears in the account and SSO logins
+    # fail with "No access" even after a user assignment is created.
+    # -------------------------------------------------------------------------
+    _provision_ps() {
+      local ps_name="$1" ps_arn="$2"
+      echo "  Provisioning '${ps_name}' to account ${ACCOUNT_ID}..."
+
+      local provision_out provision_err
+      provision_out=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        sso-admin provision-permission-set \
+        --instance-arn "${SSO_INSTANCE_ARN}" \
+        --permission-set-arn "${ps_arn}" \
+        --target-id "${ACCOUNT_ID}" \
+        --target-type AWS_ACCOUNT \
+        --output json 2>&1) || true
+
+      local request_id
+      request_id=$(echo "${provision_out}" | jq -r '.PermissionSetProvisioningStatus.RequestId // empty' 2>/dev/null || echo "")
+      if [[ -z "${request_id}" ]]; then
+        echo "    WARNING: Could not start provisioning." >&2
+        echo "    Response: ${provision_out}" >&2
+        return
+      fi
+
+      local status result_json reason=""
+      for _ in $(seq 1 20); do
+        result_json=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          sso-admin describe-permission-set-provisioning-status \
+          --instance-arn "${SSO_INSTANCE_ARN}" \
+          --provision-permission-set-request-id "${request_id}" \
+          --output json 2>/dev/null || echo "{}")
+        status=$(echo "${result_json}" | jq -r '.PermissionSetProvisioningStatus.Status // empty')
+        [[ "${status}" == "SUCCEEDED" ]] && { echo "    OK."; return; }
+        if [[ "${status}" == "FAILED" ]]; then
+          reason=$(echo "${result_json}" | jq -r '.PermissionSetProvisioningStatus.FailureReason // "no reason provided"')
+          echo "    FAILED: ${reason}" >&2
+          return
+        fi
+        sleep 3
+      done
+      echo "    WARNING: Timed out waiting for provisioning (last status: ${status:-unknown})." >&2
+    }
+
     echo ""
-    echo "  Assign permission sets in IAM Identity Center → AWS accounts:"
-    echo "    Admins:      ProjectAdminAccess"
-    echo "    Developers:  DeveloperAccess"
-    echo "  Then update sso_role_name in ~/.aws/config to match."
+    _provision_ps "DeveloperAccess"    "${DEV_PS_ARN}"
+    _provision_ps "ProjectAdminAccess" "${ADMIN_PS_ARN}"
+
+    # -------------------------------------------------------------------------
+    # Assign ProjectAdminAccess to the admin user identified by OWNER_EMAIL.
+    # -------------------------------------------------------------------------
+    IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin list-instances \
+      --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
+
+    echo ""
+    if [[ -n "${OWNER_EMAIL:-}" && -n "${IDENTITY_STORE_ID}" && "${IDENTITY_STORE_ID}" != "None" ]]; then
+      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        identitystore list-users \
+        --identity-store-id "${IDENTITY_STORE_ID}" \
+        --filters "AttributePath=Emails.Value,AttributeValue=${OWNER_EMAIL}" \
+        --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
+
+      if [[ -n "${ADMIN_USER_ID}" && "${ADMIN_USER_ID}" != "None" ]]; then
+        aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          sso-admin create-account-assignment \
+          --instance-arn "${SSO_INSTANCE_ARN}" \
+          --target-id "${ACCOUNT_ID}" \
+          --target-type AWS_ACCOUNT \
+          --permission-set-arn "${ADMIN_PS_ARN}" \
+          --principal-type USER \
+          --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
+          && echo "  Assigned ProjectAdminAccess to ${OWNER_EMAIL}." \
+          || echo "  ProjectAdminAccess already assigned to ${OWNER_EMAIL}."
+        echo "  Update sso_role_name=ProjectAdminAccess in ~/.aws/config, then re-run sso-login."
+      else
+        echo "  Could not find Identity Center user with email '${OWNER_EMAIL}'."
+        echo "  Assign ProjectAdminAccess manually: IAM Identity Center → AWS accounts."
+      fi
+    else
+      echo "  Assign permission sets in IAM Identity Center → AWS accounts:"
+      echo "    Admins:      ProjectAdminAccess"
+      echo "    Developers:  DeveloperAccess"
+      echo "  Then update sso_role_name in ~/.aws/config to match."
+    fi
     echo ""
   fi
 else
@@ -369,7 +431,7 @@ cat > "${BACKEND_CONFIG_FILE}" <<EOF
 # Auto-generated by bootstrap.sh — do not edit manually.
 TF_BACKEND_BUCKET=${BUCKET_NAME}
 TF_BACKEND_KEY=${PROJECT_NAME}/terraform.tfstate
-TF_BACKEND_REGION=${AWS_REGION}
+TF_BACKEND_REGION=${STATE_REGION}
 TF_BACKEND_DYNAMODB_TABLE=${DYNAMODB_TABLE}
 TF_BACKEND_ACCOUNT_ID=${ACCOUNT_ID}
 EOF
