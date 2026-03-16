@@ -5,6 +5,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Preserve any caller-provided AWS_PROFILE (admin.sh passes its admin profile via --env)
+_CALLER_PROFILE="${AWS_PROFILE:-}"
+
 # Load config: user.env takes precedence (user path); fall back to admin.env (admin path)
 if [[ -f "${SCRIPT_DIR}/../config/user.env" ]]; then
   source "${SCRIPT_DIR}/../config/user.env"
@@ -15,6 +18,9 @@ else
   exit 1
 fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
+
+# Caller-provided profile wins (admin.sh refresh must use admin credentials, not user.env's profile)
+[[ -n "${_CALLER_PROFILE}" ]] && AWS_PROFILE="${_CALLER_PROFILE}"
 
 : "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
 
