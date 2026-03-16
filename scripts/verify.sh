@@ -13,8 +13,9 @@ fi
 
 : "${AWS_PROFILE:?AWS_PROFILE not set}"
 
-IDENTITY=$(aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json 2>/dev/null) || {
+IDENTITY=$(aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json 2>&1) || {
   echo "ERROR: Could not retrieve identity for profile '${AWS_PROFILE}'." >&2
+  echo "       AWS error: ${IDENTITY}" >&2
   echo "       Run './admin.sh sso-login' (or './user.sh sso-login') to authenticate." >&2
   exit 1
 }

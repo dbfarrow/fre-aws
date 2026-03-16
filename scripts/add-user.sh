@@ -355,16 +355,53 @@ for OTHER_PS_NAME in "DeveloperAccess" "ProjectAdminAccess"; do
   fi
 done
 
-# Assign the target permission set
-aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+# Assign the target permission set and wait for the async provisioning to complete
+ASSIGN_OUT=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
   sso-admin create-account-assignment \
   --instance-arn "${SSO_INSTANCE_ARN}" \
   --target-id "${TF_BACKEND_ACCOUNT_ID}" \
   --target-type AWS_ACCOUNT \
   --permission-set-arn "${PS_ARN}" \
   --principal-type USER \
-  --principal-id "${SSO_USER_ID}" >/dev/null
-echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+  --principal-id "${SSO_USER_ID}" \
+  --output json 2>&1) || {
+  echo "ERROR: create-account-assignment failed: ${ASSIGN_OUT}" >&2
+  exit 1
+}
+
+ASSIGN_REQUEST_ID=$(echo "${ASSIGN_OUT}" | jq -r '.AccountAssignmentCreationStatus.RequestId // empty')
+ASSIGN_INITIAL_STATUS=$(echo "${ASSIGN_OUT}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
+
+if [[ "${ASSIGN_INITIAL_STATUS}" == "SUCCEEDED" ]]; then
+  echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+elif [[ -z "${ASSIGN_REQUEST_ID}" ]]; then
+  echo "  WARNING: Could not determine assignment RequestId. Check IAM Identity Center console." >&2
+else
+  echo "  Waiting for '${PS_NAME}' assignment to provision..."
+  ASSIGN_STATUS=""
+  for _ in $(seq 1 20); do
+    ASSIGN_RESULT=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin describe-account-assignment-creation-status \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --account-assignment-creation-request-id "${ASSIGN_REQUEST_ID}" \
+      --output json 2>/dev/null || echo "{}")
+    ASSIGN_STATUS=$(echo "${ASSIGN_RESULT}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
+    [[ "${ASSIGN_STATUS}" == "SUCCEEDED" ]] && break
+    if [[ "${ASSIGN_STATUS}" == "FAILED" ]]; then
+      ASSIGN_REASON=$(echo "${ASSIGN_RESULT}" | jq -r '.AccountAssignmentCreationStatus.FailureReason // "no reason provided"')
+      echo "ERROR: Account assignment FAILED: ${ASSIGN_REASON}" >&2
+      exit 1
+    fi
+    sleep 3
+  done
+  if [[ "${ASSIGN_STATUS}" == "SUCCEEDED" ]]; then
+    echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+  else
+    echo "ERROR: Timed out waiting for account assignment (last status: ${ASSIGN_STATUS:-unknown})." >&2
+    echo "       Check IAM Identity Center → AWS accounts in the console." >&2
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Generate user.env
