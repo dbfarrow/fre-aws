@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     bats \
     openssh-client \
+    python3-minimal \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

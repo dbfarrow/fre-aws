@@ -2,21 +2,22 @@
 # admin.sh — Admin tool for managing the fre-aws Claude Code environment.
 #
 # Usage:
-#   ./admin.sh list                      - List all users and their instance state
-#   ./admin.sh add-user                  - Interactive wizard to add a user
-#   ./admin.sh remove-user <username>    - Remove a user (destroys instance on next up)
-#   ./admin.sh sso-login                 - Log in via IAM Identity Center
-#   ./admin.sh verify                    - Verify AWS credentials are working
-#   ./admin.sh bootstrap                 - One-time setup (S3, DynamoDB, KMS)
-#   ./admin.sh up                        - Create / update AWS infrastructure
-#   ./admin.sh down                      - Destroy AWS infrastructure
-#   ./admin.sh start   [username]        - Start a user's EC2 instance (omit username to start all)
-#   ./admin.sh stop    [username]        - Stop a user's EC2 instance (omit username to stop all)
-#   ./admin.sh connect <username>        - Open a shell on a user's EC2 instance
-#   ./admin.sh refresh <username>        - Push updated session_start.sh to a running instance
-#   ./admin.sh ssm     <username>        - Direct SSM shell (fallback when SSH isn't working)
-#   ./admin.sh test                      - Run BATS tests
-#   ./admin.sh shell                     - Interactive shell inside the container (for debugging)
+#   ./admin.sh list                         - List all users and their instance state
+#   ./admin.sh add-user                     - Interactive wizard to add a user
+#   ./admin.sh remove-user <username>       - Remove a user (destroys instance on next up)
+#   ./admin.sh update-user-key <username>   - Replace a user's SSH public key in the registry
+#   ./admin.sh sso-login                    - Log in via IAM Identity Center
+#   ./admin.sh verify                       - Verify AWS credentials are working
+#   ./admin.sh bootstrap                    - One-time setup (S3, DynamoDB, KMS, SES)
+#   ./admin.sh up                           - Create / update AWS infrastructure
+#   ./admin.sh down                         - Destroy AWS infrastructure
+#   ./admin.sh start   [username]           - Start a user's EC2 instance (omit username to start all)
+#   ./admin.sh stop    [username]           - Stop a user's EC2 instance (omit username to stop all)
+#   ./admin.sh connect <username>           - Open a shell on a user's EC2 instance
+#   ./admin.sh refresh <username>           - Push updated session_start.sh to a running instance
+#   ./admin.sh ssm     <username>           - Direct SSM shell (fallback when SSH isn't working)
+#   ./admin.sh test                         - Run BATS tests
+#   ./admin.sh shell                        - Interactive shell inside the container (for debugging)
 set -euo pipefail
 
 IMAGE_NAME="fre-aws"
@@ -24,7 +25,7 @@ COMMAND="${1:-}"
 USERNAME="${2:-}"
 
 if [[ -z "${COMMAND}" ]]; then
-  echo "Usage: $0 {list|add-user|remove-user|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+  echo "Usage: $0 {list|add-user|remove-user|update-user-key|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
   exit 1
 fi
 
@@ -53,9 +54,12 @@ DOCKER_ARGS=(
   "--interactive"
   "--tty"
   "--env" "AWS_PAGER="
+  # Pass optional email / SSO settings from admin config into the container
+  "--env" "SENDER_EMAIL=${SENDER_EMAIL:-}"
+  "--env" "SSO_START_URL=${SSO_START_URL:-}"
   # Mount AWS credentials (read-write: CLI writes SSO token cache)
   "--volume" "${HOME}/.aws:/root/.aws"
-  # Mount config (read-write so bootstrap.sh can write backend.env)
+  # Mount config (read-write so bootstrap.sh can write backend.env and onboarding bundles)
   "--volume" "$(pwd)/config:/workspace/config"
   # Mount terraform dir (for state cache and .terraform/)
   "--volume" "$(pwd)/terraform:/workspace/terraform"
@@ -68,6 +72,8 @@ DOCKER_ARGS=(
 DOCKER_ARGS_QUIET=(
   "--rm"
   "--env" "AWS_PAGER="
+  "--env" "SENDER_EMAIL=${SENDER_EMAIL:-}"
+  "--env" "SSO_START_URL=${SSO_START_URL:-}"
   "--volume" "${HOME}/.aws:/root/.aws"
   "--volume" "$(pwd)/config:/workspace/config"
   "--volume" "$(pwd)/terraform:/workspace/terraform"
@@ -121,6 +127,12 @@ case "${COMMAND}" in
     docker run "${DOCKER_ARGS[@]}" \
       --env "DEV_USERNAME=${USERNAME}" \
       "${IMAGE_NAME}" /workspace/scripts/remove-user.sh
+    ;;
+  update-user-key)
+    require_username
+    docker run "${DOCKER_ARGS[@]}" \
+      --env "DEV_USERNAME=${USERNAME}" \
+      "${IMAGE_NAME}" /workspace/scripts/update-user-key.sh
     ;;
   start)
     if [[ -n "${USERNAME}" ]]; then
@@ -198,7 +210,7 @@ case "${COMMAND}" in
     ;;
   *)
     echo "Unknown command: ${COMMAND}" >&2
-    echo "Usage: $0 {list|add-user|remove-user|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
+    echo "Usage: $0 {list|add-user|remove-user|update-user-key|sso-login|verify|bootstrap|up|down|start|stop|connect|refresh|ssm|test|shell}" >&2
     exit 1
     ;;
 esac

@@ -164,6 +164,34 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# SES sender verification (only if SENDER_EMAIL is configured)
+# ---------------------------------------------------------------------------
+if [[ -n "${SENDER_EMAIL:-}" ]]; then
+  echo "Verifying SES sender: ${SENDER_EMAIL}..."
+  SES_STATUS=$(aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    ses get-identity-verification-attributes \
+    --identities "${SENDER_EMAIL}" \
+    --query "VerificationAttributes.\"${SENDER_EMAIL}\".VerificationStatus" \
+    --output text 2>/dev/null || echo "")
+
+  if [[ "${SES_STATUS}" == "Success" ]]; then
+    echo "  Already verified."
+  else
+    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      ses verify-email-identity \
+      --email-address "${SENDER_EMAIL}" >/dev/null
+    echo "  Verification email sent to ${SENDER_EMAIL}."
+    echo "  Click the link in that email before running add-user."
+  fi
+  echo ""
+else
+  echo "SENDER_EMAIL not set — skipping SES sender verification."
+  echo "  To enable automated onboarding emails, add SENDER_EMAIL=you@example.com"
+  echo "  to config/defaults.env, then re-run bootstrap."
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
 # IAM Identity Center permission sets (only if SSO_REGION is configured)
 # Creates DeveloperAccess and ProjectAdminAccess permission sets idempotently.
 # ---------------------------------------------------------------------------

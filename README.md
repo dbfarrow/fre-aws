@@ -13,6 +13,7 @@ A Docker-packaged toolset for provisioning and managing EC2-based development en
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
   - [Upgrading from Option B to Option A](#upgrading-from-option-b-to-option-a)
+  - [Email Setup (AWS SES)](#email-setup-aws-ses)
 - [Local Configuration](#local-configuration)
 - [Cost Considerations](#cost-considerations)
   - [What is Free Tier eligible](#what-is-free-tier-eligible)
@@ -231,6 +232,22 @@ No changes to Terraform or scripts needed — only the credential source changes
 
 ---
 
+### Email Setup (AWS SES)
+
+`add-user` delivers SSH keys and AWS configs to new developers via email. To enable it:
+
+1. Add `SENDER_EMAIL=you@example.com` and `SSO_START_URL=https://d-...awsapps.com/start` to `config/defaults.env`
+2. Run `./admin.sh bootstrap` — it triggers the SES verification email automatically
+3. Click the link in the verification email from AWS
+
+**SES sandbox**: New AWS accounts can only send to verified addresses. To send to any developer:
+- AWS Console → SES → Account dashboard → **Request production access**
+- Takes 24–48 hours; required before onboarding external developers
+
+> If `SENDER_EMAIL` is not set, `add-user` still completes but skips the email step. Credentials are saved to `config/onboarding/<username>/` and the admin must forward the files manually.
+
+---
+
 ## Local Configuration
 
 `config/defaults.env` is your personal admin settings file — **gitignored**, never committed.
@@ -289,13 +306,17 @@ Controlled by `NETWORK_MODE` in `config/defaults.env`. Applies to all user insta
 4.  Create SSH key + add public key to GitHub               ← see SSH Key Setup above
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/defaults.env.example config/defaults.env      ← create your admin config
-7.  Edit config/defaults.env                                ← set AWS_REGION, PROJECT_NAME, SSO_REGION, etc.
+7.  Edit config/defaults.env                                ← set AWS_REGION, PROJECT_NAME, SSO_REGION,
+                                                            ←   SSO_START_URL, SENDER_EMAIL, etc.
 8.  ./admin.sh verify                                       ← confirm AWS credentials work
-9.  ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS, permission sets
+9.  ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS, permission sets,
+                                                            ←   and triggers SES email verification
 10. (Option A) reassign yourself to ProjectAdminAccess      ← IAM Identity Center → AWS accounts
                                                             ← update sso_role_name in ~/.aws/config
                                                             ← re-run ./admin.sh sso-login
-11. ./admin.sh add-user                                     ← interactive prompt, adds first user
+11. ./admin.sh add-user                                     ← interactive prompt, adds first user,
+                                                            ←   creates IAM Identity Center user,
+                                                            ←   and emails credentials
 12. ./admin.sh up                                           ← provisions all AWS infrastructure
 13. ./admin.sh connect <username>                           ← test that it works
 ```
@@ -308,13 +329,32 @@ User configuration is stored in S3 (`<project>-tfstate/<project>/users.json`) an
 
 ### Adding a user
 
-1. Get their SSH public key (`~/.ssh/fre-claude.pub` from their Mac)
-2. Run the interactive wizard:
-   ```bash
-   ./admin.sh add-user
-   ```
-   It will prompt for username, SSH public key, git name, and git email.
-3. Run `./admin.sh up` — provisions a new EC2 instance for them
+Run the interactive wizard:
+```bash
+./admin.sh add-user
+```
+It prompts for: username, full name, email, role (developer/admin), SSH key (generate or provide), git name, and git email.
+
+The wizard automatically:
+- Creates an IAM Identity Center user and assigns the appropriate permission set
+- Generates (or accepts) an SSH key pair for EC2 access
+- Generates `developer.env` and `~/.aws/config` files ready for the developer to use
+- Saves an onboarding bundle to `config/onboarding/<username>/`
+- Emails credentials to the developer via SES (if `SENDER_EMAIL` is set)
+
+After `add-user`, run `./admin.sh up` to provision their EC2 instance.
+
+**Prerequisites**: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` must all be set in `config/defaults.env` before running `add-user`. See [Email Setup (AWS SES)](#email-setup-aws-ses) above.
+
+### Updating a user's SSH key
+
+If a developer wants to use their own SSH key after initial onboarding:
+
+```bash
+./admin.sh update-user-key <username>
+```
+
+You'll be prompted to paste their new public key. Then run `./admin.sh up` to push it to their EC2 instance.
 
 ### Removing a user
 
@@ -337,51 +377,56 @@ No down/up needed. Changes take effect on their next connect.
 ### Admin commands
 
 ```bash
-./admin.sh add-user             # interactive wizard: add a user to the registry
-./admin.sh remove-user <name>   # remove a user (destroys instance on next up)
-./admin.sh list                 # list all users and their instance state
-./admin.sh start   <username>   # start a stopped instance
-./admin.sh stop    <username>   # stop a running instance
-./admin.sh connect <username>   # SSH into an instance (admin access)
-./admin.sh refresh <username>   # push updated session_start.sh
-./admin.sh ssm     <username>   # direct SSM shell (fallback when SSH isn't working)
-./admin.sh up                   # apply Terraform changes (add/remove users, config updates)
-./admin.sh down                 # destroy all infrastructure
-./admin.sh sso-login            # re-authenticate (SSO sessions expire after ~8-12 hours)
+./admin.sh add-user                     # interactive wizard: add a user, create IAM user, email credentials
+./admin.sh remove-user <name>           # remove a user (destroys instance on next up)
+./admin.sh update-user-key <username>   # replace a user's SSH public key in the registry
+./admin.sh list                         # list all users and their instance state
+./admin.sh start   <username>           # start a stopped instance
+./admin.sh stop    <username>           # stop a running instance
+./admin.sh connect <username>           # SSH into an instance (admin access)
+./admin.sh refresh <username>           # push updated session_start.sh
+./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
+./admin.sh up                           # apply Terraform changes (add/remove users, config updates)
+./admin.sh down                         # destroy all infrastructure
+./admin.sh sso-login                    # re-authenticate (SSO sessions expire after ~8-12 hours)
 ```
 
 ---
 
 ## Developer Onboarding
 
-When a new developer is ready to use their environment:
+When a new developer is ready to use their environment, the entire flow is automated via `./admin.sh add-user`.
 
-1. **Get their SSH public key** — they run `cat ~/.ssh/fre-claude.pub` and send it to you
+**Prerequisites** (one-time admin setup):
+1. Set `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` in `config/defaults.env`
+2. Run `./admin.sh bootstrap` — triggers SES email verification
+3. Click the verification link in the email from AWS
 
-2. **Add them to the registry**:
+**Onboarding a developer:**
+
+1. **Run the wizard**:
    ```bash
    ./admin.sh add-user
    ```
+   The wizard prompts for username, full name, email, role, and SSH key preference. It then:
+   - Creates their IAM Identity Center user and assigns the `DeveloperAccess` permission set
+   - Optionally generates an SSH key pair (ed25519, no passphrase) for EC2 access
+   - Generates a ready-to-use `~/.aws/config` and `developer.env`
+   - Saves everything to `config/onboarding/<username>/`
+   - Emails credentials to the developer
 
-3. **Provision their instance**:
+2. **Provision their instance**:
    ```bash
    ./admin.sh up
    ```
 
-4. **Create an IAM Identity Center user** for them:
-   - IAM Identity Center → Users → Add user
-   - Under **AWS accounts**, assign them to your account with the `DeveloperAccess` permission set
-   - ⚠️ Adding to the directory is not enough — the account-level assignment is a separate step
-   - Both `DeveloperAccess` and `ProjectAdminAccess` are created automatically by `./admin.sh bootstrap`
+The developer receives an email with their SSH key (if generated), AWS config, and developer.env, plus step-by-step setup instructions. They follow the instructions, run `./dev.sh sso-login`, then `./dev.sh connect`.
 
-5. **Send them**:
-   - A link to **`README-developer.md`** in this repo
-   - The SSO Start URL (IAM Identity Center → Dashboard → AWS access portal URL)
-   - Their IAM Identity Center username
-   - Their `MY_USERNAME` (what you entered in `add-user`)
-   - The `AWS_REGION` and `PROJECT_NAME` from your `config/defaults.env`
-
-That's it. The developer README walks them through everything from there.
+**Key swap**: If a developer later wants to use their own SSH key instead of the generated one:
+```bash
+./admin.sh update-user-key <username>
+./admin.sh up
+```
 
 ---
 

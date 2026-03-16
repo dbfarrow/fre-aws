@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # add-user.sh — Interactive wizard to add a user to the fre-aws environment.
-# Prompts for username, SSH public key, git name, and git email.
-# Validates input, checks for duplicates, then writes to the S3 user registry.
+# Collects username, full name, email, role, SSH key, git name, and git email.
+# Creates an IAM Identity Center user, generates developer credentials, saves an
+# onboarding bundle to config/onboarding/<username>/, and emails it via SES.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,12 +26,20 @@ source "${SCRIPT_DIR}/../config/backend.env"
 source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${AWS_REGION:?AWS_REGION must be set in config/defaults.env}"
+
+# ---------------------------------------------------------------------------
+# Prerequisite checks — fail fast with clear messages
+# ---------------------------------------------------------------------------
+: "${SSO_REGION:?SSO_REGION must be set in config/defaults.env (IAM Identity Center region)}"
+: "${SSO_START_URL:?SSO_START_URL must be set in config/defaults.env (IAM Identity Center portal URL)}"
+: "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/defaults.env (verified SES sender address)}"
 
 echo "=== Add User ==="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Prompt for username
+# Prompt: username
 # ---------------------------------------------------------------------------
 while true; do
   read -r -p "Username (letters, numbers, dots, hyphens, underscores): " NEW_USERNAME
@@ -46,77 +55,332 @@ while true; do
 done
 
 # ---------------------------------------------------------------------------
-# Prompt for SSH public key
+# Prompt: full name
 # ---------------------------------------------------------------------------
 while true; do
-  read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
-  if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
-    echo "  SSH public key cannot be empty." >&2
-    continue
-  fi
-  if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
-    echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
-  fi
-  break
-done
-
-# ---------------------------------------------------------------------------
-# Prompt for git name
-# ---------------------------------------------------------------------------
-while true; do
-  read -r -p "Git user name (e.g. Alice Smith): " GIT_USER_NAME
-  if [[ -z "${GIT_USER_NAME}" ]]; then
-    echo "  Git user name cannot be empty." >&2
+  read -r -p "Full name (e.g. Alice Smith): " FULL_NAME
+  if [[ -z "${FULL_NAME}" ]]; then
+    echo "  Full name cannot be empty." >&2
     continue
   fi
   break
 done
 
 # ---------------------------------------------------------------------------
-# Prompt for git email
+# Prompt: email address
 # ---------------------------------------------------------------------------
 while true; do
-  read -r -p "Git user email (e.g. alice@example.com): " GIT_USER_EMAIL
-  if [[ -z "${GIT_USER_EMAIL}" ]]; then
-    echo "  Git user email cannot be empty." >&2
+  read -r -p "Email address: " USER_EMAIL
+  if [[ -z "${USER_EMAIL}" ]]; then
+    echo "  Email cannot be empty." >&2
     continue
   fi
   break
 done
+
+# ---------------------------------------------------------------------------
+# Prompt: role
+# ---------------------------------------------------------------------------
+echo ""
+echo "Role:"
+echo "  1) developer  (DeveloperAccess — scoped to own instance)  [default]"
+echo "  2) admin      (ProjectAdminAccess — full project access)"
+read -r -p "Select role [1]: " ROLE_CHOICE
+ROLE_CHOICE="${ROLE_CHOICE:-1}"
+
+case "${ROLE_CHOICE}" in
+  1|developer) ROLE="developer"; PS_NAME="DeveloperAccess" ;;
+  2|admin)     ROLE="admin";     PS_NAME="ProjectAdminAccess" ;;
+  *)
+    echo "  Invalid choice. Defaulting to developer." >&2
+    ROLE="developer"; PS_NAME="DeveloperAccess"
+    ;;
+esac
+echo "  Role: ${ROLE}"
+echo ""
+
+# ---------------------------------------------------------------------------
+# SSH key: generate or supply
+# Admins must supply their own key. Developers can choose.
+# ---------------------------------------------------------------------------
+SSH_PRIVATE_KEY_FILE=""
+
+if [[ "${ROLE}" == "admin" ]]; then
+  echo "Admins must supply their own SSH public key (no private key generated or stored)."
+  while true; do
+    read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
+    if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
+      echo "  SSH public key cannot be empty." >&2
+      continue
+    fi
+    if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
+      echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
+    fi
+    break
+  done
+else
+  echo "SSH key:"
+  echo "  1) Generate automatically (recommended)  [default]"
+  echo "  2) Provide my own public key"
+  read -r -p "Select option [1]: " KEY_CHOICE
+  KEY_CHOICE="${KEY_CHOICE:-1}"
+
+  case "${KEY_CHOICE}" in
+    1|generate)
+      PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
+      rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
+      ssh-keygen -t ed25519 -N "" \
+        -f "${PRIV_KEY_PATH}" \
+        -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
+      SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
+      SSH_PRIVATE_KEY_FILE="${PRIV_KEY_PATH}"
+      echo "  Generated: ${PRIV_KEY_PATH}"
+      ;;
+    2|own)
+      while true; do
+        read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
+        if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
+          echo "  SSH public key cannot be empty." >&2
+          continue
+        fi
+        if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
+          echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
+        fi
+        break
+      done
+      ;;
+    *)
+      echo "  Invalid choice. Defaulting to generate." >&2
+      PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
+      rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
+      ssh-keygen -t ed25519 -N "" \
+        -f "${PRIV_KEY_PATH}" \
+        -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
+      SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
+      SSH_PRIVATE_KEY_FILE="${PRIV_KEY_PATH}"
+      echo "  Generated: ${PRIV_KEY_PATH}"
+      ;;
+  esac
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# Prompt: git name (default: full name)
+# ---------------------------------------------------------------------------
+read -r -p "Git user name [${FULL_NAME}]: " GIT_USER_NAME
+GIT_USER_NAME="${GIT_USER_NAME:-${FULL_NAME}}"
+
+# ---------------------------------------------------------------------------
+# Prompt: git email (default: email address)
+# ---------------------------------------------------------------------------
+read -r -p "Git user email [${USER_EMAIL}]: " GIT_USER_EMAIL
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-${USER_EMAIL}}"
 
 echo ""
 echo "Adding user '${NEW_USERNAME}'..."
 
 # ---------------------------------------------------------------------------
-# Download current registry
+# Download current registry and check for duplicate
 # ---------------------------------------------------------------------------
 USERS_JSON=$(mktemp)
-trap 'rm -f "${USERS_JSON}"' EXIT
+trap 'rm -f "${USERS_JSON}" "${USERS_JSON}.tmp"' EXIT
 
 users_s3_download "${USERS_JSON}"
 
-# ---------------------------------------------------------------------------
-# Check for duplicate
-# ---------------------------------------------------------------------------
 if jq -e --arg user "${NEW_USERNAME}" '.[$user] != null' "${USERS_JSON}" >/dev/null 2>&1; then
   echo "ERROR: User '${NEW_USERNAME}' already exists in the registry." >&2
   exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# Add entry and upload
+# IAM Identity Center: create user and account assignment
+# ---------------------------------------------------------------------------
+echo ""
+echo "Creating IAM Identity Center user..."
+
+SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  sso-admin list-instances \
+  --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
+
+if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
+  echo "ERROR: No IAM Identity Center instance found in region ${SSO_REGION}." >&2
+  echo "       Verify SSO_REGION in config/defaults.env and re-run." >&2
+  exit 1
+fi
+
+IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  sso-admin list-instances \
+  --query 'Instances[0].IdentityStoreId' --output text)
+
+# Derive GivenName / FamilyName from FULL_NAME (first word = given, rest = family)
+GIVEN_NAME="${FULL_NAME%% *}"
+FAMILY_NAME="${FULL_NAME#* }"
+if [[ "${FAMILY_NAME}" == "${FULL_NAME}" ]]; then
+  FAMILY_NAME=""
+fi
+
+# Check if user already exists in identity store
+EXISTING_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  identitystore list-users \
+  --identity-store-id "${IDENTITY_STORE_ID}" \
+  --filters "AttributePath=UserName,AttributeValue=${NEW_USERNAME}" \
+  --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
+
+if [[ -n "${EXISTING_USER_ID}" && "${EXISTING_USER_ID}" != "None" ]]; then
+  echo "  IAM Identity Center user '${NEW_USERNAME}' already exists (id: ${EXISTING_USER_ID})."
+  SSO_USER_ID="${EXISTING_USER_ID}"
+else
+  EMAILS_JSON="[{\"Value\": \"${USER_EMAIL}\", \"Type\": \"work\", \"Primary\": true}]"
+  NAME_JSON="{\"GivenName\": \"${GIVEN_NAME}\", \"FamilyName\": \"${FAMILY_NAME}\", \"Formatted\": \"${FULL_NAME}\"}"
+
+  SSO_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    identitystore create-user \
+    --identity-store-id "${IDENTITY_STORE_ID}" \
+    --user-name "${NEW_USERNAME}" \
+    --name "${NAME_JSON}" \
+    --emails "${EMAILS_JSON}" \
+    --query 'UserId' --output text)
+  echo "  Created IAM Identity Center user: ${NEW_USERNAME} (id: ${SSO_USER_ID})"
+fi
+
+# Find permission set ARN
+_find_ps_arn() {
+  local target="$1"
+  local found=""
+  while IFS= read -r arn; do
+    [[ -z "${arn}" ]] && continue
+    local name
+    name=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      sso-admin describe-permission-set \
+      --instance-arn "${SSO_INSTANCE_ARN}" \
+      --permission-set-arn "${arn}" \
+      --query 'PermissionSet.Name' --output text 2>/dev/null || echo "")
+    if [[ "${name}" == "${target}" ]]; then
+      found="${arn}"
+      break
+    fi
+  done < <(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-permission-sets \
+    --instance-arn "${SSO_INSTANCE_ARN}" \
+    --max-results 100 \
+    --query 'PermissionSets[]' --output text 2>/dev/null | tr '\t' '\n')
+  echo "${found}"
+}
+
+PS_ARN=$(_find_ps_arn "${PS_NAME}")
+if [[ -z "${PS_ARN}" ]]; then
+  echo "ERROR: Permission set '${PS_NAME}' not found." >&2
+  echo "       Run './admin.sh bootstrap' to create it." >&2
+  exit 1
+fi
+
+# Create account assignment
+aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  sso-admin create-account-assignment \
+  --instance-arn "${SSO_INSTANCE_ARN}" \
+  --target-id "${TF_BACKEND_ACCOUNT_ID}" \
+  --target-type AWS_ACCOUNT \
+  --permission-set-arn "${PS_ARN}" \
+  --principal-type USER \
+  --principal-id "${SSO_USER_ID}" >/dev/null
+echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+
+# ---------------------------------------------------------------------------
+# Generate developer.env
+# ---------------------------------------------------------------------------
+AWS_PROFILE_FOR_DEV="claude-code"
+DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
+AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
+AWS_REGION=${AWS_REGION}
+"
+
+# ---------------------------------------------------------------------------
+# Generate aws-config
+# ---------------------------------------------------------------------------
+SSO_ROLE_NAME="${PS_NAME}"
+AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
+sso_session = fre-aws-sso
+sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
+sso_role_name = ${SSO_ROLE_NAME}
+region = ${AWS_REGION}
+
+[sso-session fre-aws-sso]
+sso_start_url = ${SSO_START_URL}
+sso_region = ${SSO_REGION}
+sso_registration_scopes = sso:account:access
+"
+
+# ---------------------------------------------------------------------------
+# Save onboarding bundle to config/onboarding/<username>/
+# ---------------------------------------------------------------------------
+BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${NEW_USERNAME}"
+mkdir -p "${BUNDLE_DIR}"
+
+if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
+  cp "${SSH_PRIVATE_KEY_FILE}" "${BUNDLE_DIR}/fre-claude"
+  chmod 600 "${BUNDLE_DIR}/fre-claude"
+fi
+
+printf '%s' "${AWS_CONFIG}" > "${BUNDLE_DIR}/aws-config"
+printf '%s' "${DEVELOPER_ENV}" > "${BUNDLE_DIR}/developer.env"
+
+echo ""
+echo "Onboarding bundle saved to: config/onboarding/${NEW_USERNAME}/"
+
+# ---------------------------------------------------------------------------
+# Update S3 registry
 # ---------------------------------------------------------------------------
 jq \
-  --arg user  "${NEW_USERNAME}" \
-  --arg key   "${SSH_PUBLIC_KEY}" \
-  --arg name  "${GIT_USER_NAME}" \
-  --arg email "${GIT_USER_EMAIL}" \
-  '.[$user] = {ssh_public_key: $key, git_user_name: $name, git_user_email: $email}' \
+  --arg user   "${NEW_USERNAME}" \
+  --arg key    "${SSH_PUBLIC_KEY}" \
+  --arg name   "${GIT_USER_NAME}" \
+  --arg email  "${GIT_USER_EMAIL}" \
+  --arg role   "${ROLE}" \
+  --arg uemail "${USER_EMAIL}" \
+  '.[$user] = {
+    ssh_public_key: $key,
+    git_user_name:  $name,
+    git_user_email: $email,
+    role:           $role,
+    user_email:     $uemail
+  }' \
   "${USERS_JSON}" > "${USERS_JSON}.tmp"
 mv "${USERS_JSON}.tmp" "${USERS_JSON}"
 
 users_s3_upload "${USERS_JSON}"
+echo "User '${NEW_USERNAME}' added to S3 registry."
 
-echo "User '${NEW_USERNAME}' added to registry."
+# ---------------------------------------------------------------------------
+# Send onboarding email via SES
+# ---------------------------------------------------------------------------
 echo ""
-echo "Next step: run './admin.sh up' to provision their EC2 instance."
+echo "Sending onboarding email to ${USER_EMAIL}..."
+
+ATTACHMENT_ARGS=()
+if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
+  ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/fre-claude:fre-claude")
+fi
+ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/aws-config:aws-config")
+ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/developer.env:developer.env")
+
+python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
+  --to "${USER_EMAIL}" \
+  --from "${SENDER_EMAIL}" \
+  --username "${NEW_USERNAME}" \
+  --project "${PROJECT_NAME}" \
+  --role "${ROLE}" \
+  --aws-profile "${AWS_PROFILE_FOR_DEV}" \
+  --aws-region "${AWS_REGION}" \
+  --aws-cli-profile "${AWS_PROFILE}" \
+  --ses-region "${AWS_REGION}" \
+  "${ATTACHMENT_ARGS[@]}"
+
+echo ""
+echo "=== Done ==="
+echo ""
+echo "  IAM Identity Center user: ${NEW_USERNAME}"
+echo "  Permission set:           ${PS_NAME}"
+echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
+echo "  Email sent to:            ${USER_EMAIL}"
+echo ""
+echo "Next: run './admin.sh up' to provision their EC2 instance."
