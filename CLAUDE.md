@@ -10,6 +10,10 @@ This project creates and maintains an AWS environment using Infrastructure as Co
 - `git`
 - AWS credentials via IAM Identity Center (SSO) — **no long-lived access keys**
 
+## Development Workflow
+
+Always use plan mode before writing any code. Use `EnterPlanMode` to explore the codebase, understand the existing patterns, and design an approach before making any changes. Get user approval on the plan before implementing.
+
 ## Core Principles
 
 ### Zero Trust Architecture
