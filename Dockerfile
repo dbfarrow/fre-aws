@@ -23,6 +23,7 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
+    zip \
     jq \
     git \
     ca-certificates \
