@@ -62,6 +62,10 @@ Responsibilities:
 
 ---
 
+> **Claude Code account required per user.** Each person using an instance needs their own [Claude Code account](https://claude.ai/code). Account creation is a per-user step that cannot be automated — each user must set it up themselves before their first session.
+
+---
+
 ## Security model
 
 | Control | Status | Notes |
@@ -73,5 +77,5 @@ Responsibilities:
 | IMDSv2 enforced | ✅ | Prevents SSRF-based credential theft |
 | Storage encrypted at rest | ✅ | KMS-backed EBS and S3 |
 | No public IP on EC2 | ⚠️ Optional | Default (`public` mode) assigns a public IP; `private_nat` removes it |
-| Short-lived AWS credentials | ⚠️ IAM Identity Center only | IAM user access keys are long-lived; mitigate with MFA and key rotation |
+| Short-lived AWS credentials | ⚠️ Depends on auth method | **Option A (IAM Identity Center):** credentials auto-expire every 8–12 hours — fully satisfied. **Option B (IAM user access keys):** keys are permanent until manually rotated and don't auto-expire — weaker posture; mitigate with MFA and regular rotation. See [Credential Setup](README-admin.md#credential-setup). |
 | CloudTrail / VPC Flow Logs | ❌ Deferred | Not enabled by default (cost); recommended before production use |

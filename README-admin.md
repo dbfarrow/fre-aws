@@ -44,6 +44,10 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
+### Per user (cannot be automated)
+
+Each person using an instance needs their own [Claude Code account](https://claude.ai/code). This is not something the admin can provision — each user must create their own account before their first session. Let users know they should sign up before their onboarding email arrives.
+
 ---
 
 ## SSH Key Setup
@@ -335,7 +339,10 @@ Admin users receive a two-profile `~/.aws/config` (`claude-code` for admin opera
 ./admin.sh update-user-key <username>
 ```
 
-Paste their new public key when prompted, then run `./admin.sh up` to push it to their instance.
+Two modes:
+
+- **Auto-generate (default)** — creates a fresh ed25519 key pair, stores the passphrase in Secrets Manager, pushes the new public key directly to the running instance via SSM, and generates a new installer bundle. A new pre-signed URL is printed — send it to the user so they can re-run the installer. **No `./admin.sh up` required.**
+- **Provide a public key** — accepts a key the user supplies (e.g. they manage their own key). Updates the registry and pushes to the running instance via SSM.
 
 ### Removing a user
 

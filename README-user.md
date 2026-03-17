@@ -12,6 +12,7 @@ Your AWS development environment is already set up — your admin has provisione
 |-------------|-------|
 | **Mac** | These instructions are Mac-specific |
 | **Container runtime** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — install one if you haven't already |
+| **Claude Code account** | Create your account at [claude.ai/code](https://claude.ai/code) before your first session — your admin cannot do this for you |
 | **Onboarding email** | Sent by your admin — contains a one-time installer download link |
 
 > **No `git` required.** The installer handles everything.
@@ -168,8 +169,8 @@ Your instance may be stopped. Run `~/fre-aws/user.sh start`, wait about 30 secon
 **`ForbiddenException: No access` after SSO login**
 The browser login succeeded but your AWS user hasn't been granted access to the account — this is an admin-side setup step. Contact your admin and ask them to verify you're assigned the `DeveloperAccess` permission set in IAM Identity Center.
 
-**`ERROR: SSH key not found at ~/fre-aws/.ssh/fre-claude`**
-The installer places this file automatically. Re-run the installer from Step 3, or copy it manually from the bundle.
+**`ERROR: No SSH key found`**
+The installer normally places your SSH key at `~/fre-aws/.ssh/fre-claude`. If it's missing, re-run the installer from Step 3. If the link has expired, ask your admin to run `./admin.sh publish-installer <your-username>` to generate a fresh one. If re-running the installer doesn't help, ask your admin to run `./admin.sh update-user-key <your-username>` to generate a new key and send a new installer link.
 
 **`kex_exchange_identification: Connection closed by remote host`**
 The SSH tunnel through SSM failed. Most common causes:
@@ -188,3 +189,5 @@ Your files live on an EBS volume that persists even when the instance is stopped
 ## That's it
 
 Once you're connected, Claude Code is ready. Type `claude` at any time to start a session, or it will launch automatically when you select a project from the menu.
+
+> **First time only:** Claude Code will prompt you to log in with your Claude account the first time you run it. Make sure you've created your [Claude Code account](https://claude.ai/code) before connecting.
