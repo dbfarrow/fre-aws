@@ -7,6 +7,14 @@ dnf update -y
 dnf install -y git tmux vim htop openssh-server
 
 # ---------------------------------------------------------------------------
+# GitHub CLI (gh) — used for authenticated repo browsing and cloning
+# ---------------------------------------------------------------------------
+dnf install -y 'dnf-command(config-manager)'
+dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+dnf install -y gh
+gh --version || true
+
+# ---------------------------------------------------------------------------
 # Node.js (required by Claude Code CLI)
 # ---------------------------------------------------------------------------
 dnf install -y nodejs npm

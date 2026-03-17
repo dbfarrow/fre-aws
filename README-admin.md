@@ -46,7 +46,14 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 
 ### Per user (cannot be automated)
 
-Each person using an instance needs their own [Claude Code account](https://claude.ai/code). This is not something the admin can provision — each user must create their own account before their first session. Let users know they should sign up before their onboarding email arrives.
+Each person using an instance needs to set up two accounts before their first session — neither can be provisioned by the admin:
+
+| Account | Why | Where |
+|---------|-----|--------|
+| **Claude Code** | Required to use Claude Code on their instance | [claude.ai/code](https://claude.ai/code) |
+| **GitHub** | Required to clone and push to private repos | [github.com](https://github.com) |
+
+Let users know to sign up for both before their onboarding email arrives. The session launcher handles GitHub authentication via a browser code flow on first use — no SSH key setup required, just an account.
 
 ---
 

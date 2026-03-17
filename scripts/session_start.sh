@@ -1,8 +1,8 @@
 #!/bin/bash
 # session_start.sh — Interactive Claude Code session launcher.
 # Runs automatically on SSH login. Offers locally-cloned repos, cloning a
-# new GitHub repo (via SSH agent forwarding), creating a new local project,
-# or a plain shell.
+# new GitHub repo (via gh CLI / OAuth — no SSH key in GitHub required),
+# creating a new local project, or a plain shell.
 #
 # To update this script on a running instance without down/up:
 #   ./run.sh refresh
@@ -58,25 +58,69 @@ if [[ "${CHOICE}" == "${SHELL_OPT}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Clone a GitHub repo via SSH (uses forwarded agent — no token needed)
+# Clone a GitHub repo via gh CLI (OAuth token — no SSH key in GitHub required)
 # ---------------------------------------------------------------------------
 if [[ "${CHOICE}" == "${CLONE_OPT}" ]]; then
   echo ""
-  read -r -p "GitHub repo (owner/repo): " REPO_SLUG
+
+  # Ensure gh is authenticated
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "GitHub authentication required."
+    echo "You'll be shown a one-time code — open the URL in your browser and enter it."
+    echo ""
+    gh auth login
+    echo ""
+  fi
+
+  # Fetch repo list for a numbered menu
+  echo "Fetching your GitHub repos..."
+  REPO_LIST=$(gh repo list --limit 50 --json nameWithOwner --jq '.[].nameWithOwner' 2>/dev/null || true)
+
+  REPO_SLUG=""
+  if [[ -z "${REPO_LIST}" ]]; then
+    # Fallback: manual entry
+    read -r -p "GitHub repo (owner/repo): " REPO_SLUG
+  else
+    REPO_OPTIONS=()
+    RIDX=1
+    echo ""
+    while IFS= read -r repo; do
+      printf "  %2d) %s\n" "${RIDX}" "${repo}"
+      REPO_OPTIONS+=("${repo}")
+      (( RIDX++ ))
+    done <<< "${REPO_LIST}"
+    printf "  %2d) Enter manually\n" "${RIDX}"
+    MANUAL_OPT=${RIDX}
+    echo ""
+    read -r -p "Choose repo [1]: " REPO_CHOICE
+    REPO_CHOICE="${REPO_CHOICE:-1}"
+
+    if [[ "${REPO_CHOICE}" == "${MANUAL_OPT}" ]]; then
+      read -r -p "GitHub repo (owner/repo): " REPO_SLUG
+    elif [[ "${REPO_CHOICE}" =~ ^[0-9]+$ ]] && (( REPO_CHOICE >= 1 && REPO_CHOICE < MANUAL_OPT )); then
+      REPO_SLUG="${REPO_OPTIONS[$((REPO_CHOICE-1))]}"
+    else
+      echo "Invalid choice. Dropping into shell."
+      cd "${HOME}"
+      exec bash
+    fi
+  fi
+
   if [[ -z "${REPO_SLUG}" ]]; then
     echo "No repo entered. Dropping into shell."
     cd "${HOME}"
     exec bash
   fi
+
   REPO_NAME=$(basename "${REPO_SLUG%.git}")
   LOCAL_DIR="${REPOS_DIR}/${REPO_NAME}"
   if [[ -d "${LOCAL_DIR}" ]]; then
     echo "  ${REPO_NAME} already exists locally — opening it."
   else
     echo "Cloning ${REPO_SLUG}..."
-    git clone "git@github.com:${REPO_SLUG}.git" "${LOCAL_DIR}" || {
+    gh repo clone "${REPO_SLUG}" "${LOCAL_DIR}" -- --quiet || {
       echo ""
-      echo "Clone failed. Check the repo name and that your SSH key is added to GitHub."
+      echo "Clone failed. Check that the repo name is correct and you have access."
       echo "Dropping into shell."
       cd "${HOME}"
       exec bash

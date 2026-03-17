@@ -13,7 +13,7 @@ Your AWS development environment is already set up — your admin has provisione
 | **Mac** | These instructions are Mac-specific |
 | **Container runtime** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — install one if you haven't already |
 | **Claude Code account** | Create your account at [claude.ai/code](https://claude.ai/code) before your first session — your admin cannot do this for you |
-| **GitHub account** | Needed to clone and push to private repos — create one at [github.com](https://github.com) if you don't have one. Your admin cannot do this for you. |
+| **GitHub account** | Needed to clone and push to private repos — create one at [github.com](https://github.com) if you don't have one. Your admin cannot do this for you. No SSH key setup required — authentication uses a browser-based code flow. |
 | **Onboarding email** | Sent by your admin — contains a one-time installer download link |
 
 > **No `git` required.** The installer handles everything.
@@ -67,10 +67,6 @@ The installer will:
 - Copy everything into `~/fre-aws/`
 - Install your SSH key at `~/fre-aws/.ssh/fre-claude`
 - Install your AWS config at `~/fre-aws/.aws/config` (kept separate from `~/.aws` — your other AWS profiles are untouched)
-
-> **Add your SSH key to GitHub** so git push/pull works from your instance:
-> 1. Copy your public key: `ssh-keygen -y -f ~/fre-aws/.ssh/fre-claude | pbcopy`
-> 2. In GitHub: **Settings → SSH and GPG keys → New SSH key** → paste it
 
 > **Link expired?** Contact your admin and ask them to run `./admin.sh publish-installer <your-username>` to generate a new one.
 
@@ -134,13 +130,13 @@ Enter choice [1]:
 Each time you connect, you'll see a menu:
 
 - **Locally-cloned repos** — any repos in `~/repos` appear at the top; select one to launch Claude Code in that project
-- **Clone a GitHub repo** — prompts for owner/repo (e.g. `mycompany/my-project`), clones via SSH
+- **Clone a GitHub repo** — authenticates with GitHub if needed (browser code flow, one-time per instance), then shows a numbered list of your repos to choose from; clone the selected repo with one keypress
 - **Create a new project** — prompts for a name, creates a new empty directory in `~/repos`
 - **Open a shell** — drops you into bash without launching Claude Code
 
 ### Cloning private repos
 
-When you choose "Clone a GitHub repo", your local SSH key is forwarded to the EC2 instance. As long as the key installed in Step 3 is added to your GitHub account, cloning private repos works automatically — no setup needed on the instance.
+When you choose "Clone a GitHub repo", you'll be prompted to authenticate with GitHub the first time using a browser-based code flow — the same kind of flow used for AWS SSO and Claude login. Your OAuth token is stored on your instance, so subsequent sessions skip the prompt. Private repos you have access to appear in the numbered list automatically.
 
 ---
 
@@ -181,6 +177,9 @@ The SSH tunnel through SSM failed. Most common causes:
 
 **Instance feels slow or unresponsive**
 Some workloads (browser automation, large builds) need more RAM than the default instance. Let your admin know — they can resize it.
+
+**"Clone failed" when trying to clone a GitHub repo**
+Your GitHub authentication may have expired or the repo name may be wrong. From a shell on the instance, run `gh auth status` to check. If not authenticated, run `gh auth login` to re-authenticate.
 
 **Lost your work**
 Your files live on an EBS volume that persists even when the instance is stopped. They're only deleted if your admin explicitly destroys the environment. Check `~/repos` after connecting.
