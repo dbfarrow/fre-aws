@@ -321,6 +321,15 @@ POLICY
         "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "SSOAccountAssignment",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetSAMLProvider",
+        "iam:ListSAMLProviders"
+      ],
+      "Resource": "*"
     }
   ]
 }
