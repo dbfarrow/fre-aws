@@ -270,6 +270,11 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       "Effect": "Allow",
       "Action": "s3:GetObject",
       "Resource": "arn:aws:s3:::${BUCKET_NAME}/${PROJECT_NAME}/installers/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:*:*:secret:${PROJECT_NAME}/*/ssh-key-passphrase-*"
     }
   ]
 }

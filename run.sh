@@ -169,6 +169,19 @@ if [[ "${MODE}" == "admin" ]]; then
       exit 1
     fi
   }
+
+  # Detect the admin's SSH key: SSH_KEY_FILE from admin.env → id_ed25519 → id_rsa
+  _detect_admin_ssh_key() {
+    local key=""
+    if [[ -n "${SSH_KEY_FILE:-}" ]]; then
+      [[ "${SSH_KEY_FILE}" == /* ]] && key="${SSH_KEY_FILE}" || key="${HOME}/.ssh/${SSH_KEY_FILE}"
+    elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+      key="${HOME}/.ssh/id_ed25519"
+    elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+      key="${HOME}/.ssh/id_rsa"
+    fi
+    echo "${key}"
+  }
 fi
 
 # ---------------------------------------------------------------------------
@@ -333,30 +346,36 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     connect)
       require_username
-      FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
-      if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
-        echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
-        echo "       Create it with:" >&2
-        echo "         ssh-keygen -t ed25519 -f ~/.ssh/fre-claude -C 'fre-claude'" >&2
+      HOST_SSH_KEY=$(_detect_admin_ssh_key)
+      if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+        echo "ERROR: No SSH key found." >&2
+        echo "       Create one: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+        echo "       Or set SSH_KEY_FILE in config/admin.env" >&2
         exit 1
       fi
+      CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
       docker run "${DOCKER_ARGS[@]}" \
         --volume "${HOME}/.ssh:/root/.ssh:ro" \
         --env "DEV_USERNAME=${USERNAME}" \
         --env "AWS_PROFILE=claude-code-dev" \
+        --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
         "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;
     refresh)
       require_username
-      FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
-      if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
-        echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
+      HOST_SSH_KEY=$(_detect_admin_ssh_key)
+      if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+        echo "ERROR: No SSH key found." >&2
+        echo "       Create one: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+        echo "       Or set SSH_KEY_FILE in config/admin.env" >&2
         exit 1
       fi
+      CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
       docker run "${DOCKER_ARGS[@]}" \
         --volume "${HOME}/.ssh:/root/.ssh:ro" \
         --env "DEV_USERNAME=${USERNAME}" \
         --env "AWS_PROFILE=${AWS_PROFILE}" \
+        --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
         "${IMAGE_NAME}" /workspace/scripts/refresh.sh
       ;;
     ssm)
@@ -418,15 +437,19 @@ if [[ "${MODE}" == "user" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
       ;;
     connect)
-      FRE_CLAUDE_KEY="${HOME}/.ssh/fre-claude"
-      if [[ ! -f "${FRE_CLAUDE_KEY}" ]]; then
-        echo "ERROR: SSH key not found at ~/.ssh/fre-claude" >&2
-        echo "       Follow the SSH Key Setup section in README-user.md" >&2
+      USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
+      if [[ ! -f "${USER_SSH_DIR}/fre-claude" ]]; then
+        echo "ERROR: SSH key not found at ${USER_SSH_DIR}/fre-claude" >&2
+        echo "       Re-run the installer to restore your SSH key." >&2
         exit 1
       fi
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-      CONNECT_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
-      [[ -n "${GIT_USER_NAME:-}" ]]  && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
+      CONNECT_ARGS+=(
+        "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
+        "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
+        "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
+      )
+      [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;

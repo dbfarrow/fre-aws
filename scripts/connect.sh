@@ -74,17 +74,53 @@ echo "Connecting to ${INSTANCE_ID} (${DEV_USERNAME}) via SSH over SSM..."
 echo "(Your SSH key will be forwarded — GitHub push/pull works without storing keys on the instance.)"
 echo ""
 
-# Start a fresh ssh-agent inside the container and load the fre-claude key.
+# SSH key file — passed via SSH_KEY_FILE env var from run.sh
+SSH_KEY_FILE="${SSH_KEY_FILE:-/root/.ssh/fre-claude}"
+if [[ ! -f "${SSH_KEY_FILE}" ]]; then
+  echo "ERROR: SSH key not found: ${SSH_KEY_FILE}" >&2
+  exit 1
+fi
+
+# Start a fresh ssh-agent inside the container and load the key.
 # This gives proper agent forwarding to the EC2 instance via -A without
 # relying on Docker Desktop's unreliable host agent socket bridging.
 eval "$(ssh-agent -s)" > /dev/null
-ssh-add /root/.ssh/fre-claude
+
+# Load key: silent via Secrets Manager (user mode) or interactive prompt (admin mode)
+if [[ -n "${SSH_KEY_PASSPHRASE_SECRET:-}" ]]; then
+  # User mode: retrieve passphrase from Secrets Manager, load key non-interactively
+  PASSPHRASE=$(aws secretsmanager get-secret-value \
+    --secret-id "${SSH_KEY_PASSPHRASE_SECRET}" \
+    --query 'SecretString' --output text \
+    --profile "${AWS_PROFILE}" --region "${AWS_REGION}" 2>/dev/null) || {
+    echo "ERROR: Could not retrieve SSH key passphrase from Secrets Manager." >&2
+    echo "       Secret: ${SSH_KEY_PASSPHRASE_SECRET}" >&2
+    echo "       Ensure your AWS credentials are active (run 'user.sh sso-login')." >&2
+    exit 1
+  }
+  # Write a temporary askpass helper that prints the passphrase non-interactively
+  ASKPASS_SCRIPT=$(mktemp)
+  chmod 700 "${ASKPASS_SCRIPT}"
+  printf '#!/bin/sh\nprintf "%%s" "${_SSH_PASSPHRASE}"\n' > "${ASKPASS_SCRIPT}"
+  trap 'rm -f "${ASKPASS_SCRIPT}"' EXIT
+  _SSH_PASSPHRASE="${PASSPHRASE}" \
+    SSH_ASKPASS="${ASKPASS_SCRIPT}" \
+    SSH_ASKPASS_REQUIRE=force \
+    ssh-add "${SSH_KEY_FILE}" >/dev/null 2>&1 || {
+    echo "ERROR: Failed to add SSH key. The passphrase stored in Secrets Manager may not match the key." >&2
+    exit 1
+  }
+  unset PASSPHRASE _SSH_PASSPHRASE
+else
+  # Admin mode: interactive passphrase prompt (or no passphrase if key has none)
+  ssh-add "${SSH_KEY_FILE}"
+fi
 
 # Build the SSH options array
 SSH_OPTS=(
-  "-A"                                # Forward the container's agent to EC2
-  "-i" "/root/.ssh/fre-claude"        # Explicit key — SSH won't auto-discover non-default names
-  "-o" "StrictHostKeyChecking=no"     # Instance ID changes on recreate
+  "-A"                              # Forward the container's agent to EC2
+  "-i" "${SSH_KEY_FILE}"            # Explicit key — SSH won't auto-discover non-default names
+  "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"
   # Tunnel SSH through SSM — no inbound port 22 needed in security group
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"

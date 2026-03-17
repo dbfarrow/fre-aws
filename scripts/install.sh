@@ -7,8 +7,8 @@
 #   1. Checks Docker is installed
 #   2. Warns if ~/fre-aws/ already exists, prompts to overwrite
 #   3. Copies user.sh, Dockerfile, scripts/, config/ into ~/fre-aws/
-#   4. Copies credentials/fre-claude → ~/.ssh/fre-claude (chmod 600) if present
-#   5. Backs up and replaces ~/.aws/config with credentials/aws-config
+#   4. Copies credentials/fre-claude → ~/fre-aws/.ssh/fre-claude (chmod 600) if present
+#   5. Copies credentials/aws-config → ~/fre-aws/.aws/config
 set -euo pipefail
 
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,14 +76,14 @@ echo "  Files copied to ${INSTALL_DIR}/"
 if [[ -f "${BUNDLE_DIR}/credentials/fre-claude" ]]; then
   echo ""
   echo "Installing SSH key..."
-  mkdir -p "${HOME}/.ssh"
-  chmod 700 "${HOME}/.ssh"
-  cp "${BUNDLE_DIR}/credentials/fre-claude" "${HOME}/.ssh/fre-claude"
-  chmod 600 "${HOME}/.ssh/fre-claude"
-  echo "  SSH key installed: ~/.ssh/fre-claude"
+  mkdir -p "${INSTALL_DIR}/.ssh"
+  chmod 700 "${INSTALL_DIR}/.ssh"
+  cp "${BUNDLE_DIR}/credentials/fre-claude" "${INSTALL_DIR}/.ssh/fre-claude"
+  chmod 600 "${INSTALL_DIR}/.ssh/fre-claude"
+  echo "  SSH key installed: ~/fre-aws/.ssh/fre-claude"
   echo ""
   echo "  Add this key to your GitHub account so git push/pull works from your instance:"
-  echo "    1. Copy the public key: ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy"
+  echo "    1. Copy the public key: ssh-keygen -y -f ~/fre-aws/.ssh/fre-claude | pbcopy"
   echo "    2. GitHub: Settings → SSH and GPG keys → New SSH key → paste it"
 fi
 

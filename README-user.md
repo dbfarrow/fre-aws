@@ -63,11 +63,11 @@ bash /tmp/fre-setup/install.sh
 
 The installer will:
 - Copy everything into `~/fre-aws/`
-- Install your SSH key at `~/.ssh/fre-claude`
+- Install your SSH key at `~/fre-aws/.ssh/fre-claude`
 - Install your AWS config at `~/fre-aws/.aws/config` (kept separate from `~/.aws` — your other AWS profiles are untouched)
 
 > **Add your SSH key to GitHub** so git push/pull works from your instance:
-> 1. Copy your public key: `ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy`
+> 1. Copy your public key: `ssh-keygen -y -f ~/fre-aws/.ssh/fre-claude | pbcopy`
 > 2. In GitHub: **Settings → SSH and GPG keys → New SSH key** → paste it
 
 > **Link expired?** Contact your admin and ask them to run `./admin.sh publish-installer <your-username>` to generate a new one.
@@ -94,7 +94,7 @@ Once your admin confirms your instance is ready:
 ~/fre-aws/user.sh connect
 ```
 
-You'll be prompted for your SSH key passphrase — enter it once and you're in.
+Your SSH key passphrase is handled automatically — no prompt needed.
 
 **You should see a session launcher like this:**
 
@@ -168,7 +168,7 @@ Your instance may be stopped. Run `~/fre-aws/user.sh start`, wait about 30 secon
 **`ForbiddenException: No access` after SSO login**
 The browser login succeeded but your AWS user hasn't been granted access to the account — this is an admin-side setup step. Contact your admin and ask them to verify you're assigned the `DeveloperAccess` permission set in IAM Identity Center.
 
-**`ERROR: SSH key not found at ~/.ssh/fre-claude`**
+**`ERROR: SSH key not found at ~/fre-aws/.ssh/fre-claude`**
 The installer places this file automatically. Re-run the installer from Step 3, or copy it manually from the bundle.
 
 **`kex_exchange_identification: Connection closed by remote host`**

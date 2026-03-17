@@ -138,5 +138,24 @@ else
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Delete SSH key passphrase from Secrets Manager (if it exists)
+# ---------------------------------------------------------------------------
+if [[ -n "${AWS_REGION:-}" ]]; then
+  echo ""
+  echo "Cleaning up Secrets Manager..."
+  SECRET_ID="${PROJECT_NAME}/${DEV_USERNAME}/ssh-key-passphrase"
+  if aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      secretsmanager describe-secret --secret-id "${SECRET_ID}" >/dev/null 2>&1; then
+    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      secretsmanager delete-secret \
+      --secret-id "${SECRET_ID}" \
+      --force-delete-without-recovery >/dev/null
+    echo "  Deleted SSH key passphrase: ${SECRET_ID}"
+  else
+    echo "  No SSH key passphrase secret found (skipping)."
+  fi
+fi
+
 echo ""
 echo "Run './admin.sh up' to destroy their EC2 instance and EBS volume."

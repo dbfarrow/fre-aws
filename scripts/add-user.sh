@@ -141,15 +141,17 @@ echo ""
 # SSH key
 # ---------------------------------------------------------------------------
 SSH_PRIVATE_KEY_FILE=""
+SSH_KEY_PASSPHRASE=""
 
 if [[ -n "${SSH_PUBLIC_KEY:-}" ]]; then
   echo "SSH public key provided."
   echo ""
 elif [[ -n "${USER_FILE}" ]]; then
-  # File mode, no key supplied — auto-generate
+  # File mode, no key supplied — auto-generate with passphrase
   PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
   rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
-  ssh-keygen -t ed25519 -N "" \
+  SSH_KEY_PASSPHRASE=$(openssl rand -base64 24)
+  ssh-keygen -t ed25519 -N "${SSH_KEY_PASSPHRASE}" \
     -f "${PRIV_KEY_PATH}" \
     -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
   SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
@@ -179,7 +181,8 @@ else
     1|generate|*)
       PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
       rm -f "${PRIV_KEY_PATH}" "${PRIV_KEY_PATH}.pub"
-      ssh-keygen -t ed25519 -N "" \
+      SSH_KEY_PASSPHRASE=$(openssl rand -base64 24)
+      ssh-keygen -t ed25519 -N "${SSH_KEY_PASSPHRASE}" \
         -f "${PRIV_KEY_PATH}" \
         -C "${NEW_USERNAME}@${PROJECT_NAME}" >/dev/null
       SSH_PUBLIC_KEY=$(cat "${PRIV_KEY_PATH}.pub")
@@ -527,6 +530,31 @@ echo ""
 echo "Building installer bundle..."
 INSTALLER_URL=$(_create_installer_bundle "${NEW_USERNAME}" "${BUNDLE_DIR}")
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${NEW_USERNAME}/latest.zip"
+
+# ---------------------------------------------------------------------------
+# Store SSH key passphrase in Secrets Manager (if a key was auto-generated)
+# ---------------------------------------------------------------------------
+if [[ -n "${SSH_PRIVATE_KEY_FILE}" && -n "${SSH_KEY_PASSPHRASE}" ]]; then
+  echo ""
+  echo "Storing SSH key passphrase in Secrets Manager..."
+  SECRET_ID="${PROJECT_NAME}/${NEW_USERNAME}/ssh-key-passphrase"
+  if aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      secretsmanager describe-secret --secret-id "${SECRET_ID}" >/dev/null 2>&1; then
+    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      secretsmanager put-secret-value \
+      --secret-id "${SECRET_ID}" \
+      --secret-string "${SSH_KEY_PASSPHRASE}" >/dev/null
+    echo "  Updated existing secret: ${SECRET_ID}"
+  else
+    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      secretsmanager create-secret \
+      --name "${SECRET_ID}" \
+      --description "SSH key passphrase for ${NEW_USERNAME} (${PROJECT_NAME})" \
+      --secret-string "${SSH_KEY_PASSPHRASE}" >/dev/null
+    echo "  Created secret: ${SECRET_ID}"
+  fi
+  unset SSH_KEY_PASSPHRASE
+fi
 
 # ---------------------------------------------------------------------------
 # Send onboarding email via SES
