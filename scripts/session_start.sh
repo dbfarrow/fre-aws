@@ -63,12 +63,12 @@ fi
 if [[ "${CHOICE}" == "${CLONE_OPT}" ]]; then
   echo ""
 
-  # Ensure gh is authenticated
+  # Ensure gh is authenticated (HTTPS protocol — no SSH key required)
   if ! gh auth status >/dev/null 2>&1; then
     echo "GitHub authentication required."
     echo "You'll be shown a one-time code — open the URL in your browser and enter it."
     echo ""
-    gh auth login
+    gh auth login --git-protocol https
     echo ""
   fi
 
