@@ -72,9 +72,9 @@ if [[ "${CHOICE}" == "${CLONE_OPT}" ]]; then
     echo ""
   fi
 
-  # Fetch repo list for a numbered menu
+  # Fetch repo list for a numbered menu — includes owned, collaborated, and org repos
   echo "Fetching your GitHub repos..."
-  REPO_LIST=$(gh repo list --limit 50 --json nameWithOwner --jq '.[].nameWithOwner' 2>/dev/null || true)
+  REPO_LIST=$(gh api 'user/repos?per_page=100&sort=updated' --jq '.[].full_name' 2>/dev/null || true)
 
   REPO_SLUG=""
   if [[ -z "${REPO_LIST}" ]]; then
