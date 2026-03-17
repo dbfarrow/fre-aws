@@ -40,7 +40,8 @@ user management:
   remove-user <user>    Remove a user (destroys instance on next up)
   update-user-key <user>
                         Replace a user's SSH public key
-  list [-v|--verbose]   List all users and their instance state
+  stat                  Show environment config, cost profile, and user/instance summary
+  list [-v|--verbose]   List users and their instance state
                         -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
@@ -197,6 +198,9 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${MODE}" == "admin" ]]; then
   case "${COMMAND}" in
+    stat)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stat.sh
+      ;;
     list)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh "${@:2}"
       ;;
