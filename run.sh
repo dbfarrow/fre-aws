@@ -303,7 +303,7 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --volume "${HOME}/.ssh:/root/.ssh:ro" \
         --env "DEV_USERNAME=${USERNAME}" \
-        --env "AWS_PROFILE=${AWS_PROFILE}" \
+        --env "AWS_PROFILE=claude-code-dev" \
         "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;
     refresh)
