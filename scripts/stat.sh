@@ -125,6 +125,62 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Billing — Cost Explorer (global service, always us-east-1)
+# ---------------------------------------------------------------------------
+BILLING_MTD=""
+BILLING_FORECAST=""
+BILLING_SERVICES=""
+BILLING_ERROR=""
+
+MONTH_START=$(date -u +%Y-%m-01)
+TOMORROW=$(date -u -d "1 day" +%Y-%m-%d 2>/dev/null || echo "")
+NEXT_MONTH=$(date -u -d "$(date -u +%Y-%m-01) 1 month" +%Y-%m-%d 2>/dev/null || echo "")
+
+if [[ -n "${TOMORROW}" && -n "${NEXT_MONTH}" ]]; then
+  SPEND_JSON=$(aws ce get-cost-and-usage \
+    --time-period "Start=${MONTH_START},End=${TOMORROW}" \
+    --granularity MONTHLY \
+    --metrics "UnblendedCost" \
+    --group-by "Type=DIMENSION,Key=SERVICE" \
+    --region us-east-1 \
+    --output json 2>/dev/null || echo "")
+
+  if [[ -n "${SPEND_JSON}" ]]; then
+    BILLING_MTD=$(echo "${SPEND_JSON}" | jq -r '
+      [.ResultsByTime[0]?.Groups[]?.Metrics.UnblendedCost.Amount | tonumber] | add // 0
+      | . * 100 | round / 100
+    ' 2>/dev/null || echo "")
+
+    BILLING_SERVICES=$(echo "${SPEND_JSON}" | jq -r '
+      .ResultsByTime[0]?.Groups[]? |
+      select((.Metrics.UnblendedCost.Amount | tonumber) >= 0.01) |
+      [.Keys[0], (.Metrics.UnblendedCost.Amount | tonumber | . * 100 | round / 100 | tostring)] |
+      join("\t")
+    ' 2>/dev/null | sort -t$'\t' -k2 -rn || echo "")
+
+    # Forecast remaining days (skip on last day of month when tomorrow = next month)
+    if [[ "${TOMORROW}" < "${NEXT_MONTH}" ]]; then
+      FORECAST_JSON=$(aws ce get-cost-forecast \
+        --time-period "Start=${TOMORROW},End=${NEXT_MONTH}" \
+        --granularity MONTHLY \
+        --metric UNBLENDED_COST \
+        --region us-east-1 \
+        --output json 2>/dev/null || echo "")
+
+      if [[ -n "${FORECAST_JSON}" ]]; then
+        # Add forecasted remaining days to actual MTD for end-of-month projection
+        BILLING_FORECAST=$(echo "${FORECAST_JSON}" | jq -r \
+          --argjson mtd "${BILLING_MTD:-0}" \
+          '(.Total.Amount | tonumber) + $mtd | . * 100 | round / 100' \
+          2>/dev/null || echo "")
+      fi
+    fi
+  else
+    BILLING_ERROR="unavailable — Cost Explorer may not be enabled on this account"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Users + instances
 # ---------------------------------------------------------------------------
 USERS_JSON=$(mktemp)
@@ -177,6 +233,37 @@ echo "--- Infrastructure ---"
 echo ""
 printf "  %-12s %s\n" "VPC:"   "${INFRA_STATUS}"
 printf "  %-12s s3://%s/%s\n" "State:" "${TF_BACKEND_BUCKET}" "${TF_BACKEND_KEY}"
+echo ""
+
+echo "--- Billing ---"
+echo ""
+
+if [[ -n "${BILLING_ERROR}" ]]; then
+  printf "  %s\n" "${BILLING_ERROR}"
+elif [[ -n "${BILLING_MTD}" ]]; then
+  printf "  %-16s \$%s\n" "Month-to-date:" "${BILLING_MTD}"
+
+  if [[ -n "${BILLING_FORECAST}" ]]; then
+    BUDGET="${MONTHLY_BUDGET_USD:-}"
+    if [[ -n "${BUDGET}" && "${BUDGET}" != "0" ]]; then
+      PCT=$(awk "BEGIN {printf \"%.0f\", ${BILLING_FORECAST}/${BUDGET}*100}")
+      printf "  %-16s \$%s projected  •  \$%s budget  (%s%%)\n" \
+        "Forecast:" "${BILLING_FORECAST}" "${BUDGET}" "${PCT}"
+    else
+      printf "  %-16s \$%s projected\n" "Forecast:" "${BILLING_FORECAST}"
+    fi
+  fi
+
+  if [[ -n "${BILLING_SERVICES}" ]]; then
+    echo ""
+    while IFS=$'\t' read -r svc cost; do
+      printf "    %-44s \$%s\n" "${svc}" "${cost}"
+    done <<< "${BILLING_SERVICES}"
+  fi
+else
+  printf "  no spend data yet this month\n"
+fi
+
 echo ""
 
 echo "--- Users (${USER_COUNT}) ---"
