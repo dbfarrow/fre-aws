@@ -205,13 +205,21 @@ if [[ "${MODE}" == "user" ]]; then
   : "${MY_USERNAME:?MY_USERNAME must be set in config/user.env}"
   : "${AWS_PROFILE:?AWS_PROFILE must be set in config/user.env}"
 
+  # Use a local .aws/ next to user.sh when it exists (created by install.sh),
+  # otherwise fall back to ~/.aws (admin testing from the repo).
+  if [[ -d "${USER_SCRIPT_DIR}/.aws" ]]; then
+    USER_AWS_DIR="${USER_SCRIPT_DIR}/.aws"
+  else
+    USER_AWS_DIR="${HOME}/.aws"
+  fi
+
   DOCKER_ARGS=(
     "--rm"
     "--interactive"
     "--tty"
     "--env" "AWS_PAGER="
     "--env" "DEV_USERNAME=${MY_USERNAME}"
-    "--volume" "${USER_SCRIPT_DIR}/.aws:/root/.aws"
+    "--volume" "${USER_AWS_DIR}:/root/.aws"
     "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
     "--volume" "${USER_SCRIPT_DIR}/scripts:/workspace/scripts"
   )
@@ -395,7 +403,7 @@ if [[ "${MODE}" == "user" ]]; then
     sso-login)
       if [[ "${FRESH_CREDS:-false}" == "true" ]]; then
         echo "Clearing credential cache..."
-        rm -f "${USER_SCRIPT_DIR}/.aws/cli/cache/"* 2>/dev/null || true
+        rm -f "${USER_AWS_DIR}/cli/cache/"* 2>/dev/null || true
       fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
