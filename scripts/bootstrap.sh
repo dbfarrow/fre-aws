@@ -18,18 +18,30 @@ source "$CONFIG_FILE"
 
 : "${PROJECT_NAME:?PROJECT_NAME must be set in config/admin.env}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
-: "${AWS_PROFILE:?AWS_PROFILE must be set in config/admin.env}"
+# AWS_PROFILE is optional — falls back to the AWS CLI default profile when not set.
+# Override at runtime with: ./admin.sh bootstrap --profile <name>
+AWS_PROFILE="${AWS_PROFILE:-}"
+if [[ -n "${BOOTSTRAP_PROFILE_OVERRIDE:-}" ]]; then
+  AWS_PROFILE="${BOOTSTRAP_PROFILE_OVERRIDE}"
+fi
 
 BUCKET_NAME="${PROJECT_NAME}-tfstate"
 DYNAMODB_TABLE="${PROJECT_NAME}-tflock"
 
-AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
+PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE}" ]] && PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+
+if [[ -n "${AWS_PROFILE}" ]]; then
+  AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
+else
+  AWS="aws --region ${AWS_REGION}"
+fi
 STATE_REGION="${AWS_REGION}"   # tracks state-backend region; may diverge from AWS_REGION
 
 echo "=== fre-aws bootstrap ==="
 echo "  Project:  ${PROJECT_NAME}"
 echo "  Region:   ${AWS_REGION}"
-echo "  Profile:  ${AWS_PROFILE}"
+echo "  Profile:  ${AWS_PROFILE:-<default>}"
 echo "  Bucket:   ${BUCKET_NAME}"
 echo "  DynamoDB: ${DYNAMODB_TABLE}"
 echo ""
@@ -39,9 +51,13 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "Verifying AWS credentials..."
 CALLER_IDENTITY=$($AWS sts get-caller-identity --output json 2>&1) || {
-  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
-  echo "       Run 'aws configure --profile ${AWS_PROFILE}' to set up credentials," >&2
-  echo "       or check that your access key is active in the AWS Console (IAM → Users → Security credentials)." >&2
+  if [[ -n "${AWS_PROFILE}" ]]; then
+    echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+    echo "       Run 'aws sso login --profile ${AWS_PROFILE}' or reconfigure credentials." >&2
+  else
+    echo "ERROR: No valid AWS credentials found." >&2
+    echo "       Run 'aws configure' to set up default credentials." >&2
+  fi
   exit 1
 }
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
@@ -58,7 +74,7 @@ if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
   echo "  Bucket already exists, skipping creation."
   # The bucket may have been created in a different region (e.g. us-east-1 during
   # a prior bootstrap run). Detect the actual location so backend.env is correct.
-  BUCKET_REGION=$(aws --profile "${AWS_PROFILE}" s3api get-bucket-location \
+  BUCKET_REGION=$(aws "${PROFILE_ARGS[@]}" s3api get-bucket-location \
     --bucket "${BUCKET_NAME}" \
     --query 'LocationConstraint' \
     --output text 2>/dev/null)
@@ -70,7 +86,11 @@ if $AWS s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
     echo "  WARNING: Bucket is in ${BUCKET_REGION}, not ${STATE_REGION}."
     echo "           Switching STATE_REGION to ${BUCKET_REGION} for state backend resources."
     STATE_REGION="${BUCKET_REGION}"
-    AWS="aws --region ${STATE_REGION} --profile ${AWS_PROFILE}"
+    if [[ -n "${AWS_PROFILE}" ]]; then
+      AWS="aws --region ${STATE_REGION} --profile ${AWS_PROFILE}"
+    else
+      AWS="aws --region ${STATE_REGION}"
+    fi
   fi
 else
   if [[ "${STATE_REGION}" == "us-east-1" ]]; then
@@ -149,7 +169,7 @@ echo ""
 # ---------------------------------------------------------------------------
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
   echo "Verifying SES sender: ${SENDER_EMAIL}..."
-  SES_STATUS=$(aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+  SES_STATUS=$(aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" \
     ses get-identity-verification-attributes \
     --identities "${SENDER_EMAIL}" \
     --query "VerificationAttributes.\"${SENDER_EMAIL}\".VerificationStatus" \
@@ -158,7 +178,7 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
   if [[ "${SES_STATUS}" == "Success" ]]; then
     echo "  Already verified."
   else
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" \
       ses verify-email-identity \
       --email-address "${SENDER_EMAIL}" >/dev/null
     echo "  Verification email sent to ${SENDER_EMAIL}."
@@ -179,7 +199,7 @@ fi
 if [[ -n "${SSO_REGION:-}" ]]; then
   echo "Setting up IAM Identity Center permission sets (region: ${SSO_REGION})..."
 
-  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
 
@@ -198,7 +218,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       while IFS= read -r arn; do
         [[ -z "${arn}" ]] && continue
         local name
-        name=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        name=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin describe-permission-set \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --permission-set-arn "${arn}" \
@@ -207,7 +227,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
           found="${arn}"
           break
         fi
-      done < <(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      done < <(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
         sso-admin list-permission-sets \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --max-results 100 \
@@ -223,7 +243,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       if [[ -n "${arn}" ]]; then
         echo "  '${name}': already exists." >&2
       else
-        arn=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        arn=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin create-permission-set \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --name "${name}" \
@@ -279,7 +299,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
   ]
 }
 POLICY
-    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${DEV_PS_ARN}" \
@@ -293,7 +313,7 @@ POLICY
     ADMIN_PS_ARN=$(_ensure_ps "ProjectAdminAccess" \
       "${PROJECT_NAME} admin: run bootstrap/up/down, manage users and infrastructure")
 
-    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
       sso-admin attach-managed-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -339,7 +359,7 @@ POLICY
   ]
 }
 POLICY
-    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -357,7 +377,7 @@ POLICY
       echo "  Provisioning '${ps_name}' to account ${ACCOUNT_ID}..."
 
       local provision_out provision_err
-      provision_out=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      provision_out=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
         sso-admin provision-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --permission-set-arn "${ps_arn}" \
@@ -375,7 +395,7 @@ POLICY
 
       local status result_json reason=""
       for _ in $(seq 1 20); do
-        result_json=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        result_json=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin describe-permission-set-provisioning-status \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --provision-permission-set-request-id "${request_id}" \
@@ -399,20 +419,20 @@ POLICY
     # -------------------------------------------------------------------------
     # Assign ProjectAdminAccess to the admin user identified by OWNER_EMAIL.
     # -------------------------------------------------------------------------
-    IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
       sso-admin list-instances \
       --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
 
     echo ""
     if [[ -n "${OWNER_EMAIL:-}" && -n "${IDENTITY_STORE_ID}" && "${IDENTITY_STORE_ID}" != "None" ]]; then
-      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
         identitystore list-users \
         --identity-store-id "${IDENTITY_STORE_ID}" \
         --filters "AttributePath=Emails.Value,AttributeValue=${OWNER_EMAIL}" \
         --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
 
       if [[ -n "${ADMIN_USER_ID}" && "${ADMIN_USER_ID}" != "None" ]]; then
-        aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \
@@ -422,7 +442,7 @@ POLICY
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
           && echo "  Assigned ProjectAdminAccess to ${OWNER_EMAIL}." \
           || echo "  ProjectAdminAccess already assigned to ${OWNER_EMAIL}."
-        aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \

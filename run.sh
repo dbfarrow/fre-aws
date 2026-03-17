@@ -48,7 +48,10 @@ user management:
                         -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
-  bootstrap             One-time setup (S3, DynamoDB, KMS, SES verification)
+  bootstrap [--profile <name>]
+                        One-time setup (S3, DynamoDB, KMS, SES verification)
+                        Use --profile to specify a named AWS profile; omit to
+                        use AWS_PROFILE from admin.env or the default profile
   up                    Create / update all AWS infrastructure
   down                  Destroy all AWS infrastructure
   repair-state [--dry-run] [user]
@@ -279,7 +282,15 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/repair-state.sh "${@:2}"
       ;;
     bootstrap)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
+      BOOTSTRAP_PROFILE=""
+      if [[ "${USERNAME:-}" == "--profile" && -n "${3:-}" ]]; then
+        BOOTSTRAP_PROFILE="${3}"
+      elif [[ "${USERNAME:-}" == --profile=* ]]; then
+        BOOTSTRAP_PROFILE="${USERNAME#--profile=}"
+      fi
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "BOOTSTRAP_PROFILE_OVERRIDE=${BOOTSTRAP_PROFILE}" \
+        "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
       ;;
     up)
       if [[ -n "${USERNAME}" ]]; then
