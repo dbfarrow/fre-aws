@@ -179,7 +179,7 @@ The SSH tunnel through SSM failed. Most common causes:
 Some workloads (browser automation, large builds) need more RAM than the default instance. Let your admin know — they can resize it.
 
 **"Clone failed" when trying to clone a GitHub repo**
-Your GitHub authentication may have expired or the repo name may be wrong. From a shell on the instance, run `gh auth status` to check. If not authenticated, run `gh auth login` to re-authenticate.
+Your GitHub authentication may have expired or the repo name may be wrong. From a shell on the instance, run `gh auth status` to check. If not authenticated, run `gh auth login --git-protocol https` to re-authenticate.
 
 **Lost your work**
 Your files live on an EBS volume that persists even when the instance is stopped. They're only deleted if your admin explicitly destroys the environment. Check `~/repos` after connecting.

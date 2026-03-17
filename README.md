@@ -28,7 +28,7 @@ Your Mac
 Connections use SSH tunneled through [AWS SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html):
 
 - **No open ports** — EC2 instances have no inbound firewall rules, no public IP required
-- **No keys on instances** — SSH agent forwarding means your GitHub key works on the instance without ever being copied there
+- **No GitHub SSH keys on instances** — GitHub access uses OAuth via `gh auth login`; no SSH key needs to be added to GitHub
 - **No VPN** — SSM handles the tunnel; the only requirement is valid AWS credentials
 
 ---
@@ -73,7 +73,7 @@ Responsibilities:
 | No inbound ports on EC2 | ✅ | Security group has no ingress rules |
 | SSH private key stays on Mac | ✅ | Agent forwarding; key never copied to instance |
 | Per-user EC2 isolation | ✅ | Dedicated instance per user; no shared filesystem |
-| SSH key isolation | ✅ | Each instance only accepts its owner's key |
+| SSH key isolation | ✅ | Each instance accepts its owner's key; admin key(s) are also injected at provision time for support access |
 | IMDSv2 enforced | ✅ | Prevents SSRF-based credential theft |
 | Storage encrypted at rest | ✅ | KMS-backed EBS and S3 |
 | No public IP on EC2 | ⚠️ Optional | Default (`public` mode) assigns a public IP; `private_nat` removes it |

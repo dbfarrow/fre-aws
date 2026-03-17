@@ -59,9 +59,9 @@ Let users know to sign up for both before their onboarding email arrives. The se
 
 ## SSH Key
 
-Admin connections use SSH tunneled through SSM with **agent forwarding** — your existing GitHub SSH key is used automatically. No new key is required.
+Admin connections use SSH tunneled through SSM. Your public key is injected into every user instance at provision time (and can be pushed to existing instances with `./admin.sh push-admin-keys`).
 
-The tooling looks for your key in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`. If you use a standard location, no configuration is needed. Agent forwarding means your private key never leaves your Mac — `git push` and `git pull` work on EC2 instances through the forwarded agent without copying the key to the instance.
+The tooling looks for your key in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`. If you use a standard location, no configuration is needed.
 
 ---
 
@@ -316,7 +316,7 @@ After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 | `user` | `DeveloperAccess` | None | Connect, start, stop |
 | `admin` | `ProjectAdminAccess` + `DeveloperAccess` | Full | Connect, start, stop |
 
-Admin users receive a two-profile `~/.aws/config` (`claude-code` for admin operations, `claude-code-dev` for instance access).
+Admin users receive a two-profile `~/.aws/config`: `claude-code` (ProjectAdminAccess, for `admin.sh`) and `claude-code-dev` (DeveloperAccess, for `user.sh`). Each profile has its own SSO session so `admin.sh sso-login` and `user.sh sso-login` authenticate independently.
 
 ### Updating a user's SSH key
 
@@ -347,6 +347,17 @@ The pre-signed installer URL expires after 72 hours. To generate a fresh one:
 ```
 
 This uploads a new `latest.zip` to S3 and prints a new pre-signed URL. Send it to the user manually (or copy into an email). Useful after the initial link expires or after scripts are updated.
+
+### Pushing admin SSH key to existing instances
+
+New instances get the admin's SSH public key injected automatically via `user_data` at provision time. For instances that were created before you set up your SSH key, or when adding a new admin:
+
+```bash
+./admin.sh push-admin-keys             # push to all running instances
+./admin.sh push-admin-keys <username>  # push to one instance
+```
+
+This uses SSM `send-command` — no existing SSH access required. Safe to run multiple times (idempotent).
 
 ### Pushing session launcher updates
 
@@ -401,6 +412,8 @@ Then ask the user to run `~/fre-aws/user.sh update` to pull the latest scripts f
 ./admin.sh connect <username>           # SSH into an instance (uses DeveloperAccess)
 ./admin.sh refresh <username>           # push updated session_start.sh to a running instance
 ./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
+./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
+                                        # running instances (idempotent, uses SSM — no SSH needed)
 ```
 
 ### Authentication
