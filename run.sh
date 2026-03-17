@@ -62,7 +62,8 @@ connection:
   ssm <user>            Direct SSM shell (fallback when SSH isn't working)
 
 authentication:
-  sso-login             Log in via IAM Identity Center
+  sso-login [--fresh]   Log in via IAM Identity Center
+                        --fresh clears cached role credentials first
   verify                Verify AWS credentials are active
   verify-email <addr>   Pre-verify an SES recipient address (sandbox mode only)
 
@@ -89,7 +90,8 @@ options:
   config                Path to alternate user config (default: config/user.env)
 
 authentication:
-  sso-login             Log in to AWS (required before first connect each day)
+  sso-login [--fresh]   Log in to AWS (required before first connect each day)
+                        --fresh clears cached role credentials first
   verify                Verify your AWS credentials are active
 
 instance:
@@ -172,6 +174,13 @@ if [[ "${MODE}" == "user" ]]; then
   USER_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   CONFIG_ARG="${2:-}"
 
+  # Detect --fresh flag before treating CONFIG_ARG as a file path
+  FRESH_CREDS=false
+  if [[ "${CONFIG_ARG}" == "--fresh" || "${CONFIG_ARG}" == "-f" ]]; then
+    FRESH_CREDS=true
+    CONFIG_ARG=""
+  fi
+
   if [[ -n "${CONFIG_ARG}" ]]; then
     DEV_CONFIG="${CONFIG_ARG}"
     # Resolve relative paths against cwd
@@ -216,6 +225,10 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh "${@:2}"
       ;;
     sso-login)
+      if [[ "${USERNAME:-}" == "--fresh" || "${USERNAME:-}" == "-f" ]]; then
+        echo "Clearing credential cache..."
+        rm -f "${HOME}/.aws/cli/cache/"* 2>/dev/null || true
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
@@ -376,6 +389,10 @@ fi
 if [[ "${MODE}" == "user" ]]; then
   case "${COMMAND}" in
     sso-login)
+      if [[ "${FRESH_CREDS:-false}" == "true" ]]; then
+        echo "Clearing credential cache..."
+        rm -f "${HOME}/.aws/cli/cache/"* 2>/dev/null || true
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
