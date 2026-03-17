@@ -46,6 +46,31 @@ users_s3_download "${USERS_JSON}"
 CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" | sort)
 
 # ---------------------------------------------------------------------------
+# Fetch Identity Center users not in the S3 registry (e.g. removed with --keep-sso)
+# ---------------------------------------------------------------------------
+ORPHANED_SSO=""
+if [[ -n "${SSO_REGION:-}" ]]; then
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-instances \
+    --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
+
+  if [[ -n "${IDENTITY_STORE_ID}" && "${IDENTITY_STORE_ID}" != "None" ]]; then
+    SSO_USERS_JSON=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      identitystore list-users \
+      --identity-store-id "${IDENTITY_STORE_ID}" \
+      --max-results 100 \
+      --output json 2>/dev/null || echo '{"Users":[]}')
+
+    ORPHANED_SSO=$(echo "${SSO_USERS_JSON}" | jq -r \
+      --argjson registry "$(jq -c 'keys' "${USERS_JSON}")" '
+      .Users[] |
+      select([.UserName] | inside($registry) | not) |
+      "\(.UserName)\t\(.DisplayName // "-")\t\((.Emails // []) | map(select(.Primary == true)) | .[0].Value // "-")"
+    ' 2>/dev/null || echo "")
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Fetch all non-terminated instances for this project's VPC
 # ---------------------------------------------------------------------------
 INSTANCES=$(aws ec2 describe-instances \
@@ -126,12 +151,22 @@ ORPHANED=$(echo "${INSTANCES}" | jq -r \
 
 if [[ -n "${ORPHANED}" ]]; then
   echo ""
-  echo "  --- not in registry ---"
+  echo "  --- orphaned instances (not in registry) ---"
   printf "  %-20s %-22s %-12s %s\n" "USERNAME TAG" "INSTANCE ID" "STATE" "TYPE"
   printf "  %-20s %-22s %-12s %s\n" "-----------" "-----------" "-----" "----"
   while IFS=$'\t' read -r username instance_id state type; do
     printf "  %-20s %-22s %-12s %s\n" "${username}" "${instance_id}" "${state}" "${type}"
   done <<< "${ORPHANED}"
+fi
+
+if [[ -n "${ORPHANED_SSO}" ]]; then
+  echo ""
+  echo "  --- identity center only (no fre-aws entry) ---"
+  printf "  %-20s %-25s %s\n" "USERNAME" "DISPLAY NAME" "EMAIL"
+  printf "  %-20s %-25s %s\n" "--------" "------------" "-----"
+  while IFS=$'\t' read -r username display_name email; do
+    printf "  %-20s %-25s %s\n" "${username}" "${display_name}" "${email}"
+  done <<< "${ORPHANED_SSO}"
 fi
 
 echo ""

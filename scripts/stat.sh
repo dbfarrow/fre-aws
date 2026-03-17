@@ -190,6 +190,29 @@ users_s3_download "${USERS_JSON}"
 CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" 2>/dev/null | sort || true)
 USER_COUNT=$(echo "${CONFIGURED_USERS}" | grep -c . 2>/dev/null || echo 0)
 
+# Fetch Identity Center users not in the S3 registry (e.g. removed with --keep-sso)
+ORPHANED_SSO=""
+if [[ -n "${SSO_REGION:-}" ]]; then
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin list-instances \
+    --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
+
+  if [[ -n "${IDENTITY_STORE_ID}" && "${IDENTITY_STORE_ID}" != "None" ]]; then
+    SSO_USERS_JSON=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      identitystore list-users \
+      --identity-store-id "${IDENTITY_STORE_ID}" \
+      --max-results 100 \
+      --output json 2>/dev/null || echo '{"Users":[]}')
+
+    ORPHANED_SSO=$(echo "${SSO_USERS_JSON}" | jq -r \
+      --argjson registry "$(jq -c 'keys' "${USERS_JSON}")" '
+      .Users[] |
+      select([.UserName] | inside($registry) | not) |
+      "\(.UserName)\t\(.DisplayName // "-")\t\((.Emails // []) | map(select(.Primary == true)) | .[0].Value // "-")"
+    ' 2>/dev/null || echo "")
+  fi
+fi
+
 INSTANCES=$(aws ec2 describe-instances \
   --filters \
     "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
@@ -290,6 +313,16 @@ else
         "${username}" "(not provisioned)" "" "" "${role}"
     fi
   done <<< "${CONFIGURED_USERS}"
+fi
+
+if [[ -n "${ORPHANED_SSO}" ]]; then
+  echo ""
+  echo "  --- identity center only (no fre-aws entry) ---"
+  printf "  %-20s %-25s %s\n" "USERNAME" "DISPLAY NAME" "EMAIL"
+  printf "  %-20s %-25s %s\n" "--------" "------------" "-----"
+  while IFS=$'\t' read -r username display_name email; do
+    printf "  %-20s %-25s %s\n" "${username}" "${display_name}" "${email}"
+  done <<< "${ORPHANED_SSO}"
 fi
 
 echo ""
