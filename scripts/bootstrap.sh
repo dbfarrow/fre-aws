@@ -403,7 +403,17 @@ POLICY
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
           && echo "  Assigned ProjectAdminAccess to ${OWNER_EMAIL}." \
           || echo "  ProjectAdminAccess already assigned to ${OWNER_EMAIL}."
-        echo "  Update sso_role_name=ProjectAdminAccess in ~/.aws/config, then re-run sso-login."
+        aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          sso-admin create-account-assignment \
+          --instance-arn "${SSO_INSTANCE_ARN}" \
+          --target-id "${ACCOUNT_ID}" \
+          --target-type AWS_ACCOUNT \
+          --permission-set-arn "${DEV_PS_ARN}" \
+          --principal-type USER \
+          --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
+          && echo "  Assigned DeveloperAccess to ${OWNER_EMAIL}." \
+          || echo "  DeveloperAccess already assigned to ${OWNER_EMAIL}."
+        echo "  Add both profiles to ~/.aws/config (see aws-config-sso.example), then re-run sso-login."
       else
         echo "  Could not find Identity Center user with email '${OWNER_EMAIL}'."
         echo "  Assign ProjectAdminAccess manually: IAM Identity Center → AWS accounts."

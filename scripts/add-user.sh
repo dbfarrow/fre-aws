@@ -318,6 +318,58 @@ _find_ps_arn() {
   echo "${found}"
 }
 
+# Assign a permission set and wait for async provisioning to complete
+_assign_ps() {
+  local ps_name="$1" ps_arn="$2"
+  local assign_out request_id initial_status
+  assign_out=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    sso-admin create-account-assignment \
+    --instance-arn "${SSO_INSTANCE_ARN}" \
+    --target-id "${TF_BACKEND_ACCOUNT_ID}" \
+    --target-type AWS_ACCOUNT \
+    --permission-set-arn "${ps_arn}" \
+    --principal-type USER \
+    --principal-id "${SSO_USER_ID}" \
+    --output json 2>&1) || {
+    echo "ERROR: create-account-assignment failed for '${ps_name}': ${assign_out}" >&2
+    exit 1
+  }
+  request_id=$(echo "${assign_out}" | jq -r '.AccountAssignmentCreationStatus.RequestId // empty')
+  initial_status=$(echo "${assign_out}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
+  if [[ "${initial_status}" == "SUCCEEDED" ]]; then
+    echo "  Assigned '${ps_name}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+  elif [[ -z "${request_id}" ]]; then
+    echo "  WARNING: Could not determine assignment RequestId for '${ps_name}'. Check IAM Identity Center console." >&2
+  else
+    echo "  Waiting for '${ps_name}' assignment to provision..."
+    local status=""
+    for _ in $(seq 1 20); do
+      local result_json
+      result_json=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+        sso-admin describe-account-assignment-creation-status \
+        --instance-arn "${SSO_INSTANCE_ARN}" \
+        --account-assignment-creation-request-id "${request_id}" \
+        --output json 2>/dev/null || echo "{}")
+      status=$(echo "${result_json}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
+      [[ "${status}" == "SUCCEEDED" ]] && break
+      if [[ "${status}" == "FAILED" ]]; then
+        local reason
+        reason=$(echo "${result_json}" | jq -r '.AccountAssignmentCreationStatus.FailureReason // "no reason provided"')
+        echo "ERROR: Account assignment FAILED for '${ps_name}': ${reason}" >&2
+        exit 1
+      fi
+      sleep 3
+    done
+    if [[ "${status}" == "SUCCEEDED" ]]; then
+      echo "  Assigned '${ps_name}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
+    else
+      echo "ERROR: Timed out waiting for '${ps_name}' account assignment (last status: ${status:-unknown})." >&2
+      echo "       Check IAM Identity Center → AWS accounts in the console." >&2
+      exit 1
+    fi
+  fi
+}
+
 PS_ARN=$(_find_ps_arn "${PS_NAME}")
 if [[ -z "${PS_ARN}" ]]; then
   echo "ERROR: Permission set '${PS_NAME}' not found." >&2
@@ -325,10 +377,13 @@ if [[ -z "${PS_ARN}" ]]; then
   exit 1
 fi
 
-# Remove any existing assignments for the OTHER known permission sets so
-# the user ends up with exactly one role on this account.
+# Remove any existing assignments for the OTHER known permission sets.
+# Admin users keep both ProjectAdminAccess AND DeveloperAccess; only
+# remove the one that doesn't belong to the target role.
 for OTHER_PS_NAME in "DeveloperAccess" "ProjectAdminAccess"; do
   [[ "${OTHER_PS_NAME}" == "${PS_NAME}" ]] && continue
+  # Admin users always have DeveloperAccess — don't remove it
+  [[ "${ROLE}" == "admin" && "${OTHER_PS_NAME}" == "DeveloperAccess" ]] && continue
   OTHER_PS_ARN=$(_find_ps_arn "${OTHER_PS_NAME}")
   [[ -z "${OTHER_PS_ARN}" ]] && continue
 
@@ -355,72 +410,45 @@ for OTHER_PS_NAME in "DeveloperAccess" "ProjectAdminAccess"; do
   fi
 done
 
-# Assign the target permission set and wait for the async provisioning to complete
-ASSIGN_OUT=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
-  sso-admin create-account-assignment \
-  --instance-arn "${SSO_INSTANCE_ARN}" \
-  --target-id "${TF_BACKEND_ACCOUNT_ID}" \
-  --target-type AWS_ACCOUNT \
-  --permission-set-arn "${PS_ARN}" \
-  --principal-type USER \
-  --principal-id "${SSO_USER_ID}" \
-  --output json 2>&1) || {
-  echo "ERROR: create-account-assignment failed: ${ASSIGN_OUT}" >&2
-  exit 1
-}
+# Assign the primary permission set and wait for async provisioning to complete
+_assign_ps "${PS_NAME}" "${PS_ARN}"
 
-ASSIGN_REQUEST_ID=$(echo "${ASSIGN_OUT}" | jq -r '.AccountAssignmentCreationStatus.RequestId // empty')
-ASSIGN_INITIAL_STATUS=$(echo "${ASSIGN_OUT}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
-
-if [[ "${ASSIGN_INITIAL_STATUS}" == "SUCCEEDED" ]]; then
-  echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
-elif [[ -z "${ASSIGN_REQUEST_ID}" ]]; then
-  echo "  WARNING: Could not determine assignment RequestId. Check IAM Identity Center console." >&2
-else
-  echo "  Waiting for '${PS_NAME}' assignment to provision..."
-  ASSIGN_STATUS=""
-  for _ in $(seq 1 20); do
-    ASSIGN_RESULT=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
-      sso-admin describe-account-assignment-creation-status \
-      --instance-arn "${SSO_INSTANCE_ARN}" \
-      --account-assignment-creation-request-id "${ASSIGN_REQUEST_ID}" \
-      --output json 2>/dev/null || echo "{}")
-    ASSIGN_STATUS=$(echo "${ASSIGN_RESULT}" | jq -r '.AccountAssignmentCreationStatus.Status // empty')
-    [[ "${ASSIGN_STATUS}" == "SUCCEEDED" ]] && break
-    if [[ "${ASSIGN_STATUS}" == "FAILED" ]]; then
-      ASSIGN_REASON=$(echo "${ASSIGN_RESULT}" | jq -r '.AccountAssignmentCreationStatus.FailureReason // "no reason provided"')
-      echo "ERROR: Account assignment FAILED: ${ASSIGN_REASON}" >&2
-      exit 1
-    fi
-    sleep 3
-  done
-  if [[ "${ASSIGN_STATUS}" == "SUCCEEDED" ]]; then
-    echo "  Assigned '${PS_NAME}' to ${NEW_USERNAME} on account ${TF_BACKEND_ACCOUNT_ID}."
-  else
-    echo "ERROR: Timed out waiting for account assignment (last status: ${ASSIGN_STATUS:-unknown})." >&2
-    echo "       Check IAM Identity Center → AWS accounts in the console." >&2
+# Admin users also get DeveloperAccess so ./user.sh connect works for them
+if [[ "${ROLE}" == "admin" ]]; then
+  DEV_PS_ARN=$(_find_ps_arn "DeveloperAccess")
+  if [[ -z "${DEV_PS_ARN}" ]]; then
+    echo "ERROR: DeveloperAccess permission set not found." >&2
+    echo "       Run './admin.sh bootstrap' to create it." >&2
     exit 1
   fi
+  _assign_ps "DeveloperAccess" "${DEV_PS_ARN}"
 fi
 
 # ---------------------------------------------------------------------------
-# Generate user.env
+# Generate user.env and aws-config
 # ---------------------------------------------------------------------------
-AWS_PROFILE_FOR_DEV="claude-code"
-DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
+# Admin users get two profiles: claude-code (ProjectAdminAccess, for admin.sh)
+# and claude-code-dev (DeveloperAccess, for user.sh connect).
+# Regular users get one profile: claude-code (DeveloperAccess).
+if [[ "${ROLE}" == "admin" ]]; then
+  AWS_PROFILE_FOR_DEV="claude-code-dev"
+  DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
 PROJECT_NAME=${PROJECT_NAME}
 AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
 AWS_REGION=${AWS_REGION}
 "
-
-# ---------------------------------------------------------------------------
-# Generate aws-config
-# ---------------------------------------------------------------------------
-SSO_ROLE_NAME="${PS_NAME}"
-AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
+  AWS_CONFIG="# Admin profile — use for admin.sh (ProjectAdminAccess)
+[profile claude-code]
 sso_session = fre-aws-sso
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
-sso_role_name = ${SSO_ROLE_NAME}
+sso_role_name = ProjectAdminAccess
+region = ${AWS_REGION}
+
+# Developer profile — use for user.sh connect (DeveloperAccess)
+[profile ${AWS_PROFILE_FOR_DEV}]
+sso_session = fre-aws-sso
+sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
+sso_role_name = DeveloperAccess
 region = ${AWS_REGION}
 
 [sso-session fre-aws-sso]
@@ -428,6 +456,25 @@ sso_start_url = ${SSO_START_URL}
 sso_region = ${SSO_REGION}
 sso_registration_scopes = sso:account:access
 "
+else
+  AWS_PROFILE_FOR_DEV="claude-code"
+  DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
+PROJECT_NAME=${PROJECT_NAME}
+AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
+AWS_REGION=${AWS_REGION}
+"
+  AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
+sso_session = fre-aws-sso
+sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
+sso_role_name = DeveloperAccess
+region = ${AWS_REGION}
+
+[sso-session fre-aws-sso]
+sso_start_url = ${SSO_START_URL}
+sso_region = ${SSO_REGION}
+sso_registration_scopes = sso:account:access
+"
+fi
 
 # ---------------------------------------------------------------------------
 # Save onboarding bundle to config/onboarding/<username>/
@@ -500,7 +547,11 @@ echo ""
 echo "=== Done ==="
 echo ""
 echo "  IAM Identity Center user: ${NEW_USERNAME}"
-echo "  Permission set:           ${PS_NAME}"
+if [[ "${ROLE}" == "admin" ]]; then
+  echo "  Permission sets:          ProjectAdminAccess + DeveloperAccess"
+else
+  echo "  Permission set:           ${PS_NAME}"
+fi
 echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
 echo "  Email sent to:            ${USER_EMAIL}"
 echo ""
