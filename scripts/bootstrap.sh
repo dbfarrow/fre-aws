@@ -243,7 +243,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       "Scoped ${PROJECT_NAME} user access: connect to own instance only")
 
     POLICY_FILE=$(mktemp)
-    cat > "${POLICY_FILE}" << 'POLICY'
+    cat > "${POLICY_FILE}" << POLICY
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -264,7 +264,12 @@ if [[ -n "${SSO_REGION:-}" ]]; then
     {
       "Effect": "Allow",
       "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
-      "Resource": "arn:aws:ssm:*:*:session/${aws:RoleSessionName}-*"
+      "Resource": "arn:aws:ssm:*:*:session/\${aws:RoleSessionName}-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/*"
     }
   ]
 }

@@ -70,6 +70,11 @@ development:
   build                 Build (or rebuild) the Docker image
   test                  Run BATS tests
   shell                 Interactive container shell for debugging
+
+installer:
+  publish-installer <user>
+                        Re-generate installer bundle for a user, upload to
+                        S3, and print a new 72-hour pre-signed URL
 EOF
 }
 
@@ -93,6 +98,9 @@ instance:
 
 connection:
   connect               Open a shell on your EC2 instance
+
+maintenance:
+  update                Download and apply the latest scripts from S3
 EOF
 }
 
@@ -161,17 +169,20 @@ fi
 # User mode setup
 # ---------------------------------------------------------------------------
 if [[ "${MODE}" == "user" ]]; then
+  USER_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   CONFIG_ARG="${2:-}"
 
   if [[ -n "${CONFIG_ARG}" ]]; then
-    DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
+    DEV_CONFIG="${CONFIG_ARG}"
+    # Resolve relative paths against cwd
+    [[ "${DEV_CONFIG}" != /* ]] && DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
   else
-    DEV_CONFIG="$(pwd)/config/user.env"
+    DEV_CONFIG="${USER_SCRIPT_DIR}/config/user.env"
   fi
 
   if [[ ! -f "${DEV_CONFIG}" ]]; then
     echo "ERROR: Config file not found: ${DEV_CONFIG}" >&2
-    echo "       Your admin will email you a user.env — save it to config/user.env" >&2
+    echo "       Your admin will provide a user.env — save it to ~/fre-aws/config/user.env" >&2
     exit 1
   fi
 
@@ -189,7 +200,7 @@ if [[ "${MODE}" == "user" ]]; then
     "--env" "DEV_USERNAME=${MY_USERNAME}"
     "--volume" "${HOME}/.aws:/root/.aws"
     "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
-    "--volume" "$(pwd)/scripts:/workspace/scripts"
+    "--volume" "${USER_SCRIPT_DIR}/scripts:/workspace/scripts"
   )
 fi
 
@@ -329,11 +340,19 @@ if [[ "${MODE}" == "admin" ]]; then
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/ssm.sh
       ;;
+    publish-installer)
+      require_username
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        "${IMAGE_NAME}" /workspace/scripts/publish-installer.sh
+      ;;
     build)
       docker build -t "${IMAGE_NAME}" "$(dirname "$0")"
       ;;
     test)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" bats /workspace/tests/bats/
+      docker run "${DOCKER_ARGS[@]}" \
+        --volume "$(pwd)/tests:/workspace/tests" \
+        "${IMAGE_NAME}" bats /workspace/tests/bats/
       ;;
     shell)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash -c '
@@ -381,6 +400,11 @@ if [[ "${MODE}" == "user" ]]; then
       [[ -n "${GIT_USER_NAME:-}" ]]  && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
+      ;;
+    update)
+      docker run "${DOCKER_ARGS[@]}" \
+        --volume "${USER_SCRIPT_DIR}:/workspace/fre-aws" \
+        "${IMAGE_NAME}" /workspace/scripts/update.sh
       ;;
     *)
       echo "Unknown command: ${COMMAND}" >&2

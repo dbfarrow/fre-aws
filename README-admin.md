@@ -311,7 +311,10 @@ The wizard automatically:
 - Generates or accepts an SSH key pair for EC2 access
 - Generates `user.env` and `~/.aws/config` files ready for the new user
 - Saves an onboarding bundle to `config/onboarding/<username>/`
-- Emails the bundle to the user via SES (if `SENDER_EMAIL` is set)
+- Builds a self-contained installer zip and uploads it to S3
+- Emails a 72-hour pre-signed download link to the user via SES (if `SENDER_EMAIL` is set)
+
+The user installs with a single `curl + unzip + bash` one-liner — no `git` required on their Mac.
 
 After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 
@@ -343,6 +346,16 @@ Paste their new public key when prompted, then run `./admin.sh up` to push it to
 
 `remove-user` removes the user from the registry and warns you that their instance and EBS data will be destroyed on the next `up`. Their IAM Identity Center account remains — revoke it manually in the AWS Console if needed.
 
+### Re-sending the installer link
+
+The pre-signed installer URL expires after 72 hours. To generate a fresh one:
+
+```bash
+./admin.sh publish-installer <username>
+```
+
+This uploads a new `latest.zip` to S3 and prints a new pre-signed URL. Send it to the user manually (or copy into an email). Useful after the initial link expires or after scripts are updated.
+
 ### Pushing session launcher updates
 
 After editing `scripts/session_start.sh`:
@@ -353,6 +366,16 @@ After editing `scripts/session_start.sh`:
 
 No down/up needed. Changes take effect on their next connect.
 
+### Pushing script updates to users
+
+After updating any script in `scripts/`:
+
+```bash
+./admin.sh publish-installer <username>
+```
+
+Then ask the user to run `~/fre-aws/user.sh update` to pull the latest scripts from S3.
+
 ---
 
 ## Command Reference
@@ -362,6 +385,7 @@ No down/up needed. Changes take effect on their next connect.
 ./admin.sh add-user                     # interactive wizard: add a user
 ./admin.sh remove-user <username>       # remove a user (destroys instance on next up)
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
+./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh list                         # list all users and their instance state
 ./admin.sh list -v                      # verbose: show email, role, SSH key, git config
 ```

@@ -5,17 +5,25 @@ send-onboarding-email.py — Send a developer onboarding email via AWS SES.
 Uses only Python stdlib (email.mime.*, subprocess, argparse, tempfile, os).
 Sends the raw MIME message via `aws ses send-raw-email`.
 
-Usage:
+Usage (installer URL — no attachments):
   python3 send-onboarding-email.py \\
     --to alice@example.com \\
     --from admin@example.com \\
     --username alice \\
     --project fre-aws \\
-    --role developer \\
+    --role user \\
     --aws-profile claude-code \\
     --aws-region us-east-1 \\
     --aws-cli-profile claude-code \\
     --ses-region us-east-1 \\
+    --sso-start-url https://... \\
+    --user-email alice@example.com \\
+    --installer-url "https://s3.amazonaws.com/..."
+
+Usage (fallback with file attachments):
+  python3 send-onboarding-email.py \\
+    --to alice@example.com \\
+    ... \\
     [--attachment /path/to/fre-claude:fre-claude] \\
     --attachment /path/to/aws-config:aws-config \\
     --attachment /path/to/user.env:user.env
@@ -31,10 +39,95 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
-def build_body(username: str, project: str, role: str,
-               aws_profile: str, aws_region: str,
-               has_private_key: bool,
-               sso_start_url: str, user_email: str) -> str:
+def build_body_installer_url(username: str, project: str, role: str,
+                             has_private_key: bool,
+                             sso_start_url: str, user_email: str,
+                             installer_url: str) -> str:
+    lines = [
+        f"Hi {username},",
+        "",
+        f"You have been provisioned as a {role} in the {project} environment.",
+        "",
+        "Setup instructions:",
+        "",
+    ]
+
+    step = 1
+
+    # Account activation
+    lines += [
+        f"  {step}. Activate your AWS account:",
+        f"     a. Go to: {sso_start_url}",
+        "     b. Click \"Forgot password\"",
+        f"     c. Enter your email address: {user_email}",
+        "     d. Check your inbox for a verification email from AWS and",
+        "        follow the link to set your password.",
+        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
+        "           You will need this when logging in after activation.",
+        "",
+    ]
+    step += 1
+
+    # Installer (URL expires in 72 hours)
+    lines += [
+        f"  {step}. Download and run the installer (link expires in 72 hours):",
+        "",
+        f"     curl -fsSL '{installer_url}' -o /tmp/fre-setup.zip",
+        "     unzip -d /tmp/fre-setup /tmp/fre-setup.zip",
+        "     bash /tmp/fre-setup/install.sh",
+        "",
+    ]
+    step += 1
+
+    if has_private_key:
+        lines += [
+            f"     The installer will place your SSH key at ~/.ssh/fre-claude.",
+            "     Then add the public key to GitHub so git push/pull works:",
+            "       ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy",
+            "       GitHub: Settings → SSH and GPG keys → New SSH key → paste it",
+            "",
+        ]
+
+    lines += [
+        f"  {step}. Log in to AWS (a browser window will open):",
+        "     ~/fre-aws/user.sh sso-login",
+        "",
+    ]
+    step += 1
+
+    lines += [
+        f"  {step}. Connect to your development instance:",
+        "     ~/fre-aws/user.sh connect",
+        "",
+        "Daily use:",
+        "  ~/fre-aws/user.sh sso-login   # re-authenticate (once per day)",
+        "  ~/fre-aws/user.sh start       # start your instance if it's stopped",
+        "  ~/fre-aws/user.sh connect     # connect to your instance",
+        "  ~/fre-aws/user.sh stop        # stop your instance when done",
+        "",
+    ]
+
+    if has_private_key:
+        lines += [
+            "Want to use your own SSH key instead of the generated one?",
+            f"Ask your admin to run: ./admin.sh update-user-key {username}",
+            "",
+        ]
+
+    lines += [
+        "Questions? Contact your project admin.",
+        "",
+        "—",
+        f"{project} automated onboarding",
+    ]
+
+    return "\n".join(lines)
+
+
+def build_body_attachments(username: str, project: str, role: str,
+                           aws_profile: str, aws_region: str,
+                           has_private_key: bool,
+                           sso_start_url: str, user_email: str) -> str:
     lines = [
         f"Hi {username},",
         "",
@@ -55,8 +148,7 @@ def build_body(username: str, project: str, role: str,
 
     step = 1
 
-    # Account activation must come first — the user cannot log in until
-    # they set a password via the SSO portal's Forgot password flow.
+    # Account activation
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
@@ -192,33 +284,53 @@ def main() -> None:
                         help="IAM Identity Center portal URL for account activation")
     parser.add_argument("--user-email", required=True,
                         help="User's email address (shown in activation instructions)")
+    parser.add_argument("--installer-url", default=None,
+                        help="Pre-signed S3 URL for the installer zip (72-hour expiry). "
+                             "When provided, no file attachments are sent.")
     parser.add_argument("--attachment", action="append", default=[],
                         metavar="PATH:FILENAME",
-                        help="File attachment as path:filename (repeatable)")
+                        help="File attachment as path:filename (repeatable). "
+                             "Fallback when --installer-url is not available.")
 
     args = parser.parse_args()
 
     attachments = [parse_attachment(a) for a in args.attachment]
-    has_private_key = any(fname == "fre-claude" for _, fname in attachments)
 
-    for path, filename in attachments:
-        if not os.path.exists(path):
-            print(f"ERROR: Attachment not found: {path}", file=sys.stderr)
-            sys.exit(1)
+    if args.installer_url:
+        # New flow: installer URL, no attachments
+        has_private_key = any(fname == "fre-claude" for _, fname in attachments)
+        body = build_body_installer_url(
+            username=args.username,
+            project=args.project,
+            role=args.role,
+            has_private_key=has_private_key,
+            sso_start_url=args.sso_start_url,
+            user_email=args.user_email,
+            installer_url=args.installer_url,
+        )
+        # No attachments when using installer URL
+        effective_attachments = []
+    else:
+        # Fallback flow: file attachments
+        has_private_key = any(fname == "fre-claude" for _, fname in attachments)
+        for path, filename in attachments:
+            if not os.path.exists(path):
+                print(f"ERROR: Attachment not found: {path}", file=sys.stderr)
+                sys.exit(1)
+        body = build_body_attachments(
+            username=args.username,
+            project=args.project,
+            role=args.role,
+            aws_profile=args.aws_profile,
+            aws_region=args.aws_region,
+            has_private_key=has_private_key,
+            sso_start_url=args.sso_start_url,
+            user_email=args.user_email,
+        )
+        effective_attachments = attachments
 
     subject = f"[{args.project}] Your development environment credentials"
-    body = build_body(
-        username=args.username,
-        project=args.project,
-        role=args.role,
-        aws_profile=args.aws_profile,
-        aws_region=args.aws_region,
-        has_private_key=has_private_key,
-        sso_start_url=args.sso_start_url,
-        user_email=args.user_email,
-    )
-
-    msg = build_message(args.to, args.from_addr, subject, body, attachments)
+    msg = build_message(args.to, args.from_addr, subject, body, effective_attachments)
     send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
 
     print(f"  Onboarding email sent to {args.to}")

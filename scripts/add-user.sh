@@ -24,6 +24,8 @@ source "${SCRIPT_DIR}/../config/backend.env"
 
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
+# shellcheck source=scripts/installer-bundle.sh
+source "${SCRIPT_DIR}/installer-bundle.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
@@ -436,6 +438,7 @@ if [[ "${ROLE}" == "admin" ]]; then
 PROJECT_NAME=${PROJECT_NAME}
 AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
 AWS_REGION=${AWS_REGION}
+TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
 "
   AWS_CONFIG="# Admin profile — use for admin.sh (ProjectAdminAccess)
 [profile claude-code]
@@ -462,6 +465,7 @@ else
 PROJECT_NAME=${PROJECT_NAME}
 AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
 AWS_REGION=${AWS_REGION}
+TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
 "
   AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
 sso_session = fre-aws-sso
@@ -517,17 +521,18 @@ users_s3_upload "${USERS_JSON}"
 echo "User '${NEW_USERNAME}' added to S3 registry."
 
 # ---------------------------------------------------------------------------
+# Generate installer bundle and upload to S3
+# ---------------------------------------------------------------------------
+echo ""
+echo "Building installer bundle..."
+INSTALLER_URL=$(_create_installer_bundle "${NEW_USERNAME}" "${BUNDLE_DIR}")
+echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${NEW_USERNAME}/latest.zip"
+
+# ---------------------------------------------------------------------------
 # Send onboarding email via SES
 # ---------------------------------------------------------------------------
 echo ""
 echo "Sending onboarding email to ${USER_EMAIL}..."
-
-ATTACHMENT_ARGS=()
-if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
-  ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/fre-claude:fre-claude")
-fi
-ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/aws-config:aws-config")
-ATTACHMENT_ARGS+=("--attachment" "${BUNDLE_DIR}/user.env:user.env")
 
 python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
   --to "${USER_EMAIL}" \
@@ -541,7 +546,7 @@ python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
   --ses-region "${AWS_REGION}" \
   --sso-start-url "${SSO_START_URL}" \
   --user-email "${USER_EMAIL}" \
-  "${ATTACHMENT_ARGS[@]}"
+  --installer-url "${INSTALLER_URL}"
 
 echo ""
 echo "=== Done ==="

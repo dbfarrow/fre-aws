@@ -72,8 +72,6 @@ RUN SSM_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "ubuntu_arm64" || echo "ubunt
 # ---------------------------------------------------------------------------
 WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
-COPY terraform/ /workspace/terraform/
-COPY tests/ /workspace/tests/
 RUN chmod +x /workspace/scripts/*.sh
 
 # ---------------------------------------------------------------------------
