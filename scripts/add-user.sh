@@ -445,19 +445,24 @@ TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
 "
   AWS_CONFIG="# Admin profile — use for admin.sh (ProjectAdminAccess)
 [profile claude-code]
-sso_session = fre-aws-sso
+sso_session = ${PROJECT_NAME}-admin
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
 sso_role_name = ProjectAdminAccess
 region = ${AWS_REGION}
 
 # Developer profile — use for user.sh connect (DeveloperAccess)
 [profile ${AWS_PROFILE_FOR_DEV}]
-sso_session = fre-aws-sso
+sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
 sso_role_name = DeveloperAccess
 region = ${AWS_REGION}
 
-[sso-session fre-aws-sso]
+[sso-session ${PROJECT_NAME}-admin]
+sso_start_url = ${SSO_START_URL}
+sso_region = ${SSO_REGION}
+sso_registration_scopes = sso:account:access
+
+[sso-session ${PROJECT_NAME}-dev]
 sso_start_url = ${SSO_START_URL}
 sso_region = ${SSO_REGION}
 sso_registration_scopes = sso:account:access
@@ -471,12 +476,12 @@ AWS_REGION=${AWS_REGION}
 TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
 "
   AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
-sso_session = fre-aws-sso
+sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
 sso_role_name = DeveloperAccess
 region = ${AWS_REGION}
 
-[sso-session fre-aws-sso]
+[sso-session ${PROJECT_NAME}-dev]
 sso_start_url = ${SSO_START_URL}
 sso_region = ${SSO_REGION}
 sso_registration_scopes = sso:account:access

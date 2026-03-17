@@ -500,19 +500,24 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
 # Admin profile — used by admin.sh for all management operations (ProjectAdminAccess)
 [profile claude-code]
-sso_session = fre-aws-sso
+sso_session = ${PROJECT_NAME}-admin
 sso_account_id = ${ACCOUNT_ID}
 sso_role_name = ProjectAdminAccess
 region = ${AWS_REGION}
 
 # Developer profile — used by admin.sh connect / user.sh connect (DeveloperAccess)
 [profile claude-code-dev]
-sso_session = fre-aws-sso
+sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${ACCOUNT_ID}
 sso_role_name = DeveloperAccess
 region = ${AWS_REGION}
 
-[sso-session fre-aws-sso]
+[sso-session ${PROJECT_NAME}-admin]
+sso_start_url = ${SSO_URL}
+sso_region = ${SSO_REGION}
+sso_registration_scopes = sso:account:access
+
+[sso-session ${PROJECT_NAME}-dev]
 sso_start_url = ${SSO_URL}
 sso_region = ${SSO_REGION}
 sso_registration_scopes = sso:account:access
