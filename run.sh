@@ -211,7 +211,7 @@ if [[ "${MODE}" == "user" ]]; then
     "--tty"
     "--env" "AWS_PAGER="
     "--env" "DEV_USERNAME=${MY_USERNAME}"
-    "--volume" "${HOME}/.aws:/root/.aws"
+    "--volume" "${USER_SCRIPT_DIR}/.aws:/root/.aws"
     "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
     "--volume" "${USER_SCRIPT_DIR}/scripts:/workspace/scripts"
   )
@@ -395,7 +395,7 @@ if [[ "${MODE}" == "user" ]]; then
     sso-login)
       if [[ "${FRESH_CREDS:-false}" == "true" ]]; then
         echo "Clearing credential cache..."
-        rm -f "${HOME}/.aws/cli/cache/"* 2>/dev/null || true
+        rm -f "${USER_SCRIPT_DIR}/.aws/cli/cache/"* 2>/dev/null || true
       fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"

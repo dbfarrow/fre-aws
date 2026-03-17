@@ -88,21 +88,16 @@ if [[ -f "${BUNDLE_DIR}/credentials/fre-claude" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5 — AWS config
+# Step 5 — AWS config (stored alongside user.sh, not in ~/.aws)
 # ---------------------------------------------------------------------------
 echo ""
 echo "Installing AWS config..."
-mkdir -p "${HOME}/.aws"
+mkdir -p "${INSTALL_DIR}/.aws"
 
-if [[ -f "${HOME}/.aws/config" ]]; then
-  BACKUP="${HOME}/.aws/config.backup-$(date +%Y%m%d%H%M%S)"
-  cp "${HOME}/.aws/config" "${BACKUP}"
-  echo "  Existing ~/.aws/config backed up to: ${BACKUP}"
-fi
-
-cp "${BUNDLE_DIR}/credentials/aws-config" "${HOME}/.aws/config"
-chmod 600 "${HOME}/.aws/config"
-echo "  AWS config installed: ~/.aws/config"
+cp "${BUNDLE_DIR}/credentials/aws-config" "${INSTALL_DIR}/.aws/config"
+chmod 600 "${INSTALL_DIR}/.aws/config"
+echo "  AWS config installed: ~/fre-aws/.aws/config"
+echo "  (kept separate from ~/.aws — your other AWS profiles are untouched)"
 
 # ---------------------------------------------------------------------------
 # Done

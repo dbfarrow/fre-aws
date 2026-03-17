@@ -64,7 +64,7 @@ bash /tmp/fre-setup/install.sh
 The installer will:
 - Copy everything into `~/fre-aws/`
 - Install your SSH key at `~/.ssh/fre-claude`
-- Install your AWS config at `~/.aws/config`
+- Install your AWS config at `~/fre-aws/.aws/config` (kept separate from `~/.aws` — your other AWS profiles are untouched)
 
 > **Add your SSH key to GitHub** so git push/pull works from your instance:
 > 1. Copy your public key: `ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy`
