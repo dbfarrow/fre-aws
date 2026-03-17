@@ -7,7 +7,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 ## Table of Contents
 
 - [What You Need](#what-you-need)
-- [SSH Key Setup](#ssh-key-setup)
+- [SSH Key](#ssh-key)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -30,15 +30,15 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 |-------------|-------|
 | Container runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) |
 | `git` | Pre-installed on macOS, or: `xcode-select --install` |
-| SSH key (`~/.ssh/fre-claude`) | See [SSH Key Setup](#ssh-key-setup) below |
+| SSH key + GitHub account | You almost certainly have these already — see [SSH Key](#ssh-key) below |
 
 ### In AWS
 
-| Requirement | What It Is | How To Set It Up |
-|-------------|-----------|------------------|
-| AWS account | A free-tier AWS account | [Create one here](https://aws.amazon.com/free) |
-| Root MFA | MFA on the root user | AWS Console → top-right menu → Security credentials → MFA |
-| IAM credentials | An identity this project authenticates as | See [Credential Setup](#credential-setup) below |
+| Requirement | Notes |
+|-------------|-------|
+| AWS account | Any account — free tier, personal, or organizational |
+| AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates a tighter `ProjectAdminAccess` permission set automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
+| Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
 > **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`ProjectAdminAccess` and `DeveloperAccess`).
 >
@@ -50,46 +50,19 @@ Each person using an instance needs their own [Claude Code account](https://clau
 
 ---
 
-## SSH Key Setup
+## SSH Key
 
-Connections use SSH tunneled through SSM. The SSH key enables **agent forwarding**: your local GitHub key is available on remote instances without ever copying the private key there.
+Admin connections use SSH tunneled through SSM with **agent forwarding** — your existing GitHub SSH key is used automatically. No new key is required.
 
-The key **must be named `fre-claude`**.
-
-### Create the key
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/fre-claude -C "fre-claude"
-```
-
-### Add the public key to GitHub
-
-This allows `git push` and `git pull` to work from EC2 instances:
-
-1. Copy your public key:
-   ```bash
-   cat ~/.ssh/fre-claude.pub | pbcopy
-   ```
-2. In GitHub: **Settings → SSH and GPG keys → New SSH key**
-   - Title: `fre-claude`
-   - Key type: **Authentication Key**
-   - Paste the public key
-
-### How it works at connect time
-
-When you run `./admin.sh connect <username>`:
-
-1. `admin.sh` checks that `~/.ssh/fre-claude` exists — exits with instructions if not
-2. The Docker container mounts `~/.ssh` read-only
-3. Inside the container, `connect.sh` starts a fresh `ssh-agent` and runs `ssh-add` — **one passphrase prompt**
-4. SSH connects to the EC2 instance with `-A` (agent forwarding) over SSM
-5. On the instance, `git` operations use your forwarded agent — your private key never leaves your Mac
+The tooling looks for your key in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`. If you use a standard location, no configuration is needed. Agent forwarding means your private key never leaves your Mac — `git push` and `git pull` work on EC2 instances through the forwarded agent without copying the key to the instance.
 
 ---
 
 ## Credential Setup
 
-Two options are documented below.
+`./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates a tighter `ProjectAdminAccess` permission set scoped to what this project actually needs. After that one-time step, you reassign yourself to `ProjectAdminAccess` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
+
+The two options below describe how you hold that initial AdministratorAccess:
 
 | | Option A: IAM Identity Center | Option B: IAM User (Free Tier) |
 |---|---|---|
@@ -273,22 +246,27 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 ## First-Time Setup
 
 ```
-1.  Create AWS account + enable root MFA                    ← AWS Console, one time
+1.  AWS account with AdministratorAccess                    ← any account; free tier works
+    Enable root MFA while you're there                      ← AWS Console → Security credentials → MFA
 2.  Set up credentials (Option A or B above)                ← one time
 3.  Install Docker on your Mac                              ← one time
-4.  Create SSH key + add public key to GitHub               ← see SSH Key Setup above
+4.  Confirm SSH key + GitHub account                        ← ~/.ssh/id_ed25519 works; see SSH Key above
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/admin.env.example config/admin.env            ← create your admin config
 7.  Edit config/admin.env                                   ← set PROJECT_NAME, AWS_REGION,
                                                                SSO_REGION, SSO_START_URL,
                                                                SENDER_EMAIL, etc.
-8.  ./admin.sh sso-login                                    ← authenticate (Option A)
+8.  ./admin.sh sso-login                                    ← authenticate (Option A only)
 9.  ./admin.sh verify                                       ← confirm credentials work
 10. ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS,
                                                                permission sets, SES verification
-11. (Option A) reassign yourself to ProjectAdminAccess      ← IAM Identity Center → AWS accounts
-                                                               update sso_role_name in ~/.aws/config
-                                                               re-run ./admin.sh sso-login
+                                                               (runs as AdministratorAccess)
+11. Switch to ProjectAdminAccess                            ← bootstrap just created this set;
+    (Option A) IAM Identity Center → AWS accounts              assign yourself to it, update
+               assign yourself to ProjectAdminAccess            sso_role_name in ~/.aws/config,
+               re-run ./admin.sh sso-login                      re-run sso-login
+    (Option B) no action needed                             ← IAM user access keys are unchanged;
+                                                               ProjectAdminAccess is for SSO users
 12. ./admin.sh add-user                                     ← interactive wizard: adds a user,
                                                                creates IAM Identity Center account,
                                                                emails credentials
