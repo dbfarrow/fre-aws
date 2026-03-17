@@ -455,17 +455,33 @@ if [[ "${MODE}" == "user" ]]; then
       ;;
     connect)
       USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
-      if [[ ! -f "${USER_SSH_DIR}/fre-claude" ]]; then
-        echo "ERROR: SSH key not found at ${USER_SSH_DIR}/fre-claude" >&2
-        echo "       Re-run the installer to restore your SSH key." >&2
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      if [[ -f "${USER_SSH_DIR}/fre-claude" ]]; then
+        # Installer-managed key — passphrase stored in Secrets Manager
+        CONNECT_ARGS+=(
+          "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
+          "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
+        )
+      elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+        # Fallback: user provided their own key (e.g. admin role, or custom key)
+        CONNECT_ARGS+=(
+          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519"
+        )
+      elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+        CONNECT_ARGS+=(
+          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa"
+        )
+      else
+        echo "ERROR: No SSH key found." >&2
+        echo "       Checked: ${USER_SSH_DIR}/fre-claude" >&2
+        echo "                ~/.ssh/id_ed25519" >&2
+        echo "                ~/.ssh/id_rsa" >&2
+        echo "       Ask your admin to regenerate your installer bundle." >&2
         exit 1
       fi
-      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-      CONNECT_ARGS+=(
-        "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
-        "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
-        "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
-      )
       [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
