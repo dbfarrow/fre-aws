@@ -66,6 +66,9 @@ connection:
   connect <user>        Open a shell on a user's EC2 instance (SSH over SSM)
   refresh <user>        Push updated session_start.sh to a running instance
   ssm <user>            Direct SSM shell (fallback when SSH isn't working)
+  push-admin-keys [user]
+                        Append admin SSH key to authorized_keys on one or all
+                        running instances (idempotent, uses SSM — no SSH needed)
 
 authentication:
   sso-login [--fresh]   Log in via IAM Identity Center
@@ -298,7 +301,14 @@ if [[ "${MODE}" == "admin" ]]; then
         echo "       To add one user: ./admin.sh add-user, then ./admin.sh up" >&2
         exit 1
       fi
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/up.sh
+      ADMIN_SSH_PUB_KEY=""
+      HOST_SSH_KEY=$(_detect_admin_ssh_key)
+      if [[ -n "${HOST_SSH_KEY}" && -f "${HOST_SSH_KEY}.pub" ]]; then
+        ADMIN_SSH_PUB_KEY=$(cat "${HOST_SSH_KEY}.pub")
+      fi
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "ADMIN_SSH_PUB_KEY=${ADMIN_SSH_PUB_KEY}" \
+        "${IMAGE_NAME}" /workspace/scripts/up.sh
       ;;
     down)
       if [[ -n "${USERNAME}" ]]; then
@@ -406,6 +416,24 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/publish-installer.sh
+      ;;
+    push-admin-keys)
+      HOST_SSH_KEY=$(_detect_admin_ssh_key)
+      if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+        echo "ERROR: No SSH key found." >&2
+        echo "       Create one: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+        exit 1
+      fi
+      if [[ ! -f "${HOST_SSH_KEY}.pub" ]]; then
+        echo "ERROR: No public key found at ${HOST_SSH_KEY}.pub" >&2
+        echo "       Generate it: ssh-keygen -y -f ${HOST_SSH_KEY} > ${HOST_SSH_KEY}.pub" >&2
+        exit 1
+      fi
+      ADMIN_SSH_PUB_KEY=$(cat "${HOST_SSH_KEY}.pub")
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        --env "ADMIN_SSH_PUB_KEY=${ADMIN_SSH_PUB_KEY}" \
+        "${IMAGE_NAME}" /workspace/scripts/push-admin-keys.sh
       ;;
     build)
       docker build -t "${IMAGE_NAME}" "$(dirname "$0")"

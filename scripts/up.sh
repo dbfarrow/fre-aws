@@ -48,10 +48,19 @@ echo ""
 # ---------------------------------------------------------------------------
 USERS_JSON=$(mktemp)
 USERS_TFVARS=$(mktemp)
-trap 'rm -f "${USERS_JSON}" "${USERS_TFVARS}"' EXIT
+ADMIN_KEYS_TFVARS=""
+trap 'rm -f "${USERS_JSON}" "${USERS_TFVARS}" "${ADMIN_KEYS_TFVARS}"' EXIT
 
 users_s3_download "${USERS_JSON}"
 users_render_tfvars "${USERS_JSON}" "${USERS_TFVARS}"
+
+# Admin SSH public key — passed in by run.sh from the host's .pub file
+EXTRA_TF_ARGS=()
+if [[ -n "${ADMIN_SSH_PUB_KEY:-}" ]]; then
+  ADMIN_KEYS_TFVARS=$(mktemp --suffix=.tfvars)
+  printf 'admin_ssh_keys = ["%s"]\n' "${ADMIN_SSH_PUB_KEY}" > "${ADMIN_KEYS_TFVARS}"
+  EXTRA_TF_ARGS+=("-var-file=${ADMIN_KEYS_TFVARS}")
+fi
 
 echo "=== fre-aws up ==="
 echo "  Project:  ${PROJECT_NAME}"
@@ -89,6 +98,7 @@ terraform -chdir="${TF_DIR}" plan \
   -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
   -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}" \
   -var-file="${USERS_TFVARS}" \
+  "${EXTRA_TF_ARGS[@]}" \
   -out="${TF_DIR}/.tfplan"
 echo ""
 

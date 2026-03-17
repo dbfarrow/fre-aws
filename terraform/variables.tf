@@ -55,6 +55,12 @@ variable "owner_email" {
   default     = ""
 }
 
+variable "admin_ssh_keys" {
+  description = "SSH public keys for admin access to all user instances. Auto-populated from the admin's SSH key by up.sh."
+  type        = list(string)
+  default     = []
+}
+
 variable "users" {
   description = "Map of usernames to per-user configuration. Each entry creates a dedicated EC2 instance. See config/users.tfvars.example."
   type = map(object({

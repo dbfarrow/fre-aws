@@ -4,6 +4,24 @@ locals {
 
   # Tag all resources with owner if provided
   owner_tags = var.owner_email != "" ? { Owner = var.owner_email } : {}
+
+  # Bash snippet to append admin SSH keys to authorized_keys (empty string if none configured)
+  admin_keys_block = length(var.admin_ssh_keys) == 0 ? "" : join("\n", concat(
+    [
+      "",
+      "# ---------------------------------------------------------------------------",
+      "# Admin SSH keys (appended at provision time for admin instance access)",
+      "# ---------------------------------------------------------------------------",
+      "mkdir -p /home/developer/.ssh",
+      "chmod 700 /home/developer/.ssh",
+    ],
+    [for k in var.admin_ssh_keys : "echo '${k}' >> /home/developer/.ssh/authorized_keys"],
+    [
+      "chmod 600 /home/developer/.ssh/authorized_keys",
+      "chown -R developer:developer /home/developer/.ssh",
+      "echo 'Admin SSH key(s) appended to authorized_keys.'",
+    ]
+  ))
 }
 
 # ---------------------------------------------------------------------------
@@ -239,6 +257,7 @@ module "user_ec2" {
     "GIT_USER_EMAIL='${each.value.git_user_email}'",
     "",
     file("${path.module}/user_data_main.sh"),
+    local.admin_keys_block,
     "",
     "# ---------------------------------------------------------------------------",
     "# Session launcher — injected from scripts/session_start.sh at provision time",
