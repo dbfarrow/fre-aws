@@ -236,7 +236,9 @@ if [[ -n "${SSO_REGION:-}" ]]; then
     }
 
     # ---- DeveloperAccess ------------------------------------------------
-    # Scoped policy: developer can only start/stop/connect to their own instance.
+    # Scoped policy: users can manage EC2 and connect via SSM.
+    # Per-user instance isolation is enforced at the SSH layer (each instance
+    # only accepts its owner's key), not via IAM tag conditions.
     DEV_PS_ARN=$(_ensure_ps "DeveloperAccess" \
       "Scoped ${PROJECT_NAME} user access: connect to own instance only")
 
@@ -247,25 +249,22 @@ if [[ -n "${SSO_REGION:-}" ]]; then
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["ec2:StartInstances", "ec2:StopInstances"],
-      "Resource": "*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${sts:RoleSessionName}"}}
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus"],
+      "Action": ["ec2:StartInstances", "ec2:StopInstances",
+                 "ec2:DescribeInstances", "ec2:DescribeInstanceStatus"],
       "Resource": "*"
     },
     {
       "Effect": "Allow",
       "Action": "ssm:StartSession",
-      "Resource": "*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/Username": "${sts:RoleSessionName}"}}
+      "Resource": [
+        "arn:aws:ec2:*:*:instance/*",
+        "arn:aws:ssm:*::document/AWS-StartSSHSession"
+      ]
     },
     {
       "Effect": "Allow",
       "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
-      "Resource": "arn:aws:ssm:*:*:session/${sts:RoleSessionName}-*"
+      "Resource": "arn:aws:ssm:*:*:session/${aws:RoleSessionName}-*"
     }
   ]
 }
