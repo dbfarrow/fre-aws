@@ -13,6 +13,7 @@ Your AWS development environment is already set up — your admin has provisione
 | **Mac** | These instructions are Mac-specific |
 | **Container runtime** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — install one if you haven't already |
 | **Claude Code account** | Create your account at [claude.ai/code](https://claude.ai/code) before your first session — your admin cannot do this for you |
+| **GitHub account** | Needed to clone and push to private repos — create one at [github.com](https://github.com) if you don't have one. Your admin cannot do this for you. |
 | **Onboarding email** | Sent by your admin — contains a one-time installer download link |
 
 > **No `git` required.** The installer handles everything.

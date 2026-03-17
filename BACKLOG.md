@@ -1,5 +1,16 @@
 # Backlog
 
+## gh-based session launcher
+
+Replace the SSH-based "Clone a GitHub repo" option in `session_start.sh` with a `gh`-powered flow:
+
+1. On session start, check `gh auth status` — if not authenticated, run `gh auth login` (device code flow, same UX as SSO login)
+2. Replace the freeform "owner/repo" prompt with `gh repo list` to show the user's available repos in a numbered menu
+3. Clone the selected repo with `gh repo clone` (uses HTTPS + OAuth token — no SSH key in GitHub required)
+4. Launch Claude Code in the cloned directory
+
+This eliminates the "add SSH key to GitHub" prerequisite for users and replaces it with the same browser device-code flow they already do for AWS SSO and Claude login. Requires `gh` CLI to be installed on the EC2 instance (add to `user_data_main.sh`).
+
 ## Billing / cost visibility improvements
 
 The `stat` command has a basic billing section (MTD spend, forecast, per-service breakdown via Cost Explorer). Things worth expanding:
