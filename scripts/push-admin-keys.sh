@@ -83,14 +83,14 @@ _push_key() {
     return
   fi
 
-  # Idempotent: only append if key not already present
+  # Append key then deduplicate in-place — idempotent, no quoting issues
   local ssm_params
   ssm_params=$(jq -n --arg key "${ADMIN_SSH_PUB_KEY}" '{
     "commands": [
       "mkdir -p /home/developer/.ssh",
       "chmod 700 /home/developer/.ssh",
-      "touch /home/developer/.ssh/authorized_keys",
-      "grep -qxF '\($key)' /home/developer/.ssh/authorized_keys || echo \($key) >> /home/developer/.ssh/authorized_keys",
+      "echo \($key) >> /home/developer/.ssh/authorized_keys",
+      "sort -u -o /home/developer/.ssh/authorized_keys /home/developer/.ssh/authorized_keys",
       "chmod 600 /home/developer/.ssh/authorized_keys",
       "chown -R developer:developer /home/developer/.ssh"
     ]
