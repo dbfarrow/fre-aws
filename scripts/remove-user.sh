@@ -74,7 +74,11 @@ echo "User '${DEV_USERNAME}' removed from registry."
 # ---------------------------------------------------------------------------
 # IAM Identity Center: remove account assignment and delete user
 # ---------------------------------------------------------------------------
-if [[ -z "${SSO_REGION:-}" ]]; then
+if [[ "${KEEP_SSO_USER:-}" == "true" ]]; then
+  echo ""
+  echo "IAM Identity Center user '${DEV_USERNAME}' preserved (--keep-sso)."
+  echo "  Re-adding this username will reuse the existing Identity Center account."
+elif [[ -z "${SSO_REGION:-}" ]]; then
   echo ""
   echo "SSO_REGION not set — skipping IAM Identity Center cleanup."
   echo "  Delete the user manually in the IAM Identity Center console if needed."

@@ -37,7 +37,10 @@ options:
 
 user management:
   add-user              Interactive wizard to add a new user
-  remove-user <user>    Remove a user (destroys instance on next up)
+  remove-user <user> [--keep-sso]
+                        Remove a user (destroys instance on next up)
+                        --keep-sso preserves the IAM Identity Center account
+                        so the user can be re-added without AWS account setup
   update-user-key <user>
                         Replace a user's SSH public key
   stat                  Show environment config, cost profile, and user/instance summary
@@ -304,8 +307,11 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     remove-user)
       require_username
+      KEEP_SSO_FLAG=""
+      [[ "${3:-}" == "--keep-sso" ]] && KEEP_SSO_FLAG="true"
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
+        --env "KEEP_SSO_USER=${KEEP_SSO_FLAG}" \
         "${IMAGE_NAME}" /workspace/scripts/remove-user.sh
       ;;
     update-user-key)
