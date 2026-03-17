@@ -269,7 +269,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
     {
       "Effect": "Allow",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/*"
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/${PROJECT_NAME}/installers/*"
     }
   ]
 }
