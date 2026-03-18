@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bats \
     openssh-client \
     python3 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

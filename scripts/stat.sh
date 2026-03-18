@@ -289,6 +289,34 @@ fi
 
 echo ""
 
+# Format any timestamp (ISO 8601 or "YYYY-MM-DD HH:MM:SS GMT") to local time.
+format_time() {
+  local ts="$1"
+  [[ -z "${ts}" ]] && return
+  echo "${ts}" | python3 -c "
+import sys, os
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(os.environ.get('TZ') or 'UTC')
+except Exception:
+    tz = timezone.utc
+ts = sys.stdin.read().strip().replace(' GMT', '+00:00')
+print(datetime.fromisoformat(ts).astimezone(tz).strftime('%m/%d %H:%M %Z'))
+" 2>/dev/null || echo "${ts}"
+}
+
+# Extract and reformat the timestamp from a StateTransitionReason to local timezone.
+format_reason() {
+  local reason="$1"
+  [[ -z "${reason}" ]] && return
+  if [[ "${reason}" =~ \(([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\ [A-Z]+)\) ]]; then
+    format_time "${BASH_REMATCH[1]}"
+  else
+    echo "${reason}"
+  fi
+}
+
 echo "--- Users (${USER_COUNT}) ---"
 echo ""
 
@@ -300,14 +328,19 @@ else
   while IFS= read -r username; do
     instance_info=$(echo "${INSTANCES}" | jq -r --arg user "${username}" '
       .[] | select(.Tags // [] | any(.Key == "Username" and .Value == $user))
-      | "\(.InstanceId)\t\(.State.Name)\t\(.InstanceType)"
+      | "\(.InstanceId)|\(.State.Name)|\(.InstanceType)|\(.StateTransitionReason // "")|\(.LaunchTime // "")"
     ' | head -1)
     role=$(jq -r --arg u "${username}" '.[$u].role // "-"' "${USERS_JSON}")
 
     if [[ -n "${instance_info}" ]]; then
-      IFS=$'\t' read -r instance_id state type <<< "${instance_info}"
+      IFS='|' read -r instance_id state type reason launch_time <<< "${instance_info}"
       printf "  %-20s %-22s %-12s %-10s %s\n" \
         "${username}" "${instance_id}" "${state}" "${type}" "${role}"
+      if [[ "${state}" == "running" && -n "${launch_time}" ]]; then
+        up_since=$(format_time "${launch_time}")
+        printf "  %-20s %-22s %s\n" "" "" "up since ${up_since}"
+      fi
+      [[ -n "${reason}" ]] && printf "  %-20s %-22s %s\n" "" "" "$(format_reason "${reason}")"
     else
       printf "  %-20s %-22s %-12s %-10s %s\n" \
         "${username}" "(not provisioned)" "" "" "${role}"

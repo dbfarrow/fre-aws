@@ -143,6 +143,11 @@ if [[ "${MODE}" == "admin" ]]; then
     source "$(pwd)/config/admin.env"
   fi
 
+  # Detect host timezone for passing into containers (for human-readable timestamps)
+  _HOST_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||' || true)
+  [[ -z "${_HOST_TZ}" && -f /etc/timezone ]] && _HOST_TZ=$(cat /etc/timezone 2>/dev/null || true)
+  _HOST_TZ="${_HOST_TZ:-UTC}"
+
   DOCKER_ARGS=(
     "--rm"
     "--interactive"
@@ -150,6 +155,7 @@ if [[ "${MODE}" == "admin" ]]; then
     "--env" "AWS_PAGER="
     "--env" "SENDER_EMAIL=${SENDER_EMAIL:-}"
     "--env" "SSO_START_URL=${SSO_START_URL:-}"
+    "--env" "TZ=${_HOST_TZ}"
     "--volume" "${HOME}/.aws:/root/.aws"
     "--volume" "$(pwd)/run.sh:/workspace/run.sh:ro"
     "--volume" "$(pwd)/Dockerfile:/workspace/Dockerfile:ro"
@@ -164,6 +170,7 @@ if [[ "${MODE}" == "admin" ]]; then
     "--env" "AWS_PAGER="
     "--env" "SENDER_EMAIL=${SENDER_EMAIL:-}"
     "--env" "SSO_START_URL=${SSO_START_URL:-}"
+    "--env" "TZ=${_HOST_TZ}"
     "--volume" "${HOME}/.aws:/root/.aws"
     "--volume" "$(pwd)/run.sh:/workspace/run.sh:ro"
     "--volume" "$(pwd)/Dockerfile:/workspace/Dockerfile:ro"
@@ -480,8 +487,10 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     shell)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash -c '
+        set -a
         source /workspace/config/admin.env 2>/dev/null || true
-        source /workspace/config/backend.env  2>/dev/null || true
+        source /workspace/config/backend.env 2>/dev/null || true
+        set +a
         eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed '"'"'s/^/export /'"'"')" || true
         exec /bin/bash
       '
