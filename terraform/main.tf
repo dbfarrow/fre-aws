@@ -261,6 +261,32 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Allow each instance to stop itself via the EC2 API.
+# Scoped to instances tagged with this project and this user so the instance
+# cannot stop other users' instances. The autoshutdown timer uses this instead
+# of "sudo shutdown -h now" so that AWS records "User initiated (timestamp)" in
+# StateTransitionReason, making the stop time visible in list/stat output.
+resource "aws_iam_role_policy" "ec2_self_stop" {
+  for_each = var.users
+  name     = "self-stop"
+  role     = aws_iam_role.user_ec2[each.key].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "ec2:StopInstances"
+      Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
+      Condition = {
+        StringEquals = {
+          "aws:ResourceTag/ProjectName" = var.project_name
+          "aws:ResourceTag/Username"    = each.key
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "user_ec2" {
   for_each = var.users
   name     = "${var.project_name}-${each.key}-ec2-profile"
