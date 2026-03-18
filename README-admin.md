@@ -257,7 +257,8 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ### Keeping costs low
 
-- **Stop instances when not in use** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
+- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after ~10 minutes of inactivity. A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use.
+- **Stop instances manually when needed** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
 - **Spot instances are on by default** — saves 60–90% once free tier expires.
 - For heavy workloads (browser automation, large builds), use `INSTANCE_TYPE=t3.small` (2 GB RAM) or larger.
 
@@ -372,15 +373,22 @@ New instances get the admin's SSH public key injected automatically via `user_da
 
 This uses SSM `send-command` — no existing SSH access required. Safe to run multiple times (idempotent).
 
-### Pushing session launcher updates
+### Pushing instance configuration updates
 
-After editing `scripts/session_start.sh`:
+After editing `scripts/session_start.sh`, `config/tmux.conf`, or any instance-side config:
 
 ```bash
 ./admin.sh refresh <username>
 ```
 
-No down/up needed. Changes take effect on their next connect.
+No down/up needed. `refresh` pushes the following in one shot:
+
+| What | When it takes effect |
+|------|---------------------|
+| `session_start.sh` — session launcher | Next connect |
+| `.tmux.conf` — tmux key bindings and status bar | Next new tmux session |
+| Autoshutdown timer (systemd) | Immediately — active on the running instance |
+| `.bash_profile` TMUX guard | Next connect |
 
 ### Pushing script updates to users
 
@@ -423,7 +431,7 @@ Then ask the user to run `~/fre-aws/user.sh update` to pull the latest scripts f
 ### Connecting
 ```bash
 ./admin.sh connect <username>           # SSH into an instance (uses DeveloperAccess)
-./admin.sh refresh <username>           # push updated session_start.sh to a running instance
+./admin.sh refresh <username>           # push session_start.sh + tmux.conf + autoshutdown timer
 ./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
                                         # running instances (idempotent, uses SSM — no SSH needed)

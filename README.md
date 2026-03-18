@@ -56,7 +56,7 @@ Uses their assigned instance. Uses `./user.sh`.
 Responsibilities:
 - Log in to AWS once per day (`./user.sh sso-login`)
 - Connect to their instance (`./user.sh connect`)
-- Stop their instance when done to avoid unnecessary charges (`./user.sh stop`)
+- Instances stop automatically when idle; users can also stop manually with `./user.sh stop`
 
 **→ [User Guide](README-user.md)**
 

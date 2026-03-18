@@ -94,20 +94,34 @@ Once your admin confirms your instance is ready:
 
 Your SSH key passphrase is handled automatically — no prompt needed.
 
-**You should see a session launcher like this:**
+**You should see a session launcher like this (first connect — no repos yet):**
 
 ```
-╔═══════════════════════════════════════════╗
-║     Claude Code — Session Launcher        ║
-╚═══════════════════════════════════════════╝
+╔═══════════════════════════════════════╗
+║     Claude Code Development Env       ║
+╚═══════════════════════════════════════╝
 
-  No repos found in ~/repos yet.
+   c) Clone a GitHub repo
+   n) New project
+   s) Shell
 
-   1) Clone a GitHub repo
-   2) Create a new project
-   3) Open a shell
+Choose [c]:
+```
 
-Enter choice [1]:
+**After cloning a repo, it appears at the top by number:**
+
+```
+╔═══════════════════════════════════════╗
+║     Claude Code Development Env       ║
+╚═══════════════════════════════════════╝
+
+   1) my-project
+
+   c) Clone a GitHub repo
+   n) New project
+   s) Shell
+
+Choose [1]:
 ```
 
 ---
@@ -118,10 +132,10 @@ Enter choice [1]:
 ~/fre-aws/user.sh sso-login  # log in to AWS (once per day, when your session expires)
 ~/fre-aws/user.sh start      # start your instance (if it's stopped)
 ~/fre-aws/user.sh connect    # connect to your instance
-~/fre-aws/user.sh stop       # stop your instance when done for the day
+~/fre-aws/user.sh stop       # stop your instance manually (optional — see below)
 ```
 
-**Stop your instance when you're not using it.** A stopped instance doesn't incur compute charges, but your files are preserved on disk.
+**Instances stop automatically when idle.** When you exit Claude and close your tmux session, the instance detects no active sessions and shuts itself down after about 10 minutes. A stopped instance doesn't incur compute charges, but your files are preserved on disk. You can also stop it manually at any time with `./user.sh stop`.
 
 ---
 
@@ -129,10 +143,16 @@ Enter choice [1]:
 
 Each time you connect, you'll see a menu:
 
-- **Locally-cloned repos** — any repos in `~/repos` appear at the top; select one to launch Claude Code in that project
-- **Clone a GitHub repo** — authenticates with GitHub if needed (browser code flow, one-time per instance), then shows a numbered list of your repos to choose from; clone the selected repo with one keypress
-- **Create a new project** — prompts for a name, creates a new empty directory in `~/repos`
-- **Open a shell** — drops you into bash without launching Claude Code
+- **Locally-cloned repos** — any repos in `~/repos` appear numbered at the top; select one to open Claude Code in that project
+- **`c` — Clone a GitHub repo** — authenticates with GitHub if needed (browser code flow, one-time per instance), then shows a numbered list of your repos to choose from; clone the selected repo with one keypress
+- **`n` — New project** — prompts for a name, creates a new empty directory in `~/repos`
+- **`s` — Shell** — drops you into bash without launching Claude Code
+
+### Session persistence
+
+Each repo opens in a named **tmux** session. If your SSH connection drops (or you close your laptop), the session keeps running on the instance. The next time you connect and select the same repo, you'll be reattached to the same session — Claude Code and your conversation history right where you left them.
+
+`claude --continue` is used automatically on every launch, so your conversation context is always restored even after a fresh connect.
 
 ### Cloning private repos
 
@@ -188,6 +208,6 @@ Your files live on an EBS volume that persists even when the instance is stopped
 
 ## That's it
 
-Once you're connected, Claude Code is ready. Type `claude` at any time to start a session, or it will launch automatically when you select a project from the menu.
+Once you're connected, Claude Code launches automatically when you select a project from the menu. It opens with `--continue` so your conversation history is always restored.
 
 > **First time only:** Claude Code will prompt you to log in with your Claude account the first time you run it. Make sure you've created your [Claude Code account](https://claude.ai/code) before connecting.
