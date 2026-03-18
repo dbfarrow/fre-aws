@@ -4,6 +4,8 @@ Your AWS development environment is already set up — your admin has provisione
 
 **Time to complete: about 10 minutes.**
 
+> **New to this?** Before diving in, [How it works](README-how-it-works.md) explains the mental model — two places, three services, and why you log in differently to each one.
+
 ---
 
 ## What You Need
