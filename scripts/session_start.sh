@@ -1,11 +1,14 @@
 #!/bin/bash
 # session_start.sh — Interactive Claude Code session launcher.
-# Runs automatically on SSH login. Offers locally-cloned repos, cloning a
-# new GitHub repo (via gh CLI / OAuth — no SSH key in GitHub required),
-# creating a new local project, or a plain shell.
+# Runs automatically on SSH login. Offers locally-cloned repos (numbered),
+# clone/new/shell actions (lettered), all launched inside named tmux sessions
+# with `claude --continue` so conversation history always resumes.
 #
 # To update this script on a running instance without down/up:
 #   ./run.sh refresh
+
+# Already inside tmux — don't nest
+[[ -n "${TMUX:-}" ]] && exit 0
 
 # Only run interactively. If stdin is not a terminal (e.g. a git hook or other
 # tool spawned a login shell), exit cleanly so the intended command can run.
@@ -34,23 +37,52 @@ IDX=1
 
 while IFS= read -r -d '' dir; do
   REPO_NAME=$(basename "${dir}")
-  printf "  %2d) %s\n" "${IDX}" "${REPO_NAME}"
+  printf "   %d) %s\n" "${IDX}" "${REPO_NAME}"
   OPTIONS+=("${dir}")
   (( IDX++ ))
 done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
            -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
 
-printf "  %2d) Clone a GitHub repo\n"  "${IDX}"; CLONE_OPT=${IDX};  (( IDX++ ))
-printf "  %2d) Create a new project\n" "${IDX}"; CREATE_OPT=${IDX}; (( IDX++ ))
-printf "  %2d) Open a shell\n"         "${IDX}"; SHELL_OPT=${IDX}
+if [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  echo ""
+fi
+
+echo "   c) Clone a GitHub repo"
+echo "   n) New project"
+echo "   s) Shell"
 echo ""
-read -r -p "Choose [${CLONE_OPT}]: " CHOICE
-CHOICE="${CHOICE:-${CLONE_OPT}}"
+
+# Default: first repo if any exist, otherwise clone
+if [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  DEFAULT="1"
+else
+  DEFAULT="c"
+fi
+
+read -r -p "Choose [${DEFAULT}]: " CHOICE
+CHOICE="${CHOICE:-${DEFAULT}}"
+
+# ---------------------------------------------------------------------------
+# Helper: launch Claude in a named tmux session for the given directory.
+# Reattaches if a session with that name already exists.
+# ---------------------------------------------------------------------------
+launch_in_repo() {
+  local dir="$1"
+  local name; name=$(basename "${dir}")
+  if tmux has-session -t "${name}" 2>/dev/null; then
+    echo "Reattaching to existing '${name}' session..."
+    exec tmux attach-session -t "${name}"
+  else
+    echo "Starting Claude Code in ${name}..."
+    cd "${dir}"
+    exec tmux new-session -s "${name}" 'claude --continue; exec bash'
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Shell option
 # ---------------------------------------------------------------------------
-if [[ "${CHOICE}" == "${SHELL_OPT}" ]]; then
+if [[ "${CHOICE}" == "s" ]]; then
   echo ""
   echo "Repos are in ~/repos/. Type 'claude' to start Claude Code."
   cd "${HOME}"
@@ -60,7 +92,7 @@ fi
 # ---------------------------------------------------------------------------
 # Clone a GitHub repo via gh CLI (OAuth token — no SSH key in GitHub required)
 # ---------------------------------------------------------------------------
-if [[ "${CHOICE}" == "${CLONE_OPT}" ]]; then
+if [[ "${CHOICE}" == "c" ]]; then
   echo ""
 
   # Ensure gh is authenticated (HTTPS protocol — no SSH key required)
@@ -128,16 +160,13 @@ if [[ "${CHOICE}" == "${CLONE_OPT}" ]]; then
     echo "  Done."
   fi
   echo ""
-  echo "Starting Claude Code in ${REPO_NAME}..."
-  echo ""
-  cd "${LOCAL_DIR}"
-  exec claude
+  launch_in_repo "${LOCAL_DIR}"
 fi
 
 # ---------------------------------------------------------------------------
 # Create a new local project directory
 # ---------------------------------------------------------------------------
-if [[ "${CHOICE}" == "${CREATE_OPT}" ]]; then
+if [[ "${CHOICE}" == "n" ]]; then
   echo ""
   read -r -p "Project name: " PROJECT_NAME
   if [[ -z "${PROJECT_NAME}" ]]; then
@@ -148,14 +177,11 @@ if [[ "${CHOICE}" == "${CREATE_OPT}" ]]; then
   LOCAL_DIR="${REPOS_DIR}/${PROJECT_NAME}"
   mkdir -p "${LOCAL_DIR}"
   echo ""
-  echo "Starting Claude Code in ${PROJECT_NAME}..."
-  echo ""
-  cd "${LOCAL_DIR}"
-  exec claude
+  launch_in_repo "${LOCAL_DIR}"
 fi
 
 # ---------------------------------------------------------------------------
-# Validate local repo choice
+# Validate numeric repo choice
 # ---------------------------------------------------------------------------
 if ! [[ "${CHOICE}" =~ ^[0-9]+$ ]] || (( CHOICE < 1 || CHOICE > ${#OPTIONS[@]} )); then
   echo "Invalid choice. Dropping into shell."
@@ -166,9 +192,4 @@ fi
 # ---------------------------------------------------------------------------
 # Launch Claude in the selected local repo
 # ---------------------------------------------------------------------------
-SELECTED="${OPTIONS[$((CHOICE-1))]}"
-echo ""
-echo "Starting Claude Code in $(basename "${SELECTED}")..."
-echo ""
-cd "${SELECTED}"
-exec claude
+launch_in_repo "${OPTIONS[$((CHOICE-1))]}"
