@@ -69,5 +69,23 @@ aws ec2 wait instance-running \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}"
 
+echo "Waiting for SSM agent to come online..."
+for i in $(seq 1 24); do
+  SSM_STATUS=$(aws ssm describe-instance-information \
+    --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+    --query 'InstanceInformationList[0].PingStatus' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null)
+  if [[ "${SSM_STATUS}" == "Online" ]]; then
+    echo "SSM agent online."
+    break
+  fi
+  if [[ "${i}" -eq 24 ]]; then
+    echo "WARNING: SSM agent did not come online after 2 minutes. You may need to wait before connecting."
+  else
+    sleep 5
+  fi
+done
+
 echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is running."
 echo "To connect: ./user.sh connect    (or: ./admin.sh connect ${DEV_USERNAME})"
