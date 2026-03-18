@@ -2,17 +2,24 @@
 
 ## Project Purpose
 
-This project creates and maintains an AWS environment using Infrastructure as Code (IaC). It provisions EC2 instances that serve as development environments running the Claude Code CLI. The entire toolchain is packaged as a Docker image so that non-technical Mac users can manage their AWS dev environment with minimal local setup.
+This project creates and maintains a multi-user AWS environment using Infrastructure as Code (IaC). It provisions individual EC2 instances per user that serve as persistent development environments running the Claude Code CLI. The entire toolchain is packaged as a Docker image so that non-technical Mac users can manage their AWS dev environment with minimal local setup.
 
 ## Host Machine Requirements (Mac)
 
 - A container runtime (Docker Desktop, OrbStack, Rancher Desktop, etc.)
 - `git`
-- AWS credentials via IAM Identity Center (SSO) — **no long-lived access keys**
+- AWS credentials via IAM Identity Center (SSO)
+- SSH key (`~/.ssh/fre-claude`) for SSH-over-SSM access
+
+---
 
 ## Development Workflow
 
 Always use plan mode before writing any code. Use `EnterPlanMode` to explore the codebase, understand the existing patterns, and design an approach before making any changes. Get user approval on the plan before implementing.
+
+**Debug commands:** Always write debug/diagnostic commands as a single line with no line continuations (`\`). Users copy-paste these from the terminal; multi-line commands cause paste errors.
+
+---
 
 ## Core Principles
 
@@ -21,10 +28,10 @@ This project applies Zero Trust principles where free-tier AWS constraints allow
 
 | Principle | Applied | Notes |
 |-----------|---------|-------|
-| No SSH / no port 22 | ✅ | All EC2 access via SSM Session Manager |
+| No SSH / no port 22 | ✅ | All EC2 access via SSM Session Manager (SSH tunneled over SSM) |
 | No EC2 public IP | ⚠️ | Default mode (`public`) gives EC2 a public IP; `private_nat` removes it |
-| No long-lived credentials | ❌ Free-tier compromise | IAM Identity Center requires AWS Organizations, which is not available on a free-tier standalone account. IAM user access keys are used instead. Mitigate with MFA and key rotation. Upgrade to IAM Identity Center when AWS Organizations becomes available. |
-| Least-privilege IAM | ⚠️ | `AdministratorAccess` used initially for the IAM user; EC2 instance role is scoped to SSM only |
+| No long-lived credentials | ✅ | IAM Identity Center (SSO) with short-lived session tokens |
+| Least-privilege IAM | ✅ | DeveloperAccess and ProjectAdminAccess permission sets scoped per user |
 | IMDSv2 enforced | ✅ | `http_tokens = "required"` on all instances |
 | Encryption at rest | ✅ | KMS-backed EBS and S3 |
 | Security groups deny by default | ✅ | No ingress rules on EC2 |
@@ -39,7 +46,7 @@ Key modules in use:
 | VPC | `terraform-aws-modules/vpc/aws` |
 | EC2 | `terraform-aws-modules/ec2-instance/aws` |
 | Security Group | `terraform-aws-modules/security-group/aws` |
-| IAM Role | `terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks` or `iam-assumable-role` |
+| IAM Role | `terraform-aws-modules/iam/aws//modules/iam-assumable-role` |
 | S3 (state bucket) | `terraform-aws-modules/s3-bucket/aws` |
 | KMS | `terraform-aws-modules/kms/aws` |
 
@@ -51,27 +58,90 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 
 ```
 .
-├── Dockerfile                  # Self-contained image: terraform, aws-cli, scripts
-├── docker-compose.yml          # Convenience wrapper for docker run
+├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, scripts
+├── docker-compose.yml           # Convenience wrapper for docker run
+├── run.sh                       # Host-side entry point; dispatches all commands into Docker
 ├── terraform/
-│   ├── main.tf                 # Root module: calls all submodules
+│   ├── main.tf                  # Root module; assembles user_data via join() + file()
 │   ├── variables.tf
 │   ├── outputs.tf
-│   ├── backend.tf              # S3 + DynamoDB remote state (encrypted)
-│   ├── versions.tf             # Terraform and provider version pins
-│   └── tests/                  # terraform test files (*.tftest.hcl)
+│   ├── backend.tf               # S3 + DynamoDB remote state (encrypted, KMS)
+│   ├── versions.tf              # Terraform and provider version pins
+│   ├── user_data_main.sh        # EC2 bootstrap: installs Claude, tmux, autoshutdown timer
+│   ├── user_data_tail.sh        # EC2 bootstrap tail: .bash_profile session launcher hook
+│   └── tests/                   # terraform test files (*.tftest.hcl)
 ├── scripts/
-│   ├── bootstrap.sh            # One-time: S3 bucket, DynamoDB, KMS key for state
-│   ├── up.sh                   # terraform init + apply
-│   ├── down.sh                 # terraform destroy (with confirmation)
-│   ├── start.sh                # Start stopped EC2 instance
-│   ├── stop.sh                 # Stop running EC2 instance
-│   └── connect.sh              # Open SSM Session Manager session (no SSH)
+│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, KMS key
+│   ├── up.sh                    # terraform init + apply for a user's instance
+│   ├── down.sh                  # terraform destroy for a user's instance
+│   ├── start.sh                 # Start a stopped EC2 instance
+│   ├── stop.sh                  # Stop a running EC2 instance
+│   ├── connect.sh               # SSH over SSM tunnel → session_start.sh menu
+│   ├── refresh.sh               # Push config to running instance without rebuild
+│   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
+│   ├── stat.sh                  # Full environment status: identity, billing, instances
+│   ├── list.sh                  # Users + EC2 instance state summary
+│   ├── add-user.sh              # Add user to S3 registry + Identity Center
+│   ├── remove-user.sh           # Remove user from registry (and optionally Identity Center)
+│   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
-│   └── admin.env               # Admin variables: region, instance type, project name (gitignored)
-├── README.md
+│   ├── admin.env                # Admin config: region, profile, project name (gitignored)
+│   ├── admin.env.example        # Tracked template for admin.env
+│   ├── backend.env              # Generated by bootstrap; Terraform backend config
+│   ├── defaults.env             # Per-instance defaults: instance type, EBS size (gitignored)
+│   ├── defaults.env.example     # Tracked template for defaults.env
+│   └── tmux.conf                # tmux config deployed to all instances
 └── CLAUDE.md
 ```
+
+---
+
+## Multi-User Model
+
+Each user gets their own EC2 instance, IAM Identity Center user, and S3 registry entry. Users are managed via:
+
+```
+./admin.sh add-user <username>     # Provision Identity Center user + S3 entry
+./admin.sh remove-user <username>  # Remove user (--keep-sso to preserve Identity Center)
+./admin.sh list                    # Show all users + instance state + timestamps
+./admin.sh stat                    # Full environment status including billing
+./admin.sh up <username>           # Provision EC2 instance for user
+./admin.sh down <username>         # Destroy EC2 instance for user
+./admin.sh start <username>        # Start stopped instance
+./admin.sh stop <username>         # Stop running instance
+./admin.sh connect <username>      # Connect via SSH over SSM
+./admin.sh refresh <username>      # Push config updates to running instance (no rebuild)
+```
+
+**User registry** lives in S3 (not tfvars). Each entry stores: `user_email`, `role`, `git_user_name`, `git_user_email`, `ssh_public_key`.
+
+---
+
+## EC2 Session Flow
+
+### Connection
+`connect.sh` starts an ssh-agent inside Docker, loads `~/.ssh/fre-claude`, and opens SSH over an SSM tunnel (no inbound port 22). Agent forwarding (`ssh -A`) allows git operations on the EC2 using the local key.
+
+### Session Launcher (`session_start.sh`)
+On connect, `.bash_profile` fires `session_start.sh` (guarded: only on interactive SSH, never inside tmux). The menu shows:
+- Numbered list of repos in `~/repos` — selecting one reattaches or creates a named tmux session
+- `c` — clone a GitHub repo (prompts owner/repo, clones via SSH agent)
+- `n` — create a new project directory
+- `s` — open a plain shell
+
+Each repo option launches: `claude --continue 2>/dev/null || claude; exec bash` inside a named tmux session. `--continue` resumes the last conversation; the `|| claude` fallback handles new projects with no history. `exec bash` keeps the window open after Claude exits.
+
+### Session Persistence
+tmux named sessions survive SSH/SSM disconnects. Reconnecting and selecting the same repo reattaches to the existing session — Claude picks up exactly where it left off.
+
+### Autoshutdown
+A systemd timer (`autoshutdown.timer`) runs every 5 minutes:
+- **tmux sessions exist** → reset idle timer, do nothing (user is working or session is detached)
+- **0 tmux sessions for 10+ minutes** → `sudo shutdown -h now`
+
+This means: deliberately exiting Claude → `exit` the bash shell → tmux session ends → instance stops itself in ~10–15 minutes. A midnight Lambda provides a safety net for forgotten detached sessions.
+
+**`./admin.sh refresh`** installs the autoshutdown timer live on a running instance (no rebuild needed). It also pushes `session_start.sh`, `.tmux.conf`, and patches `.bash_profile`.
 
 ---
 
@@ -81,164 +151,89 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 |------|---------|
 | Terraform (~1.9+) | IaC provisioning via terraform-aws-modules |
 | AWS CLI (v2) | SSO authentication, EC2 lifecycle, SSM sessions |
-| AWS SSM Session Manager | Secure shell access — replaces SSH entirely |
-| Bash | User-facing scripts inside the container |
-| Docker | Packages all tooling; user installs nothing locally |
+| AWS SSM Session Manager | Secure shell access — SSH tunneled over SSM, no port 22 |
+| IAM Identity Center | Per-user SSO with DeveloperAccess + ProjectAdminAccess permission sets |
+| tmux | Session persistence across SSH disconnects |
+| Python 3 + zoneinfo | Timestamp formatting (AWS ISO 8601 → local timezone) |
+| Bash | All user-facing scripts |
+| Docker | Packages all tooling; users install nothing locally |
 
 ---
 
-## Docker Image Design
+## Dockerfile Notes
 
-- **Base image**: `alpine` or `debian:slim` — install terraform and aws-cli explicitly
-- **Includes**: terraform, aws-cli v2, session-manager-plugin, the `scripts/` directory
-- **Nothing sensitive is baked in** — all config is mounted or passed at runtime:
-  - AWS SSO config via `-v ~/.aws:/root/.aws:ro`
-  - No SSH keys (SSM Session Manager is used instead)
-  - Project config via `-v "$(pwd)/config:/workspace/config:ro"`
-
-### Example Docker Run Pattern
-
-```bash
-docker run --rm -it \
-  -v ~/.aws:/root/.aws:ro \
-  -v "$(pwd)/terraform:/workspace/terraform" \
-  -v "$(pwd)/config:/workspace/config:ro" \
-  claude-code-aws <command>
-```
-
-All user-facing scripts (`bootstrap.sh`, `up.sh`, etc.) are thin wrappers that invoke this pattern transparently.
+- Base image: `debian:bookworm-slim`
+- Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**
+- `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
+- `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
+- Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
 
 ---
 
-## AWS Infrastructure (Zero Trust Design)
+## AWS Infrastructure
 
 ### Network
 - **VPC** with public and private subnets (via `terraform-aws-modules/vpc/aws`)
-- EC2 instances deploy to **private subnets only** — no public IP, no internet gateway route
-- NAT Gateway for outbound-only internet access (package installs, Claude API calls)
-- VPC Flow Logs: **not enabled initially** (cost); add when moving to production
+- Default mode: EC2 in public subnet with public IP, all inbound traffic blocked by security group
+- `private_nat` mode: EC2 in private subnet + NAT Gateway (~$33/month extra)
+- VPC Flow Logs: not enabled (cost); add before production
 
 ### EC2 Instance
 - Deployed via `terraform-aws-modules/ec2-instance/aws`
-- **Spot instances by default** — uses `instance_market_options` with `spot` type; falls back to on-demand if spot capacity unavailable
-- Default instance type: `t3.micro` (Free Tier eligible: 750 hrs/month for first 12 months)
+- **Spot instances by default** — significant cost savings; falls back to on-demand if unavailable
+- `user_data_replace_on_change = false` — prevents accidental instance replacement on user_data edits
 - **No security group ingress rules** — only egress allowed
-- **IMDSv2 required** (`http_tokens = "required"` in metadata options)
+- **IMDSv2 required** (`http_tokens = "required"`)
 - EBS volumes encrypted with a project-managed KMS key
-- IAM instance profile with only: SSM core permissions + any required AWS API access
-- User data installs Claude Code CLI on first boot
-
-> **Spot instance note**: Spot instances can be interrupted with 2-minute notice when AWS reclaims capacity. For a dev environment this is acceptable — the instance state is preserved on EBS and can be restarted. If interruption tolerance is unacceptable for a user, expose a `use_spot = false` variable to opt into on-demand.
-
-### Access
-- **AWS SSM Session Manager only** — `connect.sh` runs `aws ssm start-session`
-- No key pairs, no port 22, no bastion hosts
-- SSM access controlled by IAM policy (only the instance's SSM role + authorized user roles)
-
-### IAM
-- Users authenticate via **IAM Identity Center (SSO)** — no IAM user access keys
-- EC2 instance role: `AmazonSSMManagedInstanceCore` + scoped custom policies
-- Terraform execution role: least-privilege, assumed via IAM Identity Center permission set
-- All roles use `aws:MultiFactorAuthPresent` conditions where applicable
+- `developer` user has `NOPASSWD:ALL` sudo (required for autoshutdown `shutdown -h now`)
 
 ### State Management
-- Remote state in **S3 with versioning, encryption (KMS), and public access block**
-- State locking via **DynamoDB table with encryption**
-- State bucket and DynamoDB created by `bootstrap.sh` before Terraform is initialized
-- State bucket managed by `terraform-aws-modules/s3-bucket/aws`
+- Remote state in **S3 with versioning, KMS encryption, public access block**
+- State locking via **DynamoDB table**
+- Terraform state bucket is in us-east-1 (bootstrap ran there); EC2 resources are in us-west-2 — intentional
+- State bucket key per user: `terraform/<username>/terraform.tfstate`
+
+### Scheduled Stop (Lambda)
+- Midnight Lambda stops all running instances to prevent overnight charges
+- Safety net for detached tmux sessions the autoshutdown timer doesn't catch
 
 ---
 
 ## Testing Strategy
 
-### Terraform Validation (no AWS required, runs in CI)
+### Terraform Validation (no AWS required)
 ```bash
-terraform fmt --check          # formatting
-terraform validate             # syntax + schema
-terraform plan                 # dry-run (requires AWS credentials)
+terraform fmt --check
+terraform validate
+terraform plan
 ```
-
-### Terraform Tests (built-in framework, Terraform 1.6+)
-- Test files in `terraform/tests/*.tftest.hcl`
-- Use `mock_provider` blocks for pure unit tests (no AWS calls)
-- Integration tests run against the **single project AWS account** using a short-lived test workspace; resources are destroyed immediately after the test run
-- Run with: `terraform test`
 
 ### Shell Script Tests (BATS)
 - Test files in `tests/bats/*.bats`
-- Tests cover: argument validation, error handling, output formatting, safety prompts
 - BATS is installed in the Docker image
-- Run with: `bats tests/bats/`
+- Run with: `./admin.sh test`
 
-### Local Development Without AWS Costs
-- **LocalStack** (optional): mock AWS services for fast iteration on Terraform logic
-- Use `TF_VAR_use_localstack=true` to redirect the AWS provider endpoint
-- Note: SSM Session Manager behavior cannot be fully mocked; integration tests need real AWS
-
-### CI Strategy
-> **Single-account setup**: This project uses one AWS account for both development and CI. There is no separate test/staging account.
-
-- **On PR** (no AWS required): `terraform fmt --check`, `terraform validate`, `bats` tests, `terraform plan` with `mock_provider`
-- **Integration tests** (require AWS): run manually or gated behind a label/workflow trigger to avoid uncontrolled AWS spend; use a dedicated Terraform workspace (`test-<pr-number>`) that is always destroyed after the run
-- **On merge to main**: `terraform apply` updates the real environment; no separate staging environment at this stage
+### Known Account Limits
+- `ENABLE_ANOMALY_DETECTION=false` required in `config/defaults.env` (account hit dimensional monitor limit)
 
 ---
 
-## User-Facing Scripts
+## Debugging Tips
 
-### `bootstrap.sh`
-One-time setup run before any Terraform commands. Creates:
-- KMS key for encryption
-- S3 bucket for Terraform state (versioned, encrypted, blocked from public access)
-- DynamoDB table for state locking
-
-Prompts for: AWS profile (SSO), region, unique project name.
-
-### `up.sh`
-Runs `terraform init` → `terraform plan` → confirmation prompt → `terraform apply`.
-Outputs: instance ID, private IP, SSM connect command.
-
-### `down.sh`
-Runs `terraform destroy` with an explicit confirmation prompt. Warns if state contains resources.
-
-### `start.sh`
-`aws ec2 start-instances` for the managed instance. Waits until running.
-
-### `stop.sh`
-`aws ec2 stop-instances` for the managed instance.
-
-### `connect.sh`
-Opens an SSM Session Manager session. No SSH key required.
-```bash
-aws ssm start-session --target <instance-id> --profile <sso-profile>
-```
-
----
-
-## Development Commands
-
-```bash
-# Build the Docker image
-docker build -t claude-code-aws .
-
-# Validate Terraform inside the container
-docker run --rm -v "$(pwd)/terraform:/workspace/terraform" \
-  claude-code-aws terraform -chdir=/workspace/terraform validate
-
-# Run BATS tests
-docker run --rm -v "$(pwd):/workspace" claude-code-aws bats /workspace/tests/bats/
-
-# Format check
-docker run --rm -v "$(pwd)/terraform:/workspace/terraform" \
-  claude-code-aws terraform -chdir=/workspace/terraform fmt --check
-```
+- **Always write debug commands as a single line** — users copy-paste from the terminal; line continuations break paste
+- Check autoshutdown timer: `systemctl status autoshutdown.timer`
+- Check autoshutdown logs: `journalctl -u autoshutdown.service --no-pager -n 20`
+- Check idle file: `cat ~/.autoshutdown-idle-since`
+- Check tmux sessions: `tmux list-sessions`
+- Timestamp issues: AWS `LaunchTime` is ISO 8601 with `+00:00` offset; `date -d` silently fails on this — use Python `datetime.fromisoformat` instead
+- IFS gotcha: `IFS=$'\t' read` collapses consecutive tabs (bash treats tab as whitespace). Use `|` as jq output delimiter with `IFS='|' read` to handle empty fields correctly
 
 ---
 
 ## Security Checklist (enforce before every PR)
 
 - [ ] No hardcoded AWS account IDs, ARNs with account IDs, or credentials
-- [ ] No SSH key pairs referenced anywhere
+- [ ] No SSH key pairs referenced anywhere (SSH is only via SSM tunnel)
 - [ ] No security group ingress rules on EC2
 - [ ] All S3 buckets have `block_public_acls = true` and `block_public_policy = true`
 - [ ] All EBS volumes use `encrypted = true` with a KMS key
@@ -250,7 +245,7 @@ docker run --rm -v "$(pwd)/terraform:/workspace/terraform" \
 
 ## Open Decisions / Future Work
 
-- [ ] Multi-user support (separate EC2 per user, separate IAM roles)
-- [ ] Pre-built AMI with Claude Code to minimize boot time
-- [ ] Automatic re-authentication flow when SSO token expires
+- [ ] Pre-built AMI with Claude Code to minimize boot time (currently installs on first boot)
+- [ ] Automatic SSO re-authentication flow when token expires mid-session
 - [ ] GitHub Actions CI for automated plan/apply
+- [ ] CloudTrail + VPC Flow Logs (deferred for cost; add before production use)
