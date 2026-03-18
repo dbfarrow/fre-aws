@@ -55,13 +55,17 @@ if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
   exit 1
 fi
 
-SSH_KEY_FILE="${SSH_KEY_FILE:-/root/.ssh/fre-claude}"
 SSH_OPTS=(
-  "-i" "${SSH_KEY_FILE}"
   "-o" "StrictHostKeyChecking=no"
   "-o" "UserKnownHostsFile=/dev/null"
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
+
+if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+  # No agent forwarding — authenticate with key file
+  SSH_KEY_FILE="${SSH_KEY_FILE:-/root/.ssh/fre-claude}"
+  SSH_OPTS+=("-i" "${SSH_KEY_FILE}")
+fi
 
 echo "--- pushing session_start.sh to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \

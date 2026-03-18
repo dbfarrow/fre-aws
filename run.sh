@@ -191,6 +191,19 @@ if [[ "${MODE}" == "admin" ]]; then
     fi
     echo "${key}"
   }
+
+  # Detect a usable SSH agent socket to forward into the Docker container.
+  # Prefers SSH_AUTH_SOCK (works natively with OrbStack and a properly
+  # configured ssh-agent); falls back to Docker Desktop's host bridge socket.
+  _detect_ssh_agent_sock() {
+    if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+      echo "${SSH_AUTH_SOCK}"
+    elif [[ -S "/run/host-services/ssh-auth.sock" ]]; then
+      echo "/run/host-services/ssh-auth.sock"
+    else
+      echo ""
+    fi
+  }
 fi
 
 # ---------------------------------------------------------------------------
@@ -373,37 +386,59 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     connect)
       require_username
-      HOST_SSH_KEY=$(_detect_admin_ssh_key)
-      if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
-        echo "ERROR: No SSH key found." >&2
-        echo "       Create one: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
-        echo "       Or set SSH_KEY_FILE in config/admin.env" >&2
-        exit 1
+      AGENT_SOCK=$(_detect_ssh_agent_sock)
+      if [[ -n "${AGENT_SOCK}" ]]; then
+        # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
+        docker run "${DOCKER_ARGS[@]}" \
+          --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
+          --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=claude-code-dev" \
+          "${IMAGE_NAME}" /workspace/scripts/connect.sh
+      else
+        # Key file fallback: start fresh agent inside container, prompt for passphrase.
+        HOST_SSH_KEY=$(_detect_admin_ssh_key)
+        if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+          echo "ERROR: No SSH key found and no SSH agent running." >&2
+          echo "       Load your key first: ssh-add ~/.ssh/id_ed25519" >&2
+          echo "       Or create a key:     ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+          exit 1
+        fi
+        CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
+        docker run "${DOCKER_ARGS[@]}" \
+          --volume "${HOME}/.ssh:/root/.ssh:ro" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=claude-code-dev" \
+          --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
+          "${IMAGE_NAME}" /workspace/scripts/connect.sh
       fi
-      CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
-      docker run "${DOCKER_ARGS[@]}" \
-        --volume "${HOME}/.ssh:/root/.ssh:ro" \
-        --env "DEV_USERNAME=${USERNAME}" \
-        --env "AWS_PROFILE=claude-code-dev" \
-        --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
-        "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;
     refresh)
       require_username
-      HOST_SSH_KEY=$(_detect_admin_ssh_key)
-      if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
-        echo "ERROR: No SSH key found." >&2
-        echo "       Create one: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
-        echo "       Or set SSH_KEY_FILE in config/admin.env" >&2
-        exit 1
+      AGENT_SOCK=$(_detect_ssh_agent_sock)
+      if [[ -n "${AGENT_SOCK}" ]]; then
+        docker run "${DOCKER_ARGS[@]}" \
+          --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
+          --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=${AWS_PROFILE}" \
+          "${IMAGE_NAME}" /workspace/scripts/refresh.sh
+      else
+        HOST_SSH_KEY=$(_detect_admin_ssh_key)
+        if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+          echo "ERROR: No SSH key found and no SSH agent running." >&2
+          echo "       Load your key first: ssh-add ~/.ssh/id_ed25519" >&2
+          echo "       Or create a key:     ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+          exit 1
+        fi
+        CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
+        docker run "${DOCKER_ARGS[@]}" \
+          --volume "${HOME}/.ssh:/root/.ssh:ro" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=${AWS_PROFILE}" \
+          --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
+          "${IMAGE_NAME}" /workspace/scripts/refresh.sh
       fi
-      CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
-      docker run "${DOCKER_ARGS[@]}" \
-        --volume "${HOME}/.ssh:/root/.ssh:ro" \
-        --env "DEV_USERNAME=${USERNAME}" \
-        --env "AWS_PROFILE=${AWS_PROFILE}" \
-        --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
-        "${IMAGE_NAME}" /workspace/scripts/refresh.sh
       ;;
     ssm)
       require_username
