@@ -75,7 +75,7 @@ launch_in_repo() {
   else
     echo "Starting Claude Code in ${name}..."
     cd "${dir}"
-    exec tmux new-session -s "${name}" 'claude --continue; exec bash'
+    exec tmux new-session -s "${name}" 'claude --continue 2>/dev/null || claude; exec bash'
   fi
 }
 
