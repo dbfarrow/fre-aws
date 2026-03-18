@@ -61,7 +61,20 @@ Let users know to sign up for both before their onboarding email arrives. The se
 
 Admin connections use SSH tunneled through SSM. Your public key is injected into every user instance at provision time (and can be pushed to existing instances with `./admin.sh push-admin-keys`).
 
-The tooling looks for your key in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`. If you use a standard location, no configuration is needed.
+### Authentication (preferred: ssh-agent forwarding)
+
+The preferred way to authenticate is to have your SSH key loaded in your Mac's `ssh-agent` before running any `./admin.sh` command. The tooling detects a running agent automatically and forwards its socket into the Docker container — no key file is mounted, no passphrase is prompted.
+
+```bash
+ssh-add ~/.ssh/id_ed25519   # load your key once per Mac session
+./admin.sh connect <user>   # connects with no further prompts
+```
+
+If you use macOS's built-in agent (Keychain), your key may already be loaded automatically and no `ssh-add` is needed at all.
+
+### Fallback: key file
+
+If no agent is running, the tooling falls back to mounting `~/.ssh` into the container and prompting for the key passphrase. The key is looked up in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`.
 
 ---
 
@@ -257,7 +270,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
     Enable root MFA while you're there                      ← AWS Console → Security credentials → MFA
 2.  Set up credentials (Option A or B above)                ← one time
 3.  Install Docker on your Mac                              ← one time
-4.  Confirm SSH key + GitHub account                        ← ~/.ssh/id_ed25519 works; see SSH Key above
+4.  Confirm SSH key in ssh-agent                            ← ssh-add ~/.ssh/id_ed25519; see SSH Key above
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/admin.env.example config/admin.env            ← create your admin config
 7.  Edit config/admin.env                                   ← set PROJECT_NAME, AWS_REGION,
