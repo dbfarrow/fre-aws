@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# refresh.sh — Push an updated session_start.sh to a running instance.
-# Faster than down/up: overwrites the file in place via SSH over SSM.
+# refresh.sh — Push config updates to a running instance without a rebuild.
+# Pushes: session_start.sh, .tmux.conf, autoshutdown timer, .bash_profile guards.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,6 +78,55 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "tee /home/developer/.tmux.conf > /dev/null" \
   < "${TMUX_CONF}"
 
+echo "--- installing autoshutdown on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo tee /usr/local/bin/autoshutdown.sh > /dev/null && sudo chmod +x /usr/local/bin/autoshutdown.sh" \
+  << 'AUTOSHUTDOWN'
+#!/bin/bash
+# Shut down when no tmux sessions exist (user exited deliberately).
+# Detached sessions (SSM drop) are kept alive — midnight Lambda handles those.
+IDLE_FILE="${HOME}/.autoshutdown-idle-since"
+SESSION_COUNT=$(tmux list-sessions 2>/dev/null | wc -l || echo 0)
+if [[ "${SESSION_COUNT}" -gt 0 ]]; then
+  rm -f "${IDLE_FILE}"; exit 0
+fi
+[[ ! -f "${IDLE_FILE}" ]] && { date +%s > "${IDLE_FILE}"; exit 0; }
+IDLE_MINUTES=$(( ($(date +%s) - $(cat "${IDLE_FILE}")) / 60 ))
+if [[ "${IDLE_MINUTES}" -ge 10 ]]; then
+  logger "autoshutdown: no tmux sessions for ${IDLE_MINUTES}min — shutting down"
+  sudo shutdown -h now
+fi
+AUTOSHUTDOWN
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo tee /etc/systemd/system/autoshutdown.timer > /dev/null" \
+  << 'TIMER'
+[Unit]
+Description=Auto-shutdown when idle
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+TIMER
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo tee /etc/systemd/system/autoshutdown.service > /dev/null" \
+  << 'SERVICE'
+[Unit]
+Description=Auto-shutdown check
+
+[Service]
+Type=oneshot
+User=developer
+ExecStart=/usr/local/bin/autoshutdown.sh
+SERVICE
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo systemctl daemon-reload && sudo systemctl enable --now autoshutdown.timer && echo '  autoshutdown timer active'"
+
 # Also ensure .bash_profile has both the stdin-is-terminal guard (-t 0) and
 # the TMUX guard (-z "${TMUX:-}") so session_start.sh never fires inside an
 # existing tmux window or from non-interactive shells.
@@ -97,4 +146,5 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
 
 echo ""
 echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
-echo "    Changes take effect on the next connect"
+echo "    session_start.sh + .tmux.conf: take effect on next connect"
+echo "    autoshutdown timer:            active immediately"
