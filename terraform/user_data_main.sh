@@ -82,3 +82,49 @@ echo "SSH server configured."
 # ---------------------------------------------------------------------------
 mkdir -p /home/developer/repos
 chown developer:developer /home/developer/repos
+
+# ---------------------------------------------------------------------------
+# Autoshutdown — stop instance when no tmux sessions exist for 10+ minutes
+# ---------------------------------------------------------------------------
+cat > /usr/local/bin/autoshutdown.sh << 'AUTOSHUTDOWN'
+#!/bin/bash
+# Shut down when no tmux sessions exist (user exited deliberately).
+# Detached sessions (SSM drop) are kept alive — midnight Lambda handles those.
+IDLE_FILE="${HOME}/.autoshutdown-idle-since"
+SESSION_COUNT=$(tmux list-sessions 2>/dev/null | wc -l || echo 0)
+if [[ "${SESSION_COUNT}" -gt 0 ]]; then
+  rm -f "${IDLE_FILE}"; exit 0
+fi
+[[ ! -f "${IDLE_FILE}" ]] && { date +%s > "${IDLE_FILE}"; exit 0; }
+IDLE_MINUTES=$(( ($(date +%s) - $(cat "${IDLE_FILE}")) / 60 ))
+if [[ "${IDLE_MINUTES}" -ge 10 ]]; then
+  logger "autoshutdown: no tmux sessions for ${IDLE_MINUTES}min — shutting down"
+  sudo shutdown -h now
+fi
+AUTOSHUTDOWN
+chmod +x /usr/local/bin/autoshutdown.sh
+
+cat > /etc/systemd/system/autoshutdown.timer << 'TIMER'
+[Unit]
+Description=Auto-shutdown when idle
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+TIMER
+
+cat > /etc/systemd/system/autoshutdown.service << 'SERVICE'
+[Unit]
+Description=Auto-shutdown check
+
+[Service]
+Type=oneshot
+User=developer
+ExecStart=/usr/local/bin/autoshutdown.sh
+SERVICE
+
+systemctl enable --now autoshutdown.timer
+echo "Autoshutdown timer enabled."

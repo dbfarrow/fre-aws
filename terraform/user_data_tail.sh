@@ -5,7 +5,7 @@
 cat >> /home/developer/.bash_profile << 'PROFILE'
 
 # Launch Claude Code session selector on interactive SSH login
-if [[ -n "${SSH_TTY:-}" && -t 0 ]]; then
+if [[ -n "${SSH_TTY:-}" && -t 0 && -z "${TMUX:-}" ]]; then
   exec /home/developer/session_start.sh
 fi
 PROFILE
