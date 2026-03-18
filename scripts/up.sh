@@ -97,6 +97,7 @@ terraform -chdir="${TF_DIR}" plan \
   -var="budget_alert_threshold_percent=${BUDGET_ALERT_THRESHOLD_PERCENT:-80}" \
   -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
   -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}" \
+  -var="enable_scheduled_stop=${ENABLE_SCHEDULED_STOP:-true}" \
   -var-file="${USERS_TFVARS}" \
   "${EXTRA_TF_ARGS[@]}" \
   -out="${TF_DIR}/.tfplan"

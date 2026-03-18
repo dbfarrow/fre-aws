@@ -12,6 +12,7 @@ override.tf.json
 *_override.tf.json
 terraform/.tfplan*
 terraform/imports_repair.tf
+terraform/lambda/scheduled_stop.zip
 
 # Terraform variable files that may contain secrets
 *.auto.tfvars

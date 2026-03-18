@@ -102,3 +102,9 @@ variable "enable_anomaly_detection" {
   type        = bool
   default     = true
 }
+
+variable "enable_scheduled_stop" {
+  description = "Stop all running instances automatically at midnight Pacific time. Prevents forgotten instances from running overnight and incurring charges."
+  type        = bool
+  default     = true
+}
