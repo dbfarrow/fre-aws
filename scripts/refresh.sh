@@ -72,14 +72,24 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /home/developer/session_start.sh > /dev/null && sudo chmod +x /home/developer/session_start.sh && sudo chown developer:developer /home/developer/session_start.sh" \
   < "${SESSION_START}"
 
-# Also ensure .bash_profile has the stdin-is-terminal guard (-t 0).
-# Older instances only check SSH_TTY, which is inherited by child processes and
-# causes session_start.sh to be triggered by git hooks and other login shells.
+TMUX_CONF="${SCRIPT_DIR}/../config/tmux.conf"
+echo "--- pushing .tmux.conf to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "tee /home/developer/.tmux.conf > /dev/null" \
+  < "${TMUX_CONF}"
+
+# Also ensure .bash_profile has both the stdin-is-terminal guard (-t 0) and
+# the TMUX guard (-z "${TMUX:-}") so session_start.sh never fires inside an
+# existing tmux window or from non-interactive shells.
 echo "--- patching .bash_profile on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
   if grep -q "SSH_TTY" ~/.bash_profile && ! grep -q "\-t 0" ~/.bash_profile; then
     sed -i "s/\[\[ -n \"\${SSH_TTY:-}\" \]\]/[[ -n \"\${SSH_TTY:-}\" \&\& -t 0 ]]/" ~/.bash_profile
-    echo "  .bash_profile updated."
+    echo "  .bash_profile: added -t 0 guard."
+  fi
+  if grep -q "SSH_TTY" ~/.bash_profile && ! grep -q "TMUX" ~/.bash_profile; then
+    sed -i "s/-t 0 \]\]/-t 0 \&\& -z \"\${TMUX:-}\" ]]/" ~/.bash_profile
+    echo "  .bash_profile: added TMUX guard."
   else
     echo "  .bash_profile already up to date."
   fi
