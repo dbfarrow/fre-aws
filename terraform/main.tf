@@ -28,6 +28,8 @@ locals {
 # Data sources
 # ---------------------------------------------------------------------------
 
+data "aws_caller_identity" "current" {}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -60,6 +62,74 @@ module "kms" {
   enable_key_rotation     = true
 
   aliases = ["${var.project_name}/main"]
+
+  # Allow any IAM principal in this account to use the key via EC2/EBS.
+  # This is the AWS-recommended pattern for CMK-encrypted EBS volumes:
+  # the ViaService condition ensures the key can only be used through EC2,
+  # and GrantIsForAWSResource ensures CreateGrant is only used for AWS services.
+  # Without this, only principals with explicit kms:CreateGrant (e.g. AdminAccess)
+  # can start instances with encrypted EBS — DeveloperAccess would fail.
+  key_statements = [
+    {
+      sid = "AllowEBSEncryption"
+      effect = "Allow"
+      principals = [{
+        type        = "AWS"
+        identifiers = ["*"]
+      }]
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey",
+      ]
+      resources = ["*"]
+      conditions = [
+        {
+          test     = "StringEquals"
+          variable = "kms:CallerAccount"
+          values   = [data.aws_caller_identity.current.account_id]
+        },
+        {
+          test     = "StringEquals"
+          variable = "kms:ViaService"
+          values   = ["ec2.${var.aws_region}.amazonaws.com"]
+        },
+      ]
+    },
+    {
+      sid = "AllowEBSGrants"
+      effect = "Allow"
+      principals = [{
+        type        = "AWS"
+        identifiers = ["*"]
+      }]
+      actions = [
+        "kms:CreateGrant",
+        "kms:ListGrants",
+        "kms:RevokeGrant",
+      ]
+      resources = ["*"]
+      conditions = [
+        {
+          test     = "StringEquals"
+          variable = "kms:CallerAccount"
+          values   = [data.aws_caller_identity.current.account_id]
+        },
+        {
+          test     = "StringEquals"
+          variable = "kms:ViaService"
+          values   = ["ec2.${var.aws_region}.amazonaws.com"]
+        },
+        {
+          test     = "Bool"
+          variable = "kms:GrantIsForAWSResource"
+          values   = ["true"]
+        },
+      ]
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
