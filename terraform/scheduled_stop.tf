@@ -113,6 +113,7 @@ resource "aws_lambda_function" "scheduled_stop" {
   source_code_hash = data.archive_file.scheduled_stop[0].output_base64sha256
   handler          = "scheduled_stop.handler"
   runtime          = "python3.12"
+  timeout          = 30
 
   environment {
     variables = {
