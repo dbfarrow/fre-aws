@@ -110,6 +110,12 @@ instance:
 connection:
   connect               Open a shell on your EC2 instance
 
+file sharing:
+  upload <file> [project]
+                        Upload a local file to ~/uploads/<project>/ on your
+                        EC2 instance so Claude can read it. If project is
+                        omitted, a numbered menu of your repos is shown.
+
 maintenance:
   update                Download and apply the latest scripts from S3
 EOF
@@ -400,6 +406,7 @@ if [[ "${MODE}" == "admin" ]]; then
       if [[ -n "${AGENT_SOCK}" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
         docker run "${DOCKER_ARGS[@]}" \
+          --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
@@ -416,6 +423,7 @@ if [[ "${MODE}" == "admin" ]]; then
         fi
         CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
         docker run "${DOCKER_ARGS[@]}" \
+          --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "AWS_PROFILE=claude-code-dev" \
@@ -559,7 +567,52 @@ if [[ "${MODE}" == "user" ]]; then
       fi
       [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
+      CONNECT_ARGS+=("--publish" "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}")
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
+      ;;
+    upload)
+      LOCAL_FILE="${2:-}"
+      if [[ -z "${LOCAL_FILE}" ]]; then
+        echo "Usage: user.sh upload <local-file> [project-name]" >&2
+        exit 1
+      fi
+      [[ "${LOCAL_FILE}" != /* ]] && LOCAL_FILE="$(pwd)/${LOCAL_FILE}"
+      if [[ ! -f "${LOCAL_FILE}" ]]; then
+        echo "ERROR: File not found: ${LOCAL_FILE}" >&2
+        exit 1
+      fi
+      USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      if [[ -f "${USER_SSH_DIR}/fre-claude" ]]; then
+        CONNECT_ARGS+=(
+          "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
+          "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
+        )
+      elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+        CONNECT_ARGS+=(
+          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519"
+        )
+      elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+        CONNECT_ARGS+=(
+          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+          "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa"
+        )
+      else
+        echo "ERROR: No SSH key found." >&2
+        echo "       Checked: ${USER_SSH_DIR}/fre-claude" >&2
+        echo "                ~/.ssh/id_ed25519" >&2
+        echo "                ~/.ssh/id_rsa" >&2
+        echo "       Ask your admin to regenerate your installer bundle." >&2
+        exit 1
+      fi
+      CONNECT_ARGS+=(
+        "--volume" "${LOCAL_FILE}:${LOCAL_FILE}:ro"
+        "--env" "UPLOAD_FILE=${LOCAL_FILE}"
+        "--env" "UPLOAD_PROJECT=${3:-}"
+      )
+      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/upload.sh
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \
