@@ -22,9 +22,18 @@ variable "instance_type" {
 }
 
 variable "use_spot" {
-  description = "Use EC2 Spot instances to reduce cost (60-90% cheaper than on-demand). Spot instances can be interrupted with 2-minute notice; EBS data is preserved on stop."
+  description = <<-EOT
+    Use EC2 Spot instances to reduce cost (60-90% cheaper than on-demand).
+    Spot instances can be interrupted with 2-minute notice; EBS data is preserved on stop.
+
+    WARNING — BREAKING CHANGE: changing this value on an existing environment destroys
+    and recreates ALL instances. Terraform switches the underlying resource type
+    (aws_spot_instance_request vs aws_instance), forcing replacement regardless of
+    user_data_replace_on_change. Only change before initial provisioning, or when
+    reprovisioning every instance from scratch is acceptable.
+  EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "network_mode" {
