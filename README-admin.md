@@ -24,13 +24,20 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 
 ## What You Need
 
-### On Your Mac
+### On your machine
 
 | Requirement | Notes |
 |-------------|-------|
-| Container runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) |
-| `git` | Pre-installed on macOS, or: `xcode-select --install` |
+| Container runtime | **macOS**: [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — **Windows**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (see Windows/WSL2 note below) |
+| `git` | Pre-installed on macOS (`xcode-select --install` if missing). Windows: use git inside WSL2 (`sudo apt install git`). |
 | SSH key + GitHub account | You almost certainly have these already — see [SSH Key](#ssh-key) below |
+
+> **Windows/WSL2 users:** This tooling runs inside WSL2. Before proceeding:
+> 1. Install WSL2: run `wsl --install` in PowerShell (requires Windows 10 2004+ or Windows 11)
+> 2. Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) and enable the WSL2 backend (Settings → General → "Use the WSL 2 based engine")
+> 3. Clone this repo **inside the WSL2 filesystem** (e.g. `~/fre-aws`) — do **not** clone under `/mnt/c/`; line endings and file permissions behave incorrectly there
+> 4. Keep your SSH keys in `~/.ssh/` **within WSL2** — not in the Windows user profile
+> 5. Run all `./admin.sh` commands from your WSL2 terminal
 
 ### In AWS
 
@@ -63,14 +70,16 @@ Admin connections use SSH tunneled through SSM. Your public key is injected into
 
 ### Authentication (preferred: ssh-agent forwarding)
 
-The preferred way to authenticate is to have your SSH key loaded in your Mac's `ssh-agent` before running any `./admin.sh` command. The tooling detects a running agent automatically and forwards its socket into the Docker container — no key file is mounted, no passphrase is prompted.
+The preferred way to authenticate is to have your SSH key loaded in your `ssh-agent` before running any `./admin.sh` command. The tooling detects a running agent automatically and forwards its socket into the Docker container — no key file is mounted, no passphrase is prompted.
 
 ```bash
-ssh-add ~/.ssh/id_ed25519   # load your key once per Mac session
+ssh-add ~/.ssh/id_ed25519   # load your key once per session
 ./admin.sh connect <user>   # connects with no further prompts
 ```
 
-If you use macOS's built-in agent (Keychain), your key may already be loaded automatically and no `ssh-add` is needed at all.
+**macOS:** If you use macOS's built-in agent (Keychain), your key may already be loaded automatically and no `ssh-add` is needed at all.
+
+**WSL2:** There is no automatic agent on WSL2. Add `eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519` to your `~/.bash_profile` or `~/.bashrc` to start an agent on each shell session, or run it manually before connecting.
 
 ### Fallback: key file
 
@@ -126,12 +135,14 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
    | **SSO Region** | IAM Identity Center → Settings → **Identity source** |
    | **Account ID** | Top-right corner of any AWS Console page (12-digit number) |
 
-6. **Create `~/.aws/config` on your Mac**:
+6. **Create `~/.aws/config`**:
    ```bash
    mkdir -p ~/.aws
    cp config/aws-config-sso.example ~/.aws/config
    ```
    Open `~/.aws/config` and replace the `UPPER_CASE` placeholders. Set `sso_role_name = AdministratorAccess` for now.
+
+   > **WSL2 note:** `~/.aws` means the WSL2 home directory (e.g. `/home/<user>/.aws`), not the Windows path `C:\Users\...\.aws`. All AWS config used by this tooling lives inside WSL2.
 
 7. **Log in**:
    ```bash
@@ -169,13 +180,15 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 5. **Enable MFA** on the IAM user (Security credentials → MFA → Authenticator app)
 
-6. **Create the AWS credentials files on your Mac**:
+6. **Create the AWS credentials files**:
    ```bash
    mkdir -p ~/.aws
    cp config/aws-credentials-keys.example ~/.aws/credentials
    cp config/aws-config-keys.example ~/.aws/config
    ```
    Fill in the `UPPER_CASE` placeholders in each file.
+
+   > **WSL2 note:** `~/.aws` means the WSL2 home directory (e.g. `/home/<user>/.aws`), not the Windows path `C:\Users\...\.aws`.
 
 7. **Verify**:
    ```bash
@@ -270,7 +283,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 1.  AWS account with AdministratorAccess                    ← any account; free tier works
     Enable root MFA while you're there                      ← AWS Console → Security credentials → MFA
 2.  Set up credentials (Option A or B above)                ← one time
-3.  Install Docker on your Mac                              ← one time
+3.  Install Docker                                          ← one time (Mac: Docker Desktop/OrbStack/Rancher; Windows: Docker Desktop with WSL2 backend)
 4.  Confirm SSH key in ssh-agent                            ← ssh-add ~/.ssh/id_ed25519; see SSH Key above
 5.  Clone this repo                                         ← git clone ...
 6.  cp config/admin.env.example config/admin.env            ← create your admin config
