@@ -4,7 +4,7 @@ echo "Region: ${REGION}  Project: ${PROJECT_NAME}  User: ${DEV_USERNAME}"
 # System updates and tools
 # ---------------------------------------------------------------------------
 dnf update -y
-dnf install -y git tmux vim htop openssh-server
+dnf install -y git tmux vim htop openssh-server rsync
 
 # ---------------------------------------------------------------------------
 # GitHub CLI (gh) — used for authenticated repo browsing and cloning

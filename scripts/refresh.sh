@@ -148,6 +148,10 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
   fi
 '
 
+echo "--- ensuring rsync is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo dnf install -y rsync -q && echo '  rsync ready'"
+
 echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /etc/systemd/system/web-preview.service > /dev/null" \
