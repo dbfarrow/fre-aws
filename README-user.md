@@ -12,8 +12,8 @@ Your AWS development environment is already set up — your admin has provisione
 
 | Requirement | Notes |
 |-------------|-------|
-| **Mac** | These instructions are Mac-specific |
-| **Container runtime** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — install one if you haven't already |
+| **Mac or Windows** | macOS or Windows with WSL2 — see note below for Windows setup |
+| **Container runtime** | **macOS**: [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev), or [Rancher Desktop](https://rancherdesktop.io) — **Windows**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend |
 | **Claude Code account** | Create your account at [claude.ai/code](https://claude.ai/code) before your first session — your admin cannot do this for you |
 | **GitHub account** | Needed to clone and push to private repos — create one at [github.com](https://github.com) if you don't have one. Your admin cannot do this for you. No SSH key setup required — authentication uses a browser-based code flow. |
 | **Onboarding email** | Sent by your admin — contains a one-time installer download link |
@@ -34,11 +34,20 @@ Your AWS development environment is already set up — your admin has provisione
 
 ## Step 1 — Install Docker
 
-Install one of the following container runtimes if you haven't already:
+**macOS:** Install one of the following container runtimes if you haven't already:
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [OrbStack](https://orbstack.dev) *(lighter weight, recommended for Mac)*
 - [Rancher Desktop](https://rancherdesktop.io)
+
+**Windows:** Set up WSL2 first, then install Docker Desktop with the WSL2 backend:
+
+1. Open PowerShell as Administrator and run: `wsl --install`
+2. Restart your computer when prompted
+3. Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) and enable the WSL2 backend (Settings → General → "Use the WSL 2 based engine")
+4. Run all subsequent steps from your **WSL2 terminal**, not PowerShell or CMD
+
+> **Windows only:** Run the installer and all `~/fre-aws/user.sh` commands from inside the WSL2 terminal.
 
 ---
 
