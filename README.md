@@ -2,6 +2,8 @@
 
 A self-hosted development environment that gives each team member a dedicated EC2 instance running [Claude Code](https://claude.ai/code). One command to connect; your admin handles everything else.
 
+Supported host platforms: **macOS** and **Windows (WSL2)**. See the [Admin Guide](README-admin.md) or [User Guide](README-user.md) for platform-specific setup instructions.
+
 ---
 
 ## What it does
@@ -9,7 +11,7 @@ A self-hosted development environment that gives each team member a dedicated EC
 Each user gets their own EC2 instance in your AWS account. The admin provisions and manages the infrastructure using Docker-packaged tooling — no Terraform or AWS CLI required on any machine. Users connect with a single command and land in a session launcher that lets them open projects, clone repos, or drop into a shell.
 
 ```
-Your Mac
+Your machine (Mac or Windows/WSL2)
   └── Docker container (terraform + aws-cli + ssh)
         └── AWS account
               ├── VPC (shared)
@@ -71,7 +73,7 @@ Responsibilities:
 | Control | Status | Notes |
 |---------|--------|-------|
 | No inbound ports on EC2 | ✅ | Security group has no ingress rules |
-| SSH private key stays on Mac | ✅ | Agent forwarding; key never copied to instance |
+| SSH private key stays on your machine | ✅ | Agent forwarding; key never copied to instance |
 | Per-user EC2 isolation | ✅ | Dedicated instance per user; no shared filesystem |
 | SSH key isolation | ✅ | Each instance accepts its owner's key; admin key(s) are also injected at provision time for support access |
 | IMDSv2 enforced | ✅ | Prevents SSRF-based credential theft |

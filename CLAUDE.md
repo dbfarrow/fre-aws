@@ -4,12 +4,18 @@
 
 This project creates and maintains a multi-user AWS environment using Infrastructure as Code (IaC). It provisions individual EC2 instances per user that serve as persistent development environments running the Claude Code CLI. The entire toolchain is packaged as a Docker image so that non-technical Mac users can manage their AWS dev environment with minimal local setup.
 
-## Host Machine Requirements (Mac)
+## Host Machine Requirements (Mac and Windows/WSL2)
 
-- A container runtime (Docker Desktop, OrbStack, Rancher Desktop, etc.)
-- `git`
+Supported platforms: **macOS** and **Windows with WSL2**.
+
+- A container runtime:
+  - macOS: Docker Desktop, OrbStack, or Rancher Desktop
+  - Windows: Docker Desktop with WSL2 backend
+- `git` (macOS: pre-installed or via Xcode CLI tools; Windows: use git inside WSL2)
 - AWS credentials via IAM Identity Center (SSO)
 - SSH key (`~/.ssh/fre-claude`) for SSH-over-SSM access
+
+> **Windows users:** Install WSL2 first (`wsl --install`), then Docker Desktop with WSL2 backend. Clone this repo and run all commands from inside the WSL2 terminal. Keep SSH keys in `~/.ssh/` within WSL2.
 
 ---
 
