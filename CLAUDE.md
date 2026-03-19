@@ -21,6 +21,42 @@ Always use plan mode before writing any code. Use `EnterPlanMode` to explore the
 
 ---
 
+## Git Workflow
+
+This project uses **GitHub Flow**. All changes reach `main` through pull requests — no direct pushes to `main`.
+
+### Branch naming
+| Prefix | Use for |
+|--------|---------|
+| `feature/` | new functionality |
+| `fix/` | bug fixes |
+| `docs/` | documentation only |
+| `chore/` | maintenance, refactoring, dependency updates |
+
+Example: `feature/windows-wsl2-support`, `fix/spot-instance-tagging`
+
+### Pull request rules
+- **Every change to `main` goes through a PR** — no exceptions
+- **Merges are performed in the GitHub UI, never automated from the CLI or from Claude**
+- Use **squash-and-merge** to keep `main` history linear and readable
+- PR title should be concise; description must explain *what* changed and *why*
+- Keep PRs focused: one logical change per PR
+- Delete the branch after merge
+
+### Standard flow
+```
+git checkout -b feature/my-change   # branch from main
+# ... make changes, commit frequently ...
+git push -u origin feature/my-change
+# Open PR in GitHub UI → review → squash-and-merge → delete branch
+git checkout main && git pull        # sync local main after merge
+```
+
+### PR scope discipline (Claude-specific)
+Claude should continuously ask: *has the work in progress grown beyond the reasonable scope of a single PR?* When it has — when uncommitted changes span multiple independent concerns, or when a new direction emerges mid-implementation — Claude will call this out explicitly and propose stopping to open a PR for the current work before continuing. The goal is PRs that are independently reviewable and meaningful, not large mixed-concern diffs.
+
+---
+
 ## Core Principles
 
 ### Zero Trust Architecture
