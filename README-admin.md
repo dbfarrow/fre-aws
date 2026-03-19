@@ -402,6 +402,8 @@ No down/up needed. `refresh` pushes the following in one shot:
 | `.tmux.conf` — tmux key bindings and status bar | Next new tmux session |
 | Autoshutdown timer (systemd) | Immediately — active on the running instance |
 | `.bash_profile` TMUX guard | Next connect |
+| `web-preview.service` — static file server on port 8080 | Immediately — restarted on the running instance |
+| `~/.claude/CLAUDE.md` — file sharing instructions for Claude | Next Claude session |
 
 ### Pushing script updates to users
 
