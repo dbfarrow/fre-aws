@@ -106,7 +106,7 @@ The two options below describe how you hold that initial AdministratorAccess:
 
 IAM Identity Center provides short-lived credentials and enforces MFA by design. It requires AWS Organizations, which is not available on free-tier standalone accounts but is available on any paid account.
 
-> **No AWS CLI required on your Mac.** All operations run inside Docker. Setup only requires the AWS Console and creating one text file.
+> **No AWS CLI required on your machine.** All operations run inside Docker. Setup only requires the AWS Console and creating one text file.
 
 **Steps:**
 
@@ -162,7 +162,7 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 ### Option B: IAM User with Access Keys (Free Tier)
 
-> **No AWS CLI required on your Mac.** Setup only requires the AWS Console and creating two plain text files.
+> **No AWS CLI required on your machine.** Setup only requires the AWS Console and creating two plain text files.
 
 **Steps:**
 
