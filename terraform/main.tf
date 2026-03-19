@@ -380,3 +380,27 @@ module "user_ec2" {
     Username    = each.key
   })
 }
+
+# ---------------------------------------------------------------------------
+# Explicit instance tagging — spot instance workaround
+# ---------------------------------------------------------------------------
+# terraform-aws-modules/ec2-instance propagates tags to spot instances via
+# aws_ec2_tag resources inside the module, but those can fail silently during
+# apply (the spot_instance_id is "known after apply" and the apply may partially
+# succeed). Adding these at the root level ensures tags are (re)applied on every
+# terraform apply, using the module's id output which correctly returns the EC2
+# instance ID (not the spot request ID) once the spot is fulfilled.
+
+resource "aws_ec2_tag" "user_project_name" {
+  for_each    = var.users
+  resource_id = module.user_ec2[each.key].id
+  key         = "ProjectName"
+  value       = var.project_name
+}
+
+resource "aws_ec2_tag" "user_username" {
+  for_each    = var.users
+  resource_id = module.user_ec2[each.key].id
+  key         = "Username"
+  value       = each.key
+}
