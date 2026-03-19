@@ -134,6 +134,6 @@ fi
 
 echo "Uploading ${FILENAME} to ~/uploads/${PROJECT}/ on ${INSTANCE_ID}..."
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "mkdir -p ~/uploads/${PROJECT}/ && cat > ~/uploads/${PROJECT}/${FILENAME}" \
+  "mkdir -p ~/uploads/${PROJECT}/ ~/www/${PROJECT}/ && ln -sf ~/uploads/${PROJECT} ~/www/${PROJECT}/uploads && cat > ~/uploads/${PROJECT}/${FILENAME}" \
   < "${LOCAL_FILE}"
 echo "Done. File available at ~/uploads/${PROJECT}/${FILENAME}"

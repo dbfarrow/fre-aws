@@ -69,8 +69,9 @@ CHOICE="${CHOICE:-${DEFAULT}}"
 launch_in_repo() {
   local dir="$1"
   local name; name=$(basename "${dir}")
-  # Ensure per-project web output and upload directories exist
+  # Ensure per-project web root and upload directories exist, with uploads linked into web root
   mkdir -p ~/www/"${name}" ~/uploads/"${name}"
+  ln -sf ~/uploads/"${name}" ~/www/"${name}"/uploads
   if tmux has-session -t "${name}" 2>/dev/null; then
     echo "Reattaching to existing '${name}' session..."
     exec tmux attach-session -t "${name}"
