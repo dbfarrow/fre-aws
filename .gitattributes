@@ -1,0 +1,15 @@
+# Ensure shell scripts and Terraform files always use LF
+* text=auto
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+*.tf text eol=lf
+*.tfvars text eol=lf
+*.hcl text eol=lf
+*.env text eol=lf
+*.env.example text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
