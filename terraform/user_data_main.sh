@@ -171,7 +171,7 @@ A static web server is always running on this instance. The user can access it a
 Directory conventions (using `my-app` as an example project):
 - `~/repos/my-app/` — the **working directory** (source code)
 - `~/www/my-app/`   — the **web root** (also called the serve directory); files here are served at `http://localhost:8080/my-app/`
-- `~/uploads/my-app/` — where user-uploaded files land
+- `~/uploads/my-app/` — where user-uploaded files land; also accessible at `http://localhost:8080/my-app/uploads/` via a symlink in the web root
 
 ### Sharing visual output or web content
 
