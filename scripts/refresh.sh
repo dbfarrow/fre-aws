@@ -58,6 +58,7 @@ fi
 SSH_OPTS=(
   "-o" "StrictHostKeyChecking=no"
   "-o" "UserKnownHostsFile=/dev/null"
+  "-o" "LogLevel=ERROR"
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
 
