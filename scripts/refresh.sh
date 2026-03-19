@@ -147,7 +147,50 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
   fi
 '
 
+echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo tee /etc/systemd/system/web-preview.service > /dev/null" \
+  << 'WEB_PREVIEW_SERVICE'
+[Unit]
+Description=Static web server for Claude Code output preview
+After=network.target
+
+[Service]
+Type=simple
+User=developer
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /home/developer/www
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+WEB_PREVIEW_SERVICE
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo systemctl daemon-reload && sudo systemctl enable web-preview.service && sudo systemctl restart web-preview.service && echo '  web-preview service active on port 8080'"
+
+echo "--- pushing ~/.claude/CLAUDE.md to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "mkdir -p ~/.claude && tee ~/.claude/CLAUDE.md > /dev/null" \
+  << 'CLAUDE_MD'
+## File Sharing with the User
+
+A static web server is always running on this instance. The user can access it at **http://localhost:8080** in their local browser while connected.
+
+### Sharing visual output or web content
+
+Write files to `~/www/<project>/` where `<project>` is the basename of your current working directory (e.g. if you are in `/home/developer/repos/my-app`, use `~/www/my-app/`).
+
+Files written there are immediately visible at `http://localhost:8080/<project>/` in the user's browser. Tell the user to open that URL to preview your output.
+
+### When the user uploads files
+
+The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
+CLAUDE_MD
+
 echo ""
 echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
 echo "    session_start.sh + .tmux.conf: take effect on next connect"
 echo "    autoshutdown timer:            active immediately"
+echo "    web-preview service:           active immediately (http://localhost:8080)"
+echo "    ~/.claude/CLAUDE.md:           updated"
