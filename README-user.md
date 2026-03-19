@@ -187,19 +187,20 @@ Claude will tell you the URL — just open it in your browser.
 
 ### Uploading files to Claude
 
-To share a screenshot, image, or reference file with Claude, use:
+To share a screenshot, image, reference file, or entire directory with Claude, use:
 
 ```bash
-~/fre-aws/user.sh upload <file>
+~/fre-aws/user.sh upload <file-or-directory>
 ```
 
 If you have multiple projects, you'll see a numbered menu to pick which one. Or specify it directly:
 
 ```bash
 ~/fre-aws/user.sh upload screenshot.png my-project
+~/fre-aws/user.sh upload reference-images/ my-project
 ```
 
-The file lands in `~/uploads/<project>/` on your instance and is also browseable at `http://localhost:8080/<project>/uploads/`. Once uploaded, tell Claude "I uploaded a file" — it will check that directory.
+Files land in `~/uploads/<project>/` on your instance. Directories are synced with rsync — re-uploading the same directory only transfers what changed. Everything uploaded is also browseable at `http://localhost:8080/<project>/uploads/`. Once uploaded, tell Claude "I uploaded a file" — it will check that directory.
 
 ---
 

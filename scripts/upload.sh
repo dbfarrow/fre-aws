@@ -132,8 +132,27 @@ if [[ -z "${PROJECT}" ]]; then
   exit 1
 fi
 
-echo "Uploading ${FILENAME} to ~/uploads/${PROJECT}/ on ${INSTANCE_ID}..."
+# Build a temporary SSH wrapper script so rsync can use our SSH options
+# (ProxyCommand contains spaces; a wrapper avoids quoting gymnastics)
+SSH_WRAPPER=$(mktemp)
+chmod 700 "${SSH_WRAPPER}"
+{
+  echo '#!/bin/sh'
+  printf 'exec ssh'
+  printf ' %q' "${SSH_OPTS[@]}"
+  printf ' "$@"\n'
+} > "${SSH_WRAPPER}"
+trap 'rm -f "${SSH_WRAPPER}"' EXIT
+
+# Ensure destination directories and uploads symlink exist
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "mkdir -p ~/uploads/${PROJECT}/ ~/www/${PROJECT}/ && ln -sf ~/uploads/${PROJECT} ~/www/${PROJECT}/uploads && cat > ~/uploads/${PROJECT}/${FILENAME}" \
-  < "${LOCAL_FILE}"
-echo "Done. File available at ~/uploads/${PROJECT}/${FILENAME}"
+  "mkdir -p ~/uploads/${PROJECT}/ ~/www/${PROJECT}/ && ln -sf ~/uploads/${PROJECT} ~/www/${PROJECT}/uploads"
+
+# Strip trailing slash so rsync transfers the item itself, not just its contents
+SOURCE="${LOCAL_FILE%/}"
+echo "Uploading $(basename "${SOURCE}") to ~/uploads/${PROJECT}/ on ${INSTANCE_ID}..."
+rsync -az --progress \
+  -e "${SSH_WRAPPER}" \
+  "${SOURCE}" \
+  developer@"${INSTANCE_ID}":~/uploads/"${PROJECT}"/
+echo "Done. Accessible at ~/uploads/${PROJECT}/ and http://localhost:8080/${PROJECT}/uploads/"

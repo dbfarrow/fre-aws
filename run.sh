@@ -111,10 +111,11 @@ connection:
   connect               Open a shell on your EC2 instance
 
 file sharing:
-  upload <file> [project]
-                        Upload a local file to ~/uploads/<project>/ on your
-                        EC2 instance so Claude can read it. If project is
-                        omitted, a numbered menu of your repos is shown.
+  upload <file-or-dir> [project]
+                        Upload a file or directory to ~/uploads/<project>/
+                        on your EC2 instance. Directories are synced with
+                        rsync — only changed files are transferred. If
+                        project is omitted, a menu of your repos is shown.
 
 maintenance:
   update                Download and apply the latest scripts from S3
@@ -577,8 +578,8 @@ if [[ "${MODE}" == "user" ]]; then
         exit 1
       fi
       [[ "${LOCAL_FILE}" != /* ]] && LOCAL_FILE="$(pwd)/${LOCAL_FILE}"
-      if [[ ! -f "${LOCAL_FILE}" ]]; then
-        echo "ERROR: File not found: ${LOCAL_FILE}" >&2
+      if [[ ! -e "${LOCAL_FILE}" ]]; then
+        echo "ERROR: File or directory not found: ${LOCAL_FILE}" >&2
         exit 1
       fi
       USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
