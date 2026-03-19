@@ -200,8 +200,11 @@ if [[ "${MODE}" == "admin" ]]; then
   }
 
   # Detect a usable SSH agent socket to forward into the Docker container.
-  # Prefers SSH_AUTH_SOCK (works natively with OrbStack and a properly
-  # configured ssh-agent); falls back to Docker Desktop's host bridge socket.
+  # Prefers SSH_AUTH_SOCK (works on Mac with OrbStack, on Linux, and on WSL2
+  # when an ssh-agent is running). Falls back to Docker Desktop for Mac's host
+  # bridge socket (/run/host-services/ssh-auth.sock). On WSL2 without a running
+  # agent, neither path is found and the empty return triggers the key-file
+  # fallback in the caller (mounts ~/.ssh and prompts for passphrase).
   _detect_ssh_agent_sock() {
     if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
       echo "${SSH_AUTH_SOCK}"
