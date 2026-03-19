@@ -131,3 +131,53 @@ SERVICE
 
 systemctl enable --now autoshutdown.timer
 echo "Autoshutdown timer enabled."
+
+# ---------------------------------------------------------------------------
+# Web preview — static server for ~/www/; accessible from host via SSH tunnel
+# ---------------------------------------------------------------------------
+mkdir -p /home/developer/www /home/developer/uploads
+chown developer:developer /home/developer/www /home/developer/uploads
+
+cat > /etc/systemd/system/web-preview.service << 'EOF'
+[Unit]
+Description=Static web server for Claude Code output preview
+After=network.target
+
+[Service]
+Type=simple
+User=developer
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /home/developer/www
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable web-preview.service
+systemctl start web-preview.service
+echo "Web preview server enabled on port 8080."
+
+# ---------------------------------------------------------------------------
+# Global Claude Code instructions for all sessions on this instance
+# ---------------------------------------------------------------------------
+mkdir -p /home/developer/.claude
+cat > /home/developer/.claude/CLAUDE.md << 'EOF'
+## File Sharing with the User
+
+A static web server is always running on this instance. The user can access it at **http://localhost:8080** in their local browser while connected.
+
+### Sharing visual output or web content
+
+Write files to `~/www/<project>/` where `<project>` is the basename of your current working directory (e.g. if you are in `/home/developer/repos/my-app`, use `~/www/my-app/`).
+
+Files written there are immediately visible at `http://localhost:8080/<project>/` in the user's browser. Tell the user to open that URL to preview your output.
+
+### When the user uploads files
+
+The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
+EOF
+
+chown -R developer:developer /home/developer/.claude
+echo "Global Claude Code instructions written."
