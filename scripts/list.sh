@@ -134,12 +134,15 @@ elif [[ "${VERBOSE}" == true ]]; then
 
     if [[ -n "${instance_info}" ]]; then
       IFS='|' read -r instance_id state type reason launch_time <<< "${instance_info}"
-      printf "    %-16s %s  %s  %s\n" "instance:" "${instance_id}" "${state}" "${type}"
       if [[ "${state}" == "running" && -n "${launch_time}" ]]; then
         up_since=$(format_time "${launch_time}")
-        printf "    %-16s %s\n" "up since:" "${up_since}"
+        state_col="${state}  (up since ${up_since})"
+      elif [[ -n "${reason}" ]]; then
+        state_col="${state}  $(format_reason "${reason}")"
+      else
+        state_col="${state}"
       fi
-      [[ -n "${reason}" ]] && printf "    %-16s %s\n" "stopped:" "$(format_reason "${reason}")"
+      printf "    %-16s %s  %s  %s\n" "instance:" "${instance_id}" "${type}" "${state_col}"
     else
       printf "    %-16s %s\n" "instance:" "(not provisioned — run ./admin.sh up)"
     fi
@@ -160,8 +163,8 @@ elif [[ "${VERBOSE}" == true ]]; then
     echo ""
   done <<< "${CONFIGURED_USERS}"
 else
-  printf "  %-20s %-22s %-12s %s\n" "USERNAME" "INSTANCE ID" "STATE" "TYPE"
-  printf "  %-20s %-22s %-12s %s\n" "--------" "-----------" "-----" "----"
+  printf "  %-20s %-22s %-12s %s\n" "USERNAME" "INSTANCE ID" "TYPE" "STATE"
+  printf "  %-20s %-22s %-12s %s\n" "--------" "-----------" "----" "-----"
   while IFS= read -r username; do
     instance_info=$(echo "${INSTANCES}" | jq -r --arg user "${username}" '
       .[] | select(.Tags // [] | any(.Key == "Username" and .Value == $user))
@@ -170,12 +173,15 @@ else
 
     if [[ -n "${instance_info}" ]]; then
       IFS='|' read -r instance_id state type reason launch_time <<< "${instance_info}"
-      printf "  %-20s %-22s %-12s %s\n" "${username}" "${instance_id}" "${state}" "${type}"
       if [[ "${state}" == "running" && -n "${launch_time}" ]]; then
         up_since=$(format_time "${launch_time}")
-        printf "  %-20s %-22s %s\n" "" "" "up since ${up_since}"
+        state_col="${state}  (up since ${up_since})"
+      elif [[ -n "${reason}" ]]; then
+        state_col="${state}  $(format_reason "${reason}")"
+      else
+        state_col="${state}"
       fi
-      [[ -n "${reason}" ]] && printf "  %-20s %-22s %s\n" "" "" "$(format_reason "${reason}")"
+      printf "  %-20s %-22s %-12s %s\n" "${username}" "${instance_id}" "${type}" "${state_col}"
     else
       printf "  %-20s %-22s %-12s %s\n" "${username}" "(not provisioned)" "" "run ./admin.sh up"
     fi

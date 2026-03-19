@@ -323,8 +323,8 @@ echo ""
 if [[ -z "${CONFIGURED_USERS}" ]]; then
   echo "  (no registered users — run './admin.sh add-user')"
 else
-  printf "  %-20s %-22s %-12s %-10s %s\n" "USERNAME" "INSTANCE ID" "STATE" "TYPE" "ROLE"
-  printf "  %-20s %-22s %-12s %-10s %s\n" "--------" "-----------" "-----" "----" "----"
+  printf "  %-20s %-22s %-12s %-10s %s\n" "USERNAME" "INSTANCE ID" "TYPE" "ROLE" "STATE"
+  printf "  %-20s %-22s %-12s %-10s %s\n" "--------" "-----------" "----" "----" "-----"
   while IFS= read -r username; do
     instance_info=$(echo "${INSTANCES}" | jq -r --arg user "${username}" '
       .[] | select(.Tags // [] | any(.Key == "Username" and .Value == $user))
@@ -334,16 +334,19 @@ else
 
     if [[ -n "${instance_info}" ]]; then
       IFS='|' read -r instance_id state type reason launch_time <<< "${instance_info}"
-      printf "  %-20s %-22s %-12s %-10s %s\n" \
-        "${username}" "${instance_id}" "${state}" "${type}" "${role}"
       if [[ "${state}" == "running" && -n "${launch_time}" ]]; then
         up_since=$(format_time "${launch_time}")
-        printf "  %-20s %-22s %s\n" "" "" "up since ${up_since}"
+        state_col="${state}  (up since ${up_since})"
+      elif [[ -n "${reason}" ]]; then
+        state_col="${state}  $(format_reason "${reason}")"
+      else
+        state_col="${state}"
       fi
-      [[ -n "${reason}" ]] && printf "  %-20s %-22s %s\n" "" "" "$(format_reason "${reason}")"
+      printf "  %-20s %-22s %-12s %-10s %s\n" \
+        "${username}" "${instance_id}" "${type}" "${role}" "${state_col}"
     else
       printf "  %-20s %-22s %-12s %-10s %s\n" \
-        "${username}" "(not provisioned)" "" "" "${role}"
+        "${username}" "(not provisioned)" "" "${role}" ""
     fi
   done <<< "${CONFIGURED_USERS}"
 fi
