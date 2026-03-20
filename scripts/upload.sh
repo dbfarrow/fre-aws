@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# upload.sh — Upload a local file to ~/uploads/<project>/ on the EC2 instance.
-# The file is piped over SSH stdin so no scp or separate key detection is needed.
+# upload.sh — Upload a file or directory to ~/uploads/<project>/ on the EC2 instance.
+# Uses rsync over an SSM-tunnelled SSH connection for incremental, structure-preserving transfers.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +34,6 @@ if [[ -z "${LOCAL_FILE}" || ! -e "${LOCAL_FILE}" ]]; then
   echo "ERROR: UPLOAD_FILE not set or file/directory not found: ${LOCAL_FILE:-<unset>}" >&2
   exit 1
 fi
-FILENAME=$(basename "${LOCAL_FILE}")
 
 CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
   echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
@@ -61,6 +60,7 @@ fi
 SSH_OPTS=(
   "-o" "StrictHostKeyChecking=no"
   "-o" "UserKnownHostsFile=/dev/null"
+  "-o" "LogLevel=ERROR"
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
 
