@@ -116,6 +116,38 @@ format_reason() {
 }
 
 # ---------------------------------------------------------------------------
+# App login URL generation (only when WEB_APP_URL is configured)
+# HMAC secret is fetched from SSM once on first use and cached.
+# ---------------------------------------------------------------------------
+_HMAC_SECRET=""
+_HMAC_FETCH_DONE=false
+
+_get_hmac_secret() {
+  [[ "${_HMAC_FETCH_DONE}" == true ]] && return
+  _HMAC_FETCH_DONE=true
+  _HMAC_SECRET=$(aws ssm get-parameter \
+    --name "/${PROJECT_NAME}/app/hmac-secret" \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --output text \
+    --region "${AWS_REGION}" 2>/dev/null || echo "")
+}
+
+_make_app_link() {
+  local username="$1"
+  [[ -z "${WEB_APP_URL:-}" ]] && return
+  _get_hmac_secret
+  [[ -z "${_HMAC_SECRET}" ]] && return
+  local expiry=$(( $(date +%s) + 259200 ))
+  local payload="${username}:${expiry}"
+  local hmac_hex
+  hmac_hex=$(printf '%s' "${payload}" | openssl dgst -sha256 -hmac "${_HMAC_SECRET}" -hex | awk '{print $NF}')
+  local token
+  token=$(printf '%s' "${payload}:${hmac_hex}" | base64 | tr '+/' '-_' | tr -d '=' | tr -d '\n')
+  echo "${WEB_APP_URL%/}?token=${token}"
+}
+
+# ---------------------------------------------------------------------------
 # Print registered users
 # ---------------------------------------------------------------------------
 echo "=== ${PROJECT_NAME} users ==="
@@ -143,6 +175,10 @@ elif [[ "${VERBOSE}" == true ]]; then
         state_col="${state}"
       fi
       printf "    %-16s %s  %s  %s\n" "instance:" "${instance_id}" "${type}" "${state_col}"
+      if [[ "${state}" == "running" ]]; then
+        app_link=$(_make_app_link "${username}")
+        [[ -n "${app_link}" ]] && printf "    %-16s %s\n" "login url:" "${app_link}"
+      fi
     else
       printf "    %-16s %s\n" "instance:" "(not provisioned — run ./admin.sh up)"
     fi
@@ -180,6 +216,10 @@ else
         state_col="${state}  $(format_reason "${reason}")"
       else
         state_col="${state}"
+      fi
+      if [[ "${state}" == "running" ]]; then
+        app_link=$(_make_app_link "${username}")
+        [[ -n "${app_link}" ]] && state_col="${state_col}  ${app_link:0:50}…"
       fi
       printf "  %-20s %-22s %-12s %s\n" "${username}" "${instance_id}" "${type}" "${state_col}"
     else

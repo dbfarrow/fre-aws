@@ -39,6 +39,24 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
+def build_body_app_link(username: str, project: str, app_url: str) -> str:
+    lines = [
+        f"Hi {username},",
+        "",
+        f"Your {project} development environment is ready.",
+        "",
+        "No install required — just click the link below to open your instance in a browser:",
+        "",
+        f"  {app_url}",
+        "",
+        "The link expires in 72 hours. If it has expired, contact your project admin for a new one.",
+        "",
+        "—",
+        f"{project} automated onboarding",
+    ]
+    return "\n".join(lines)
+
+
 def build_body_installer_url(username: str, project: str, role: str,
                              has_private_key: bool,
                              sso_start_url: str, user_email: str,
@@ -291,10 +309,27 @@ def main() -> None:
                         metavar="PATH:FILENAME",
                         help="File attachment as path:filename (repeatable). "
                              "Fallback when --installer-url is not available.")
+    parser.add_argument("--app-url", default=None,
+                        help="Browser app magic-link URL (72-hour expiry). "
+                             "When provided, sends a minimal app-link email instead of "
+                             "the full installer onboarding email.")
 
     args = parser.parse_args()
 
     attachments = [parse_attachment(a) for a in args.attachment]
+
+    if args.app_url:
+        # App link flow: simple email with just the magic link
+        body = build_body_app_link(
+            username=args.username,
+            project=args.project,
+            app_url=args.app_url,
+        )
+        subject = f"[{args.project}] Your development environment is ready"
+        msg = build_message(args.to, args.from_addr, subject, body, [])
+        send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
+        print(f"  App link email sent to {args.to}")
+        return
 
     if args.installer_url:
         # New flow: installer URL, no attachments
