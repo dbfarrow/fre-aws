@@ -278,6 +278,47 @@ if [[ "${MODE}" == "user" ]]; then
     "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
     "--volume" "${USER_SCRIPT_DIR}/scripts:/workspace/scripts"
   )
+
+  # Append SSH auth options to CONNECT_ARGS (caller must initialise it first).
+  # Prefers a running ssh-agent; falls back to key files in priority order.
+  _setup_user_ssh_auth() {
+    local user_ssh_dir="${USER_SCRIPT_DIR}/.ssh"
+    if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock"
+        "--env" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+      )
+    elif [[ -S "/run/host-services/ssh-auth.sock" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "/run/host-services/ssh-auth.sock:/tmp/ssh-agent.sock"
+        "--env" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+      )
+    elif [[ -f "${user_ssh_dir}/fre-claude" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "${user_ssh_dir}:/root/.ssh:ro"
+        "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
+        "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
+      )
+    elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+        "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519"
+      )
+    elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+      CONNECT_ARGS+=(
+        "--volume" "${HOME}/.ssh:/root/.ssh:ro"
+        "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa"
+      )
+    else
+      echo "ERROR: No SSH key or agent found." >&2
+      echo "       Checked: ssh-agent (SSH_AUTH_SOCK)" >&2
+      echo "                ${user_ssh_dir}/fre-claude" >&2
+      echo "                ~/.ssh/id_ed25519" >&2
+      echo "                ~/.ssh/id_rsa" >&2
+      echo "       Ask your admin to regenerate your installer bundle." >&2
+      exit 1
+    fi
+  }
 fi
 
 # ---------------------------------------------------------------------------
@@ -541,34 +582,8 @@ if [[ "${MODE}" == "user" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
       ;;
     connect)
-      USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-      if [[ -f "${USER_SSH_DIR}/fre-claude" ]]; then
-        # Installer-managed key — passphrase stored in Secrets Manager
-        CONNECT_ARGS+=(
-          "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
-          "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
-        )
-      elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
-        # Fallback: user provided their own key (e.g. admin role, or custom key)
-        CONNECT_ARGS+=(
-          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519"
-        )
-      elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
-        CONNECT_ARGS+=(
-          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa"
-        )
-      else
-        echo "ERROR: No SSH key found." >&2
-        echo "       Checked: ${USER_SSH_DIR}/fre-claude" >&2
-        echo "                ~/.ssh/id_ed25519" >&2
-        echo "                ~/.ssh/id_rsa" >&2
-        echo "       Ask your admin to regenerate your installer bundle." >&2
-        exit 1
-      fi
+      _setup_user_ssh_auth
       [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       CONNECT_ARGS+=("--publish" "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}")
@@ -585,32 +600,8 @@ if [[ "${MODE}" == "user" ]]; then
         echo "ERROR: File or directory not found: ${LOCAL_FILE}" >&2
         exit 1
       fi
-      USER_SSH_DIR="${USER_SCRIPT_DIR}/.ssh"
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-      if [[ -f "${USER_SSH_DIR}/fre-claude" ]]; then
-        CONNECT_ARGS+=(
-          "--volume" "${USER_SSH_DIR}:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude"
-          "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase"
-        )
-      elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
-        CONNECT_ARGS+=(
-          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519"
-        )
-      elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
-        CONNECT_ARGS+=(
-          "--volume" "${HOME}/.ssh:/root/.ssh:ro"
-          "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa"
-        )
-      else
-        echo "ERROR: No SSH key found." >&2
-        echo "       Checked: ${USER_SSH_DIR}/fre-claude" >&2
-        echo "                ~/.ssh/id_ed25519" >&2
-        echo "                ~/.ssh/id_rsa" >&2
-        echo "       Ask your admin to regenerate your installer bundle." >&2
-        exit 1
-      fi
+      _setup_user_ssh_auth
       CONNECT_ARGS+=(
         "--volume" "${LOCAL_FILE}:${LOCAL_FILE}:ro"
         "--env" "UPLOAD_FILE=${LOCAL_FILE}"
