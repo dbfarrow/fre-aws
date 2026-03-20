@@ -337,7 +337,7 @@ module "user_ec2" {
   # Provisioning variables are injected directly — no SSM parameter reads at boot.
   # SSH key and git identity come from users.tfvars; session_start.sh from scripts/.
   # To update session_start.sh on a running instance: ./admin.sh refresh <username>
-  user_data = join("\n", [
+  user_data_base64 = base64gzip(join("\n", [
     "#!/usr/bin/env bash",
     "# EC2 user data for ${var.project_name} / ${each.key}",
     "set -euo pipefail",
@@ -372,7 +372,7 @@ module "user_ec2" {
     "chmod +x /home/developer/session_start.sh",
     "chown developer:developer /home/developer/session_start.sh",
     file("${path.module}/user_data_tail.sh"),
-  ])
+  ]))
   user_data_replace_on_change = false
 
   tags = merge(local.owner_tags, {
