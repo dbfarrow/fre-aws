@@ -33,7 +33,7 @@ _create_installer_bundle() {
   chmod +x "${tmp_dir}/install.sh"
 
   mkdir -p "${tmp_dir}/scripts"
-  for s in connect.sh start.sh stop.sh verify.sh update.sh; do
+  for s in connect.sh start.sh stop.sh verify.sh update.sh upload.sh; do
     if [[ -f "${SCRIPT_DIR}/${s}" ]]; then
       cp "${SCRIPT_DIR}/${s}" "${tmp_dir}/scripts/"
     fi
