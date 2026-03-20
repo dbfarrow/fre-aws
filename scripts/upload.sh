@@ -30,8 +30,8 @@ if [[ -z "${DEV_USERNAME}" ]]; then
 fi
 
 LOCAL_FILE="${UPLOAD_FILE:-}"
-if [[ -z "${LOCAL_FILE}" || ! -f "${LOCAL_FILE}" ]]; then
-  echo "ERROR: UPLOAD_FILE not set or file not found: ${LOCAL_FILE:-<unset>}" >&2
+if [[ -z "${LOCAL_FILE}" || ! -e "${LOCAL_FILE}" ]]; then
+  echo "ERROR: UPLOAD_FILE not set or file/directory not found: ${LOCAL_FILE:-<unset>}" >&2
   exit 1
 fi
 FILENAME=$(basename "${LOCAL_FILE}")
