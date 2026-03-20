@@ -237,6 +237,9 @@ if [[ "${MODE}" == "user" ]]; then
     CONFIG_ARG=""
   fi
 
+  # upload uses $2 as the file/directory to transfer, not a config override
+  [[ "${COMMAND}" == "upload" ]] && CONFIG_ARG=""
+
   if [[ -n "${CONFIG_ARG}" ]]; then
     DEV_CONFIG="${CONFIG_ARG}"
     # Resolve relative paths against cwd
