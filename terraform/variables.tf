@@ -117,3 +117,23 @@ variable "enable_scheduled_stop" {
   type        = bool
   default     = true
 }
+
+# ---- Web app ---------------------------------------------------------------
+
+variable "enable_web_app" {
+  description = "Deploy the browser-based user app (Lambda + S3 + CloudFront). Set to true after bootstrapping to provide users with a zero-install path."
+  type        = bool
+  default     = false
+}
+
+variable "app_domain" {
+  description = "Custom domain for the browser app (e.g. app.myproject.com). Leave empty to use the auto-generated CloudFront domain."
+  type        = string
+  default     = ""
+}
+
+variable "route53_zone_id" {
+  description = "Route 53 hosted zone ID for app_domain. Required if app_domain is set."
+  type        = string
+  default     = ""
+}

@@ -1,8 +1,10 @@
-# User Guide
+# CLI User Guide
 
 Your AWS development environment is already set up — your admin has provisioned a dedicated EC2 instance just for you. This guide walks you through the one-time setup needed to connect to it.
 
 **Time to complete: about 10 minutes.**
+
+> **Browser path available.** If your admin sent you a link instead of a setup zip, you can connect entirely from a browser — no Docker, no install required. See the [Browser Access Guide](README-user-web.md) instead.
 
 > **New to this?** Before diving in, [How it works](README-how-it-works.md) explains the mental model — two places, three services, and why you log in differently to each one.
 

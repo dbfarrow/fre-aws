@@ -85,6 +85,11 @@ installer:
   publish-installer <user>
                         Re-generate installer bundle for a user, upload to
                         S3, and print a new 72-hour pre-signed URL
+
+browser app:
+  publish-app-link <user>
+                        Generate a 72-hour signed magic link for the browser
+                        app and optionally send it via email
 EOF
 }
 
@@ -514,6 +519,12 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/publish-installer.sh
+      ;;
+    publish-app-link)
+      require_username
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        "${IMAGE_NAME}" /workspace/scripts/publish-app-link.sh
       ;;
     push-admin-keys)
       HOST_SSH_KEY=$(_detect_admin_ssh_key)

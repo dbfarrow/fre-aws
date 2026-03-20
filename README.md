@@ -27,11 +27,27 @@ Your machine (Mac or Windows/WSL2)
 
 ## How access works
 
+There are two ways for users to reach their instance:
+
+### CLI path (default)
+
 Connections use SSH tunneled through [AWS SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html):
 
 - **No open ports** — EC2 instances have no inbound firewall rules, no public IP required
 - **No GitHub SSH keys on instances** — GitHub access uses OAuth via `gh auth login`; no SSH key needs to be added to GitHub
 - **No VPN** — SSM handles the tunnel; the only requirement is valid AWS credentials
+- **Requires**: Docker (or OrbStack/Rancher Desktop) installed on the user's machine
+
+### Browser path (optional)
+
+When the admin enables the web app (`ENABLE_WEB_APP=true`), users get a zero-install alternative:
+
+- **No Docker, no AWS credentials, no local install** — just a browser
+- User clicks a signed link from their onboarding email → lands on a personal dashboard
+- Dashboard shows instance status and provides **Start**, **Stop**, and **Open Terminal** buttons
+- **Open Terminal** opens an interactive AWS SSM browser terminal directly in a new tab
+
+The admin enables this once per project; users receive individual signed links via `./admin.sh publish-app-link`.
 
 ---
 
@@ -53,14 +69,17 @@ Responsibilities:
 
 ### User
 
-Uses their assigned instance. Uses `./user.sh`.
+Uses their assigned instance.
 
-Responsibilities:
+**CLI path** — uses `./user.sh` (requires Docker):
 - Log in to AWS once per day (`./user.sh sso-login`)
 - Connect to their instance (`./user.sh connect`)
-- Instances stop automatically when idle; users can also stop manually with `./user.sh stop`
 
-**→ [User Guide](README-user.md)**
+**Browser path** — uses a signed URL (no install required):
+- Open the dashboard link from their onboarding email
+- Start the instance and open a terminal from the browser
+
+**→ [CLI User Guide](README-user.md) · [Browser User Guide](README-user-web.md)**
 
 ---
 

@@ -98,6 +98,9 @@ terraform -chdir="${TF_DIR}" plan \
   -var="anomaly_threshold_usd=${ANOMALY_THRESHOLD_USD:-5}" \
   -var="enable_anomaly_detection=${ENABLE_ANOMALY_DETECTION:-true}" \
   -var="enable_scheduled_stop=${ENABLE_SCHEDULED_STOP:-true}" \
+  -var="enable_web_app=${ENABLE_WEB_APP:-false}" \
+  -var="app_domain=${APP_DOMAIN:-}" \
+  -var="route53_zone_id=${ROUTE53_ZONE_ID:-}" \
   -var-file="${USERS_TFVARS}" \
   "${EXTRA_TF_ARGS[@]}" \
   -out="${TF_DIR}/.tfplan"
@@ -123,10 +126,25 @@ rm -f "${TF_DIR}/.tfplan"
 echo ""
 
 # ---------------------------------------------------------------------------
+# CloudFront cache invalidation (web app only)
+# Ensures browsers get the updated index.html after every apply.
+# ---------------------------------------------------------------------------
+TF_OUTPUTS=$(terraform -chdir="${TF_DIR}" output -json)
+CF_DIST_ID=$(echo "${TF_OUTPUTS}" | jq -r '.app_cloudfront_distribution_id.value // empty')
+if [[ -n "${CF_DIST_ID}" ]]; then
+  echo "--- invalidating CloudFront cache (${CF_DIST_ID}) ---"
+  aws cloudfront create-invalidation \
+    --distribution-id "${CF_DIST_ID}" \
+    --paths "/*" \
+    --output json | jq -r '"  Invalidation: \(.Invalidation.Id) (\(.Invalidation.Status))"'
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
 # Print outputs
 # ---------------------------------------------------------------------------
 echo "=== Environment ready ==="
-terraform -chdir="${TF_DIR}" output -json | jq -r '
+echo "${TF_OUTPUTS}" | jq -r '
   "  Network mode:    \(.network_mode.value)",
   "",
   "  Users deployed:",

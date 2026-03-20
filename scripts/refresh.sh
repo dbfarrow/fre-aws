@@ -131,18 +131,15 @@ SERVICE
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo systemctl daemon-reload && sudo systemctl enable --now autoshutdown.timer && echo '  autoshutdown timer active'"
 
-# Also ensure .bash_profile has both the stdin-is-terminal guard (-t 0) and
-# the TMUX guard (-z "${TMUX:-}") so session_start.sh never fires inside an
-# existing tmux window or from non-interactive shells.
+# Ensure .bash_profile uses the correct session launcher guard:
+#   [[ -t 0 && -z "${TMUX:-}" ]]  (SSH and SSM browser terminal both have a TTY)
+# Remove the SSH_TTY restriction if present — SSM browser sessions don't set SSH_TTY.
 echo "--- patching .bash_profile on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
-  if grep -q "SSH_TTY" ~/.bash_profile && ! grep -q "\-t 0" ~/.bash_profile; then
-    sed -i "s/\[\[ -n \"\${SSH_TTY:-}\" \]\]/[[ -n \"\${SSH_TTY:-}\" \&\& -t 0 ]]/" ~/.bash_profile
-    echo "  .bash_profile: added -t 0 guard."
-  fi
-  if grep -q "SSH_TTY" ~/.bash_profile && ! grep -q "TMUX" ~/.bash_profile; then
-    sed -i "s/-t 0 \]\]/-t 0 \&\& -z \"\${TMUX:-}\" ]]/" ~/.bash_profile
-    echo "  .bash_profile: added TMUX guard."
+  if grep -q "SSH_TTY" ~/.bash_profile; then
+    sed -i "s/\[\[ -n \"\${SSH_TTY:-}\" && -t 0 && -z \"\${TMUX:-}\" \]\]/[[ -t 0 \&\& -z \"\${TMUX:-}\" ]]/" ~/.bash_profile
+    sed -i "s/# Launch Claude Code session selector on interactive SSH login/# Launch Claude Code session selector on interactive login (SSH or SSM browser terminal)/" ~/.bash_profile
+    echo "  .bash_profile: removed SSH_TTY restriction (now fires for SSH and SSM sessions)"
   else
     echo "  .bash_profile already up to date."
   fi
