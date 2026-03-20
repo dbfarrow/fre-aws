@@ -17,6 +17,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 - [Cost Considerations](#cost-considerations)
 - [First-Time Setup](#first-time-setup)
 - [Managing Users](#managing-users)
+- [Browser App (Optional)](#browser-app-optional)
 - [Command Reference](#command-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -256,6 +257,19 @@ User configuration is stored in S3 (`<project>-tfstate/<project>/users.json`) an
 | **KMS key** | $1/month per key | One key shared across all users |
 | **Multiple EC2 instances** | Multiplied by number of users | Each user has their own instance |
 
+### Browser app costs (when `ENABLE_WEB_APP=true`)
+
+All three resources have generous free tiers and will cost effectively nothing for small teams:
+
+| Resource | Free Tier | Beyond Free Tier |
+|----------|-----------|-----------------|
+| **Lambda** (API) | 1M requests/month | ~$0.20 per million |
+| **API Gateway** | 1M requests/month (first 12 months) | ~$1 per million |
+| **CloudFront** (static HTML) | 1 TB transfer + 10M requests/month | ~$0.01/GB |
+| **SSM Parameter Store** | Standard parameters free | — |
+
+For a team of 10 users each opening the dashboard a few times a day, monthly cost is negligible (cents or zero).
+
 ### Network configuration options
 
 Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
@@ -375,6 +389,20 @@ The pre-signed installer URL expires after 72 hours. To generate a fresh one:
 
 This uploads a new `latest.zip` to S3 and prints a new pre-signed URL. Send it to the user manually (or copy into an email). Useful after the initial link expires or after scripts are updated.
 
+### Sending a browser app link
+
+If the browser app is enabled (`ENABLE_WEB_APP=true` and `WEB_APP_URL` set in `config/admin.env`), you can send a user a signed browser access link instead of (or in addition to) the installer:
+
+```bash
+./admin.sh publish-app-link <username>
+```
+
+This generates a 72-hour signed magic link and prints the URL. If `SENDER_EMAIL` is set in `config/admin.env`, it also emails the link to the user automatically.
+
+The link logs the user in without a password and redirects to their personal dashboard. They can start their instance and open an SSM terminal entirely from the browser — no Docker or AWS credentials required.
+
+> **WEB_APP_URL must be set** in `config/admin.env` before running this command. See [Browser App](#browser-app-optional) below for setup instructions.
+
 ### Pushing admin SSH key to existing instances
 
 New instances get the admin's SSH public key injected automatically via `user_data` at provision time. For instances that were created before you set up your SSH key, or when adding a new admin:
@@ -417,6 +445,59 @@ Then ask the user to run `~/fre-aws/user.sh update` to pull the latest scripts f
 
 ---
 
+## Browser App (Optional)
+
+The browser app gives users a zero-install path to their instance: a personal dashboard where they can start/stop their instance and open an SSM terminal in a browser tab. No Docker, no AWS credentials, no local setup required on the user side.
+
+### Enabling the browser app
+
+1. Set `ENABLE_WEB_APP=true` in `config/admin.env`
+
+2. Run `./admin.sh up` — this provisions:
+   - A Lambda function (API)
+   - An API Gateway HTTP API
+   - An S3 bucket + CloudFront distribution (serves the dashboard HTML)
+   - An SSM session preferences document (starts the terminal as `developer`)
+   - An IAM federation role (scoped to the user's specific instance)
+   - An SSM parameter for the signing secret
+
+3. Capture the app URL from the Terraform output:
+   ```
+   app_url = "https://d1234abcd.cloudfront.net"
+   ```
+
+4. Set `WEB_APP_URL=<app_url>` in `config/admin.env`
+
+5. Send users their access links:
+   ```bash
+   ./admin.sh publish-app-link <username>
+   ```
+
+### Custom domain (optional)
+
+To use a custom domain (e.g. `app.myproject.com`) instead of the auto-generated CloudFront URL:
+
+1. Set `APP_DOMAIN=app.myproject.com` in `config/admin.env`
+2. Set `ROUTE53_ZONE_ID=<your-hosted-zone-id>` in `config/admin.env`
+3. Run `./admin.sh up` — Terraform provisions the ACM certificate (in `us-east-1`, required by CloudFront), DNS validation record, and Route 53 A record automatically
+4. Set `WEB_APP_URL=https://app.myproject.com` in `config/admin.env`
+
+### How the terminal works
+
+Clicking **Open Terminal** in the dashboard:
+1. Calls the Lambda API, which assumes a tightly-scoped IAM role restricted to the user's specific instance
+2. Exchanges the temporary credentials for a one-time AWS Console sign-in token
+3. Returns a URL that opens the AWS SSM Session Manager console pre-connected to the instance
+4. The terminal starts as `developer` and fires the session launcher automatically
+
+The signed terminal URL is single-use and expires after one hour.
+
+### After updating infrastructure
+
+After every `./admin.sh up`, the CloudFront cache is invalidated automatically so users always get the latest dashboard HTML.
+
+---
+
 ## Command Reference
 
 ### User management
@@ -425,6 +506,7 @@ Then ask the user to run `~/fre-aws/user.sh update` to pull the latest scripts f
 ./admin.sh remove-user <username>       # remove a user (destroys instance on next up)
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
+./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
 ./admin.sh list                         # list all users and their instance state
 ./admin.sh list -v                      # verbose: show email, role, SSH key, git config
 ```
