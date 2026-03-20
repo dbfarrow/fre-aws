@@ -131,4 +131,6 @@ else
   SSH_OPTS+=("-i" "${SSH_KEY_FILE}")  # Explicit key — SSH won't auto-discover non-default names
 fi
 
+SSH_OPTS+=("-L" "0.0.0.0:${WEB_PREVIEW_PORT:-8080}:localhost:8080")
+
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}"

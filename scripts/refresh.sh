@@ -58,6 +58,7 @@ fi
 SSH_OPTS=(
   "-o" "StrictHostKeyChecking=no"
   "-o" "UserKnownHostsFile=/dev/null"
+  "-o" "LogLevel=ERROR"
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )
 
@@ -147,7 +148,59 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
   fi
 '
 
+echo "--- ensuring rsync is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo dnf install -y rsync -q && echo '  rsync ready'"
+
+echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo tee /etc/systemd/system/web-preview.service > /dev/null" \
+  << 'WEB_PREVIEW_SERVICE'
+[Unit]
+Description=Static web server for Claude Code output preview
+After=network.target
+
+[Service]
+Type=simple
+User=developer
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /home/developer/www
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+WEB_PREVIEW_SERVICE
+
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo systemctl daemon-reload && sudo systemctl enable web-preview.service && sudo systemctl restart web-preview.service && echo '  web-preview service active on port 8080'"
+
+echo "--- pushing ~/.claude/CLAUDE.md to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "mkdir -p ~/.claude && tee ~/.claude/CLAUDE.md > /dev/null" \
+  << 'CLAUDE_MD'
+## File Sharing with the User
+
+A static web server is always running on this instance. The user can access it at **http://localhost:8080** in their local browser while connected.
+
+Directory conventions (using `my-app` as an example project):
+- `~/repos/my-app/` — the **working directory** (source code)
+- `~/www/my-app/`   — the **web root** (also called the serve directory); files here are served at `http://localhost:8080/my-app/`
+- `~/uploads/my-app/` — where user-uploaded files land; also accessible at `http://localhost:8080/my-app/uploads/` via a symlink in the web root
+
+### Sharing visual output or web content
+
+Write files to the **web root** (`~/www/<project>/`) where `<project>` is the basename of the working directory. For example, if the working directory is `~/repos/my-app/`, the web root is `~/www/my-app/`.
+
+Files written to the web root are immediately visible at `http://localhost:8080/<project>/` in the user's browser. Tell the user to open that URL to preview your output.
+
+### When the user uploads files
+
+The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention as the web root). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
+CLAUDE_MD
+
 echo ""
 echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
 echo "    session_start.sh + .tmux.conf: take effect on next connect"
 echo "    autoshutdown timer:            active immediately"
+echo "    web-preview service:           active immediately (http://localhost:8080)"
+echo "    ~/.claude/CLAUDE.md:           updated"

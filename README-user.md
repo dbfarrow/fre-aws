@@ -171,6 +171,39 @@ When you choose "Clone a GitHub repo", you'll be prompted to authenticate with G
 
 ---
 
+## Web preview and file sharing
+
+While you're connected, a web server is running on your instance and forwarded to your browser. Open **http://localhost:8080** to see a directory listing of your projects.
+
+### Viewing Claude's output
+
+When you ask Claude to create a web page, chart, or any visual output, it writes to the **web root** for your project (`~/www/<project>/`). Files there are immediately available at:
+
+```
+http://localhost:8080/<project>/
+```
+
+Claude will tell you the URL — just open it in your browser.
+
+### Uploading files to Claude
+
+To share a screenshot, image, reference file, or entire directory with Claude, use:
+
+```bash
+~/fre-aws/user.sh upload <file-or-directory>
+```
+
+If you have multiple projects, you'll see a numbered menu to pick which one. Or specify it directly:
+
+```bash
+~/fre-aws/user.sh upload screenshot.png my-project
+~/fre-aws/user.sh upload reference-images/ my-project
+```
+
+Files land in `~/uploads/<project>/` on your instance. Directories are synced with rsync — re-uploading the same directory only transfers what changed. Everything uploaded is also browseable at `http://localhost:8080/<project>/uploads/`. Once uploaded, tell Claude "I uploaded a file" — it will check that directory.
+
+---
+
 ## Keeping your tools up to date
 
 When your admin releases an update to the scripts, run:

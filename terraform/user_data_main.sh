@@ -4,7 +4,7 @@ echo "Region: ${REGION}  Project: ${PROJECT_NAME}  User: ${DEV_USERNAME}"
 # System updates and tools
 # ---------------------------------------------------------------------------
 dnf update -y
-dnf install -y git tmux vim htop openssh-server
+dnf install -y git tmux vim htop openssh-server rsync
 
 # ---------------------------------------------------------------------------
 # GitHub CLI (gh) — used for authenticated repo browsing and cloning
@@ -131,3 +131,58 @@ SERVICE
 
 systemctl enable --now autoshutdown.timer
 echo "Autoshutdown timer enabled."
+
+# ---------------------------------------------------------------------------
+# Web preview — static server for ~/www/; accessible from host via SSH tunnel
+# ---------------------------------------------------------------------------
+mkdir -p /home/developer/www /home/developer/uploads
+chown developer:developer /home/developer/www /home/developer/uploads
+
+cat > /etc/systemd/system/web-preview.service << 'EOF'
+[Unit]
+Description=Static web server for Claude Code output preview
+After=network.target
+
+[Service]
+Type=simple
+User=developer
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /home/developer/www
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable web-preview.service
+systemctl start web-preview.service
+echo "Web preview server enabled on port 8080."
+
+# ---------------------------------------------------------------------------
+# Global Claude Code instructions for all sessions on this instance
+# ---------------------------------------------------------------------------
+mkdir -p /home/developer/.claude
+cat > /home/developer/.claude/CLAUDE.md << 'EOF'
+## File Sharing with the User
+
+A static web server is always running on this instance. The user can access it at **http://localhost:8080** in their local browser while connected.
+
+Directory conventions (using `my-app` as an example project):
+- `~/repos/my-app/` — the **working directory** (source code)
+- `~/www/my-app/`   — the **web root** (also called the serve directory); files here are served at `http://localhost:8080/my-app/`
+- `~/uploads/my-app/` — where user-uploaded files land; also accessible at `http://localhost:8080/my-app/uploads/` via a symlink in the web root
+
+### Sharing visual output or web content
+
+Write files to the **web root** (`~/www/<project>/`) where `<project>` is the basename of the working directory. For example, if the working directory is `~/repos/my-app/`, the web root is `~/www/my-app/`.
+
+Files written to the web root are immediately visible at `http://localhost:8080/<project>/` in the user's browser. Tell the user to open that URL to preview your output.
+
+### When the user uploads files
+
+The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention as the web root). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
+EOF
+
+chown -R developer:developer /home/developer/.claude
+echo "Global Claude Code instructions written."
