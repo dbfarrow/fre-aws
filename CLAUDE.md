@@ -104,18 +104,24 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
 ├── terraform/
-│   ├── main.tf                  # Root module; assembles user_data via join() + file()
+│   ├── main.tf                  # Base module: VPC, KMS, security groups, billing, web app
 │   ├── variables.tf
-│   ├── outputs.tf
+│   ├── outputs.tf               # Exports: subnet_id, security_group_id, kms_key_arn, etc.
 │   ├── backend.tf               # S3 + DynamoDB remote state (encrypted, KMS)
 │   ├── versions.tf              # Terraform and provider version pins
 │   ├── user_data_main.sh        # EC2 bootstrap: installs Claude, tmux, autoshutdown timer
 │   ├── user_data_tail.sh        # EC2 bootstrap tail: .bash_profile session launcher hook
+│   ├── user/                    # Per-user module (called once per user by up.sh / down.sh)
+│   │   ├── main.tf              # EC2 instance, IAM role/profile, tags
+│   │   ├── variables.tf         # username, ssh_public_key, base outputs as inputs
+│   │   ├── outputs.tf           # instance_id, instance_state
+│   │   ├── backend.tf           # Empty S3 backend; keys injected at runtime
+│   │   └── versions.tf          # AWS provider only
 │   └── tests/                   # terraform test files (*.tftest.hcl)
 ├── scripts/
 │   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, KMS key
-│   ├── up.sh                    # terraform init + apply for a user's instance
-│   ├── down.sh                  # terraform destroy for a user's instance
+│   ├── up.sh                    # Two-phase: base apply, then per-user apply loop
+│   ├── down.sh                  # Per-user destroy; optionally tears down base
 │   ├── start.sh                 # Start a stopped EC2 instance
 │   ├── stop.sh                  # Stop a running EC2 instance
 │   ├── connect.sh               # SSH over SSM tunnel → session_start.sh menu
@@ -233,7 +239,9 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - Remote state in **S3 with versioning, KMS encryption, public access block**
 - State locking via **DynamoDB table**
 - Terraform state bucket is in us-east-1 (bootstrap ran there); EC2 resources are in us-west-2 — intentional
-- State bucket key per user: `terraform/<username>/terraform.tfstate`
+- State is split: base state at `<project>/base/terraform.tfstate`; per-user state at `<project>/users/<username>/terraform.tfstate`
+- `up.sh` runs two phases: base apply (shared infra, fast no-op if converged), then per-user loop
+- `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Scheduled Stop (Lambda)
 - Midnight Lambda stops all running instances to prevent overnight charges
