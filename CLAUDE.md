@@ -130,7 +130,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── stat.sh                  # Full environment status: identity, billing, instances
 │   ├── list.sh                  # Users + EC2 instance state summary
 │   ├── add-user.sh              # Add user to S3 registry + Identity Center
-│   ├── remove-user.sh           # Remove user from registry (and optionally Identity Center)
+│   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center)
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -150,7 +150,7 @@ Each user gets their own EC2 instance, IAM Identity Center user, and S3 registry
 
 ```
 ./admin.sh add-user <username>     # Provision Identity Center user + S3 entry
-./admin.sh remove-user <username>  # Remove user (--keep-sso to preserve Identity Center)
+./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
 ./admin.sh list                    # Show all users + instance state + timestamps
 ./admin.sh stat                    # Full environment status including billing
 ./admin.sh up <username>           # Provision EC2 instance for user

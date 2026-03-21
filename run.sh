@@ -38,9 +38,10 @@ options:
 user management:
   add-user              Interactive wizard to add a new user
   remove-user <user> [--keep-sso]
-                        Remove a user (destroys instance on next up)
-                        --keep-sso preserves the IAM Identity Center account
-                        so the user can be re-added without AWS account setup
+                        Destroy a user's EC2 instance and remove them from
+                        the registry. --keep-sso preserves the IAM Identity
+                        Center account so the user can be re-added without
+                        AWS account setup.
   update-user-key <user>
                         Replace a user's SSH public key
   stat                  Show environment config, cost profile, and user/instance summary

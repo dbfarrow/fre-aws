@@ -55,39 +55,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Confirmation — single prompt before any destruction begins
+# Confirmation — single prompt before any destruction begins.
+# Set SKIP_DOWN_CONFIRM=true to bypass (e.g. when called from remove-user.sh
+# which has already collected its own confirmation).
 # ---------------------------------------------------------------------------
-echo "=== fre-aws down ==="
-echo ""
+if [[ "${SKIP_DOWN_CONFIRM:-}" != "true" ]]; then
+  echo "=== fre-aws down ==="
+  echo ""
 
-if [[ -n "${TARGET_USER}" ]]; then
-  echo "WARNING: This will DESTROY ${TARGET_USER}'s EC2 instance and all associated resources."
-  echo "         The user's EBS data will be permanently deleted."
-  echo "         Base infrastructure (VPC, KMS, security groups) will be preserved."
-  echo ""
-  echo "  User:    ${TARGET_USER}"
-  echo "  Project: ${PROJECT_NAME}"
-  echo "  Region:  ${AWS_REGION}"
-  echo ""
-  read -r -p "Type the username to confirm [${TARGET_USER}]: " CONFIRM
-  if [[ "${CONFIRM}" != "${TARGET_USER}" ]]; then
-    echo "Confirmation did not match. Aborted."
-    exit 0
+  if [[ -n "${TARGET_USER}" ]]; then
+    echo "WARNING: This will DESTROY ${TARGET_USER}'s EC2 instance and all associated resources."
+    echo "         The user's EBS data will be permanently deleted."
+    echo "         Base infrastructure (VPC, KMS, security groups) will be preserved."
+    echo ""
+    echo "  User:    ${TARGET_USER}"
+    echo "  Project: ${PROJECT_NAME}"
+    echo "  Region:  ${AWS_REGION}"
+    echo ""
+    read -r -p "Type the username to confirm [${TARGET_USER}]: " CONFIRM
+    if [[ "${CONFIRM}" != "${TARGET_USER}" ]]; then
+      echo "Confirmation did not match. Aborted."
+      exit 0
+    fi
+  else
+    echo "WARNING: This will DESTROY all user EC2 instances AND all base AWS resources."
+    echo "         All user EBS data will be permanently deleted."
+    echo ""
+    echo "  Project: ${PROJECT_NAME}"
+    echo "  Region:  ${AWS_REGION}"
+    echo ""
+    read -r -p "Type the project name to confirm [${PROJECT_NAME}]: " CONFIRM
+    if [[ "${CONFIRM}" != "${PROJECT_NAME}" ]]; then
+      echo "Confirmation did not match. Aborted."
+      exit 0
+    fi
   fi
-else
-  echo "WARNING: This will DESTROY all user EC2 instances AND all base AWS resources."
-  echo "         All user EBS data will be permanently deleted."
   echo ""
-  echo "  Project: ${PROJECT_NAME}"
-  echo "  Region:  ${AWS_REGION}"
-  echo ""
-  read -r -p "Type the project name to confirm [${PROJECT_NAME}]: " CONFIRM
-  if [[ "${CONFIRM}" != "${PROJECT_NAME}" ]]; then
-    echo "Confirmation did not match. Aborted."
-    exit 0
-  fi
 fi
-echo ""
 
 # ---------------------------------------------------------------------------
 # Export credentials for Terraform

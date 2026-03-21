@@ -373,11 +373,10 @@ Two modes:
 ### Removing a user
 
 ```bash
-./admin.sh down <username>        # destroy the EC2 instance and its data
-./admin.sh remove-user <username> # remove from user registry
+./admin.sh remove-user <username>
 ```
 
-`down <username>` destroys the user's EC2 instance and EBS volume permanently. `remove-user` then removes them from the registry so they won't be reprovisioned on the next `up`. Their IAM Identity Center account remains — revoke it manually in the AWS Console if needed.
+`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step. Their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
 
 ### Re-sending the installer link
 
@@ -503,7 +502,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ### User management
 ```bash
 ./admin.sh add-user                     # interactive wizard: add a user
-./admin.sh remove-user <username>       # remove a user (destroys instance on next up)
+./admin.sh remove-user <username>       # destroy EC2 instance + remove from registry
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
