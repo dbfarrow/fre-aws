@@ -30,6 +30,8 @@ source "${SCRIPT_DIR}/../config/backend.env"
 
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
+# shellcheck source=scripts/app-link.sh
+source "${SCRIPT_DIR}/app-link.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${AWS_REGION:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
@@ -67,35 +69,10 @@ fi
 USER_EMAIL=$(jq -r --arg u "${USERNAME}" '.[$u].user_email' "${USERS_JSON}")
 
 # ---------------------------------------------------------------------------
-# Fetch HMAC secret from SSM
-# ---------------------------------------------------------------------------
-HMAC_PARAM_PATH="/${PROJECT_NAME}/app/hmac-secret"
-
-echo "Fetching HMAC secret..."
-SECRET=$(aws ssm get-parameter \
-  --name "${HMAC_PARAM_PATH}" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text \
-  --region "${AWS_REGION}" \
-  --profile "${AWS_PROFILE}")
-
-if [[ -z "${SECRET}" ]]; then
-  echo "ERROR: Could not read HMAC secret from SSM (${HMAC_PARAM_PATH})." >&2
-  echo "       Ensure the web app is deployed: ENABLE_WEB_APP=true in admin.env, then ./admin.sh up" >&2
-  exit 1
-fi
-
-# ---------------------------------------------------------------------------
 # Generate 72-hour magic link token
-# Format: base64url("{username}:{expiry_unix}:{hmac_hex}")
 # ---------------------------------------------------------------------------
-EXPIRY=$(( $(date +%s) + 259200 ))
-PAYLOAD="${USERNAME}:${EXPIRY}"
-HMAC_HEX=$(printf '%s' "${PAYLOAD}" | openssl dgst -sha256 -hmac "${SECRET}" -hex | awk '{print $NF}')
-TOKEN=$(printf '%s' "${PAYLOAD}:${HMAC_HEX}" | base64 | tr '+/' '-_' | tr -d '=' | tr -d '\n')
-
-APP_LINK_URL="${WEB_APP_URL%/}?token=${TOKEN}"
+echo "Generating app link..."
+APP_LINK_URL=$(_generate_app_link_url "${USERNAME}")
 
 # ---------------------------------------------------------------------------
 # Send email (if SENDER_EMAIL is configured)
