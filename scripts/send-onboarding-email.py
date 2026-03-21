@@ -72,7 +72,7 @@ def build_body_app_link(username, project, app_url):
 
 def build_body_installer_url(username, project, role,
                              has_private_key,
-                             sso_start_url, user_email,
+                             sso_start_url,
                              installer_url):
     lines = [
         f"Hi {username},",
@@ -153,7 +153,7 @@ def build_body_installer_url(username, project, role,
 
 
 def build_body_unified(username, project, role, has_private_key,
-                       sso_start_url, user_email, installer_url, app_url):
+                       sso_start_url, installer_url, app_url):
     """Plain-text unified email: browser link first, CLI installer below."""
     lines = [
         f"Hi {username},",
@@ -243,7 +243,7 @@ def build_body_unified(username, project, role, has_private_key,
 def build_body_attachments(username, project, role,
                            aws_profile, aws_region,
                            has_private_key,
-                           sso_start_url, user_email):
+                           sso_start_url):
     lines = [
         f"Hi {username},",
         "",
@@ -395,7 +395,7 @@ def build_html_app_link(username, project, app_url, logo_url):
 
 
 def _html_cli_steps(username, role, project, has_private_key,
-                    sso_start_url, user_email, installer_url, step_offset=1):
+                    sso_start_url, installer_url, step_offset=1):
     """Return HTML for the numbered CLI setup steps starting at step_offset."""
     # Pre-compute multi-line command strings — backslashes are forbidden inside
     # f-string expression parts in Python < 3.12, so these must be variables.
@@ -467,17 +467,17 @@ def _html_cli_steps(username, role, project, has_private_key,
 
 
 def build_html_installer_url(username, project, role, has_private_key,
-                             sso_start_url, user_email, installer_url, logo_url):
+                             sso_start_url, installer_url, logo_url):
     body_html = f"""\
     <p>Hi {username},</p>
     <p>You have been provisioned as a <strong>{role}</strong> in the <strong>{project}</strong> environment.</p>
     <h3 style="color:#333;">Setup instructions</h3>
-    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, user_email, installer_url)}"""
+    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, installer_url)}"""
     return _html_card(project, logo_url, body_html)
 
 
 def build_html_unified(username, project, role, has_private_key,
-                       sso_start_url, user_email, installer_url, app_url, logo_url):
+                       sso_start_url, installer_url, app_url, logo_url):
     """HTML unified email: browser link (top), CLI installer (below)."""
     body_html = f"""\
     <p>Hi {username},</p>
@@ -491,7 +491,7 @@ def build_html_unified(username, project, role, has_private_key,
     <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0;">
     <h3 style="color:#333;">Prefer the native terminal experience?</h3>
     <p>Follow these steps to install the CLI:</p>
-    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, user_email, installer_url)}"""
+    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, installer_url)}"""
     return _html_card(project, logo_url, body_html)
 
 
@@ -618,7 +618,6 @@ def main():
             role=args.role,
             has_private_key=has_private_key,
             sso_start_url=args.sso_start_url,
-            user_email=args.user_email,
             installer_url=args.installer_url,
             app_url=args.app_url,
         )
@@ -628,7 +627,6 @@ def main():
             role=args.role,
             has_private_key=has_private_key,
             sso_start_url=args.sso_start_url,
-            user_email=args.user_email,
             installer_url=args.installer_url,
             app_url=args.app_url,
             logo_url=logo_url,
@@ -667,7 +665,6 @@ def main():
             role=args.role,
             has_private_key=has_private_key,
             sso_start_url=args.sso_start_url,
-            user_email=args.user_email,
             installer_url=args.installer_url,
         )
         html = build_html_installer_url(
@@ -676,7 +673,6 @@ def main():
             role=args.role,
             has_private_key=has_private_key,
             sso_start_url=args.sso_start_url,
-            user_email=args.user_email,
             installer_url=args.installer_url,
             logo_url=logo_url,
         )
@@ -700,7 +696,6 @@ def main():
         aws_region=args.aws_region,
         has_private_key=has_private_key,
         sso_start_url=args.sso_start_url,
-        user_email=args.user_email,
     )
     subject = f"[{args.project}] Your development environment credentials"
     msg = build_message(args.to, args.from_addr, subject, plain, None, attachments)
