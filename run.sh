@@ -52,8 +52,8 @@ infrastructure:
                         One-time setup (S3, DynamoDB, KMS, SES verification)
                         Use --profile to specify a named AWS profile; omit to
                         use AWS_PROFILE from admin.env or the default profile
-  up                    Create / update all AWS infrastructure
-  down                  Destroy all AWS infrastructure
+  up [user]             Create / update base infrastructure + all users (or just one user)
+  down [user]           Destroy one user's instance, or all infrastructure if no user given
   repair-state [--dry-run] [user]
                         Import resources that exist in AWS but are missing from
                         Terraform state (fixes EntityAlreadyExists errors)
@@ -375,11 +375,6 @@ if [[ "${MODE}" == "admin" ]]; then
         "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
       ;;
     up)
-      if [[ -n "${USERNAME}" ]]; then
-        echo "ERROR: 'up' provisions ALL users — it does not accept a username." >&2
-        echo "       To add one user: ./admin.sh add-user, then ./admin.sh up" >&2
-        exit 1
-      fi
       ADMIN_SSH_PUB_KEY=""
       HOST_SSH_KEY=$(_detect_admin_ssh_key)
       if [[ -n "${HOST_SSH_KEY}" && -f "${HOST_SSH_KEY}.pub" ]]; then
@@ -387,15 +382,10 @@ if [[ "${MODE}" == "admin" ]]; then
       fi
       docker run "${DOCKER_ARGS[@]}" \
         --env "ADMIN_SSH_PUB_KEY=${ADMIN_SSH_PUB_KEY}" \
-        "${IMAGE_NAME}" /workspace/scripts/up.sh
+        "${IMAGE_NAME}" /workspace/scripts/up.sh "${USERNAME:-}"
       ;;
     down)
-      if [[ -n "${USERNAME}" ]]; then
-        echo "ERROR: 'down' destroys ALL infrastructure — it does not accept a username." >&2
-        echo "       To remove one user's instance: ./admin.sh remove-user ${USERNAME} && ./admin.sh up" >&2
-        exit 1
-      fi
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh "${USERNAME:-}"
       ;;
     add-user)
       if [[ -n "${USERNAME}" ]]; then
