@@ -88,12 +88,11 @@ def build_body_installer_url(username, project, role,
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
-        "     b. Click \"Forgot password\"",
-        f"     c. Enter your email address: {user_email}",
-        "     d. Check your inbox for a verification email from AWS and",
-        "        follow the link to set your password.",
-        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
-        "           You will need this when logging in after activation.",
+        f"     b. Enter your username: {username}",
+        "     c. Click \"Forgot password\"",
+        "     d. Complete the CAPTCHA",
+        "     e. Check your inbox for a password reset email and follow the",
+        "        link to set your password.",
         "",
     ]
     step += 1
@@ -177,12 +176,11 @@ def build_body_unified(username, project, role, has_private_key,
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
-        "     b. Click \"Forgot password\"",
-        f"     c. Enter your email address: {user_email}",
-        "     d. Check your inbox for a verification email from AWS and",
-        "        follow the link to set your password.",
-        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
-        "           You will need this when logging in after activation.",
+        f"     b. Enter your username: {username}",
+        "     c. Click \"Forgot password\"",
+        "     d. Complete the CAPTCHA",
+        "     e. Check your inbox for a password reset email and follow the",
+        "        link to set your password.",
         "",
     ]
     step += 1
@@ -269,12 +267,11 @@ def build_body_attachments(username, project, role,
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
-        "     b. Click \"Forgot password\"",
-        f"     c. Enter your email address: {user_email}",
-        "     d. Check your inbox for a verification email from AWS and",
-        "        follow the link to set your password.",
-        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
-        "           You will need this when logging in after activation.",
+        f"     b. Enter your username: {username}",
+        "     c. Click \"Forgot password\"",
+        "     d. Complete the CAPTCHA",
+        "     e. Check your inbox for a password reset email and follow the",
+        "        link to set your password.",
         "",
     ]
     step += 1
@@ -417,21 +414,16 @@ def _html_cli_steps(username, role, project, has_private_key,
         "~/fre-aws/user.sh connect     # connect to your instance\n"
         "~/fre-aws/user.sh stop        # stop your instance when done"
     )
-    note_username = _html_note(
-        f"Your AWS login name is <strong>{username}</strong> \u2014 not your email address. "
-        "You will need this when logging in after activation."
-    )
-
     step = step_offset
     html = f"""\
     <p><strong>{step}. Activate your AWS account:</strong></p>
     <ol type="a" style="margin-left:20px;">
       <li>Go to: <a href="{sso_start_url}">{sso_start_url}</a></li>
+      <li>Enter your username: <strong><code>{username}</code></strong></li>
       <li>Click <strong>"Forgot password"</strong></li>
-      <li>Enter your email address: <code>{user_email}</code></li>
-      <li>Check your inbox for a verification email from AWS and follow the link to set your password.</li>
+      <li>Complete the CAPTCHA</li>
+      <li>Check your inbox for a password reset email and follow the link to set your password.</li>
     </ol>
-    {note_username}
     """
     step += 1
 
