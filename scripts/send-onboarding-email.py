@@ -5,6 +5,9 @@ send-onboarding-email.py — Send a developer onboarding email via AWS SES.
 Uses only Python stdlib (email.mime.*, subprocess, argparse, tempfile, os).
 Sends the raw MIME message via `aws ses send-raw-email`.
 
+Email format: multipart/alternative (plain text + HTML) for installer/app-link
+flows; plain text only for the attachment fallback.
+
 Usage (installer URL — no attachments):
   python3 send-onboarding-email.py \\
     --to alice@example.com \\
@@ -19,6 +22,12 @@ Usage (installer URL — no attachments):
     --sso-start-url https://... \\
     --user-email alice@example.com \\
     --installer-url "https://s3.amazonaws.com/..."
+
+Usage (unified — browser link + CLI installer in one email):
+  python3 send-onboarding-email.py \\
+    ... \\
+    --installer-url "https://..." \\
+    --app-url "https://..."
 
 Usage (fallback with file attachments):
   python3 send-onboarding-email.py \\
@@ -39,7 +48,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
-def build_body_app_link(username: str, project: str, app_url: str) -> str:
+# ---------------------------------------------------------------------------
+# Plain-text body builders
+# ---------------------------------------------------------------------------
+
+def build_body_app_link(username, project, app_url):
     lines = [
         f"Hi {username},",
         "",
@@ -57,10 +70,10 @@ def build_body_app_link(username: str, project: str, app_url: str) -> str:
     return "\n".join(lines)
 
 
-def build_body_installer_url(username: str, project: str, role: str,
-                             has_private_key: bool,
-                             sso_start_url: str, user_email: str,
-                             installer_url: str) -> str:
+def build_body_installer_url(username, project, role,
+                             has_private_key,
+                             sso_start_url, user_email,
+                             installer_url):
     lines = [
         f"Hi {username},",
         "",
@@ -72,7 +85,6 @@ def build_body_installer_url(username: str, project: str, role: str,
 
     step = 1
 
-    # Account activation
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
@@ -86,7 +98,6 @@ def build_body_installer_url(username: str, project: str, role: str,
     ]
     step += 1
 
-    # Installer (URL expires in 72 hours)
     lines += [
         f"  {step}. Download and run the installer (link expires in 72 hours):",
         "",
@@ -99,7 +110,7 @@ def build_body_installer_url(username: str, project: str, role: str,
 
     if has_private_key:
         lines += [
-            f"     The installer will place your SSH key at ~/.ssh/fre-claude.",
+            "     The installer will place your SSH key at ~/.ssh/fre-claude.",
             "     Then add the public key to GitHub so git push/pull works:",
             "       ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy",
             "       GitHub: Settings → SSH and GPG keys → New SSH key → paste it",
@@ -142,10 +153,99 @@ def build_body_installer_url(username: str, project: str, role: str,
     return "\n".join(lines)
 
 
-def build_body_attachments(username: str, project: str, role: str,
-                           aws_profile: str, aws_region: str,
-                           has_private_key: bool,
-                           sso_start_url: str, user_email: str) -> str:
+def build_body_unified(username, project, role, has_private_key,
+                       sso_start_url, user_email, installer_url, app_url):
+    """Plain-text unified email: browser link first, CLI installer below."""
+    lines = [
+        f"Hi {username},",
+        "",
+        f"Your {project} development environment is ready.",
+        "",
+        "Open in your browser (no install required):",
+        "",
+        f"  {app_url}",
+        "",
+        "  The link expires in 72 hours. If it has expired, contact your project admin for a new one.",
+        "",
+        "---",
+        "Prefer the native terminal experience? Follow these steps to install the CLI:",
+        "",
+    ]
+
+    step = 1
+
+    lines += [
+        f"  {step}. Activate your AWS account:",
+        f"     a. Go to: {sso_start_url}",
+        "     b. Click \"Forgot password\"",
+        f"     c. Enter your email address: {user_email}",
+        "     d. Check your inbox for a verification email from AWS and",
+        "        follow the link to set your password.",
+        f"     NOTE: Your AWS login name is '{username}' — not your email address.",
+        "           You will need this when logging in after activation.",
+        "",
+    ]
+    step += 1
+
+    lines += [
+        f"  {step}. Download and run the installer (link expires in 72 hours):",
+        "",
+        f"     curl -fsSL '{installer_url}' -o /tmp/fre-setup.zip",
+        "     unzip -d /tmp/fre-setup /tmp/fre-setup.zip",
+        "     bash /tmp/fre-setup/install.sh",
+        "",
+    ]
+    step += 1
+
+    if has_private_key:
+        lines += [
+            "     The installer will place your SSH key at ~/.ssh/fre-claude.",
+            "     Then add the public key to GitHub so git push/pull works:",
+            "       ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy",
+            "       GitHub: Settings → SSH and GPG keys → New SSH key → paste it",
+            "",
+        ]
+
+    lines += [
+        f"  {step}. Log in to AWS (a browser window will open):",
+        "     ~/fre-aws/user.sh sso-login",
+        "",
+    ]
+    step += 1
+
+    lines += [
+        f"  {step}. Connect to your development instance:",
+        "     ~/fre-aws/user.sh connect",
+        "",
+        "Daily use:",
+        "  ~/fre-aws/user.sh sso-login   # re-authenticate (once per day)",
+        "  ~/fre-aws/user.sh start       # start your instance if it's stopped",
+        "  ~/fre-aws/user.sh connect     # connect to your instance",
+        "  ~/fre-aws/user.sh stop        # stop your instance when done",
+        "",
+    ]
+
+    if has_private_key:
+        lines += [
+            "Want to use your own SSH key instead of the generated one?",
+            f"Ask your admin to run: ./admin.sh update-user-key {username}",
+            "",
+        ]
+
+    lines += [
+        "Questions? Contact your project admin.",
+        "",
+        "—",
+        f"{project} automated onboarding",
+    ]
+
+    return "\n".join(lines)
+
+
+def build_body_attachments(username, project, role,
+                           aws_profile, aws_region,
+                           has_private_key,
+                           sso_start_url, user_email):
     lines = [
         f"Hi {username},",
         "",
@@ -166,7 +266,6 @@ def build_body_attachments(username: str, project: str, role: str,
 
     step = 1
 
-    # Account activation
     lines += [
         f"  {step}. Activate your AWS account:",
         f"     a. Go to: {sso_start_url}",
@@ -236,26 +335,197 @@ def build_body_attachments(username: str, project: str, role: str,
     return "\n".join(lines)
 
 
-def build_message(to_addr: str, from_addr: str, subject: str,
-                  body: str, attachments: list) -> MIMEMultipart:
-    msg = MIMEMultipart()
-    msg["From"] = from_addr
-    msg["To"] = to_addr
-    msg["Subject"] = subject
+# ---------------------------------------------------------------------------
+# HTML body builders
+# ---------------------------------------------------------------------------
 
-    msg.attach(MIMEText(body, "plain"))
+def _html_card(project, logo_url, body_html):
+    """Wrap body_html in a styled card with project header."""
+    if logo_url:
+        header_content = (
+            f'<img src="{logo_url}" alt="{project}" '
+            'style="max-width:200px;max-height:80px;">'
+        )
+    else:
+        header_content = (
+            f'<h2 style="margin:0;color:#333;font-family:Arial,sans-serif;">'
+            f'{project}</h2>'
+        )
+    return f"""\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;padding:24px;margin:0;color:#333;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;padding:32px;border-radius:8px;">
+    <div style="text-align:center;padding-bottom:20px;border-bottom:1px solid #e0e0e0;margin-bottom:24px;">
+      {header_content}
+    </div>
+    {body_html}
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0;">
+    <p style="color:#999;font-size:12px;font-style:italic;margin:0;">{project} automated onboarding</p>
+  </div>
+</body>
+</html>"""
 
-    for path, filename in attachments:
-        with open(path, "rb") as fh:
-            part = MIMEApplication(fh.read(), Name=filename)
-        part["Content-Disposition"] = f'attachment; filename="{filename}"'
-        msg.attach(part)
 
-    return msg
+def _html_pre(code):
+    """Wrap code in a styled monospace block."""
+    return (
+        '<pre style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;'
+        'padding:12px;font-family:monospace;font-size:13px;'
+        f'overflow-x:auto;white-space:pre-wrap;">{code}</pre>'
+    )
 
 
-def send_via_ses(msg: MIMEMultipart, ses_region: str,
-                 aws_cli_profile: str) -> None:
+def _html_note(text):
+    """Render a highlighted note box."""
+    return (
+        '<div style="background:#fff9e6;border-left:3px solid #e6ac00;'
+        f'padding:10px 14px;margin:12px 0;font-size:13px;">{text}</div>'
+    )
+
+
+def build_html_app_link(username, project, app_url, logo_url):
+    body_html = f"""\
+    <p>Hi {username},</p>
+    <p>Your <strong>{project}</strong> development environment is ready.</p>
+    <p>No install required — just click the link below to open your instance in a browser:</p>
+    <p style="text-align:center;margin:28px 0;">
+      <a href="{app_url}" style="background:#0073bb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:4px;font-weight:bold;display:inline-block;">Open Development Environment</a>
+    </p>
+    <p style="color:#666;font-size:13px;">The link expires in 72 hours. If it has expired, contact your project admin for a new one.</p>"""
+    return _html_card(project, logo_url, body_html)
+
+
+def _html_cli_steps(username, role, project, has_private_key,
+                    sso_start_url, user_email, installer_url, step_offset=1):
+    """Return HTML for the numbered CLI setup steps starting at step_offset."""
+    step = step_offset
+    html = f"""\
+    <p><strong>{step}. Activate your AWS account:</strong></p>
+    <ol type="a" style="margin-left:20px;">
+      <li>Go to: <a href="{sso_start_url}">{sso_start_url}</a></li>
+      <li>Click <strong>"Forgot password"</strong></li>
+      <li>Enter your email address: <code>{user_email}</code></li>
+      <li>Check your inbox for a verification email from AWS and follow the link to set your password.</li>
+    </ol>
+    {_html_note(f'Your AWS login name is <strong>{username}</strong> — not your email address. You will need this when logging in after activation.')}
+    """
+    step += 1
+
+    html += f"""\
+    <p><strong>{step}. Download and run the installer</strong> (link expires in 72 hours):</p>
+    {_html_pre(f"curl -fsSL '{installer_url}' -o /tmp/fre-setup.zip\nunzip -d /tmp/fre-setup /tmp/fre-setup.zip\nbash /tmp/fre-setup/install.sh")}
+    """
+    step += 1
+
+    if has_private_key:
+        html += f"""\
+    <p>The installer will place your SSH key at <code>~/.ssh/fre-claude</code>. Then add the public key to GitHub so git push/pull works:</p>
+    {_html_pre("ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy\n# GitHub: Settings → SSH and GPG keys → New SSH key → paste it")}
+    """
+
+    html += f"""\
+    <p><strong>{step}. Log in to AWS</strong> (a browser window will open):</p>
+    {_html_pre("~/fre-aws/user.sh sso-login")}
+    """
+    step += 1
+
+    html += f"""\
+    <p><strong>{step}. Connect to your development instance:</strong></p>
+    {_html_pre("~/fre-aws/user.sh connect")}
+    <h3 style="color:#333;">Daily use</h3>
+    {_html_pre("~/fre-aws/user.sh sso-login   # re-authenticate (once per day)\n~/fre-aws/user.sh start       # start your instance if it's stopped\n~/fre-aws/user.sh connect     # connect to your instance\n~/fre-aws/user.sh stop        # stop your instance when done")}
+    """
+
+    if has_private_key:
+        html += f"""\
+    <p style="color:#666;font-size:13px;">Want to use your own SSH key instead of the generated one? Ask your admin to run: <code>./admin.sh update-user-key {username}</code></p>
+    """
+
+    html += """\
+    <p>Questions? Contact your project admin.</p>"""
+
+    return html
+
+
+def build_html_installer_url(username, project, role, has_private_key,
+                             sso_start_url, user_email, installer_url, logo_url):
+    body_html = f"""\
+    <p>Hi {username},</p>
+    <p>You have been provisioned as a <strong>{role}</strong> in the <strong>{project}</strong> environment.</p>
+    <h3 style="color:#333;">Setup instructions</h3>
+    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, user_email, installer_url)}"""
+    return _html_card(project, logo_url, body_html)
+
+
+def build_html_unified(username, project, role, has_private_key,
+                       sso_start_url, user_email, installer_url, app_url, logo_url):
+    """HTML unified email: browser link (top), CLI installer (below)."""
+    body_html = f"""\
+    <p>Hi {username},</p>
+    <p>Your <strong>{project}</strong> development environment is ready.</p>
+    <h3 style="color:#333;">Open in your browser</h3>
+    <p>No install required — just click the link below:</p>
+    <p style="text-align:center;margin:28px 0;">
+      <a href="{app_url}" style="background:#0073bb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:4px;font-weight:bold;display:inline-block;">Open Development Environment</a>
+    </p>
+    <p style="color:#666;font-size:13px;">The link expires in 72 hours. If it has expired, contact your project admin for a new one.</p>
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0;">
+    <h3 style="color:#333;">Prefer the native terminal experience?</h3>
+    <p>Follow these steps to install the CLI:</p>
+    {_html_cli_steps(username, role, project, has_private_key, sso_start_url, user_email, installer_url)}"""
+    return _html_card(project, logo_url, body_html)
+
+
+# ---------------------------------------------------------------------------
+# Message assembly and sending
+# ---------------------------------------------------------------------------
+
+def build_message(to_addr, from_addr, subject, plain_body, html_body, attachments):
+    """Build a MIME email message.
+
+    When html_body is provided and there are no attachments, produces
+    multipart/alternative (plain + HTML). When attachments are present,
+    wraps the alternative part in multipart/mixed. html_body=None sends
+    plain text only (used by the attachment fallback flow).
+    """
+    if attachments:
+        outer = MIMEMultipart("mixed")
+        outer["From"] = from_addr
+        outer["To"] = to_addr
+        outer["Subject"] = subject
+        if html_body:
+            alt = MIMEMultipart("alternative")
+            alt.attach(MIMEText(plain_body, "plain"))
+            alt.attach(MIMEText(html_body, "html"))
+            outer.attach(alt)
+        else:
+            outer.attach(MIMEText(plain_body, "plain"))
+        for path, filename in attachments:
+            with open(path, "rb") as fh:
+                part = MIMEApplication(fh.read(), Name=filename)
+            part["Content-Disposition"] = f'attachment; filename="{filename}"'
+            outer.attach(part)
+        return outer
+    else:
+        if html_body:
+            msg = MIMEMultipart("alternative")
+            msg["From"] = from_addr
+            msg["To"] = to_addr
+            msg["Subject"] = subject
+            msg.attach(MIMEText(plain_body, "plain"))
+            msg.attach(MIMEText(html_body, "html"))
+        else:
+            msg = MIMEMultipart()
+            msg["From"] = from_addr
+            msg["To"] = to_addr
+            msg["Subject"] = subject
+            msg.attach(MIMEText(plain_body, "plain"))
+        return msg
+
+
+def send_via_ses(msg, ses_region, aws_cli_profile):
     raw_b64 = base64.b64encode(msg.as_bytes()).decode("ascii")
     result = subprocess.run(
         [
@@ -272,7 +542,7 @@ def send_via_ses(msg: MIMEMultipart, ses_region: str,
         sys.exit(1)
 
 
-def parse_attachment(value: str) -> tuple:
+def parse_attachment(value):
     """Parse 'path:filename' into (path, filename)."""
     if ":" in value:
         path, _, filename = value.partition(":")
@@ -282,7 +552,7 @@ def parse_attachment(value: str) -> tuple:
     return path, filename
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description="Send user onboarding email via SES")
     parser.add_argument("--to", required=True, help="Developer email address")
     parser.add_argument("--from", dest="from_addr", required=True,
@@ -311,30 +581,70 @@ def main() -> None:
                              "Fallback when --installer-url is not available.")
     parser.add_argument("--app-url", default=None,
                         help="Browser app magic-link URL (72-hour expiry). "
-                             "When provided, sends a minimal app-link email instead of "
-                             "the full installer onboarding email.")
+                             "Combined with --installer-url for a unified email; "
+                             "alone sends a minimal app-link email.")
+    parser.add_argument("--logo-url", default=None,
+                        help="HTTPS URL of a banner image shown at the top of the email card. "
+                             "Omit for a clean text-only header.")
 
     args = parser.parse_args()
 
     attachments = [parse_attachment(a) for a in args.attachment]
+    logo_url = args.logo_url
+
+    if args.app_url and args.installer_url:
+        # Unified mode — browser link + CLI installer in one email (Issue 2)
+        has_private_key = any(fname == "fre-claude" for _, fname in attachments)
+        plain = build_body_unified(
+            username=args.username,
+            project=args.project,
+            role=args.role,
+            has_private_key=has_private_key,
+            sso_start_url=args.sso_start_url,
+            user_email=args.user_email,
+            installer_url=args.installer_url,
+            app_url=args.app_url,
+        )
+        html = build_html_unified(
+            username=args.username,
+            project=args.project,
+            role=args.role,
+            has_private_key=has_private_key,
+            sso_start_url=args.sso_start_url,
+            user_email=args.user_email,
+            installer_url=args.installer_url,
+            app_url=args.app_url,
+            logo_url=logo_url,
+        )
+        subject = f"[{args.project}] Your development environment is ready"
+        msg = build_message(args.to, args.from_addr, subject, plain, html, [])
+        send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
+        print(f"  Onboarding email sent to {args.to}")
+        return
 
     if args.app_url:
-        # App link flow: simple email with just the magic link
-        body = build_body_app_link(
+        # App link only — simple email with the magic link
+        plain = build_body_app_link(
             username=args.username,
             project=args.project,
             app_url=args.app_url,
         )
+        html = build_html_app_link(
+            username=args.username,
+            project=args.project,
+            app_url=args.app_url,
+            logo_url=logo_url,
+        )
         subject = f"[{args.project}] Your development environment is ready"
-        msg = build_message(args.to, args.from_addr, subject, body, [])
+        msg = build_message(args.to, args.from_addr, subject, plain, html, [])
         send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
         print(f"  App link email sent to {args.to}")
         return
 
     if args.installer_url:
-        # New flow: installer URL, no attachments
+        # Installer URL — no attachments
         has_private_key = any(fname == "fre-claude" for _, fname in attachments)
-        body = build_body_installer_url(
+        plain = build_body_installer_url(
             username=args.username,
             project=args.project,
             role=args.role,
@@ -343,31 +653,41 @@ def main() -> None:
             user_email=args.user_email,
             installer_url=args.installer_url,
         )
-        # No attachments when using installer URL
-        effective_attachments = []
-    else:
-        # Fallback flow: file attachments
-        has_private_key = any(fname == "fre-claude" for _, fname in attachments)
-        for path, filename in attachments:
-            if not os.path.exists(path):
-                print(f"ERROR: Attachment not found: {path}", file=sys.stderr)
-                sys.exit(1)
-        body = build_body_attachments(
+        html = build_html_installer_url(
             username=args.username,
             project=args.project,
             role=args.role,
-            aws_profile=args.aws_profile,
-            aws_region=args.aws_region,
             has_private_key=has_private_key,
             sso_start_url=args.sso_start_url,
             user_email=args.user_email,
+            installer_url=args.installer_url,
+            logo_url=logo_url,
         )
-        effective_attachments = attachments
+        subject = f"[{args.project}] Your development environment credentials"
+        msg = build_message(args.to, args.from_addr, subject, plain, html, [])
+        send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
+        print(f"  Onboarding email sent to {args.to}")
+        return
 
+    # Attachment fallback — plain text only
+    has_private_key = any(fname == "fre-claude" for _, fname in attachments)
+    for path, filename in attachments:
+        if not os.path.exists(path):
+            print(f"ERROR: Attachment not found: {path}", file=sys.stderr)
+            sys.exit(1)
+    plain = build_body_attachments(
+        username=args.username,
+        project=args.project,
+        role=args.role,
+        aws_profile=args.aws_profile,
+        aws_region=args.aws_region,
+        has_private_key=has_private_key,
+        sso_start_url=args.sso_start_url,
+        user_email=args.user_email,
+    )
     subject = f"[{args.project}] Your development environment credentials"
-    msg = build_message(args.to, args.from_addr, subject, body, effective_attachments)
+    msg = build_message(args.to, args.from_addr, subject, plain, None, attachments)
     send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
-
     print(f"  Onboarding email sent to {args.to}")
 
 
