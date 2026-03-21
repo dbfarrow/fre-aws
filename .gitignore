@@ -45,6 +45,9 @@ config/aws-config-admin.example
 # Onboarding bundles contain SSH private keys — never commit these
 config/onboarding/
 
+# Per-user env files generated at runtime — never commit these
+config/users/
+
 # macOS
 .DS_Store
 .AppleDouble
