@@ -197,22 +197,26 @@ fi
 # ---------------------------------------------------------------------------
 if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
   BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${DEV_USERNAME}"
+  echo ""
+  echo "Regenerating installer bundle..."
+
   if [[ -d "${BUNDLE_DIR}" && -f "${BUNDLE_DIR}/user.env" ]]; then
-    echo ""
-    echo "Regenerating installer bundle..."
+    # Local bundle exists — update the key there and upload all files to S3
     cp "${SSH_PRIVATE_KEY_FILE}" "${BUNDLE_DIR}/fre-claude"
     chmod 600 "${BUNDLE_DIR}/fre-claude"
-    INSTALLER_URL=$(_create_installer_bundle "${DEV_USERNAME}" "${BUNDLE_DIR}")
-    echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${DEV_USERNAME}/latest.zip"
-    echo ""
-    echo "Send this installer URL to ${DEV_USERNAME} (expires in 72 hours):"
-    echo "  ${INSTALLER_URL}"
+    _upload_onboarding_files "${DEV_USERNAME}" "${BUNDLE_DIR}"
   else
-    echo ""
-    echo "  NOTE: Onboarding bundle dir not found at ${BUNDLE_DIR}/."
-    echo "        New private key: ${SSH_PRIVATE_KEY_FILE}"
-    echo "        Run './admin.sh add-user' for a full re-onboard, or copy the key manually."
+    # No local bundle — upload just the new private key directly to S3
+    aws s3 cp "${SSH_PRIVATE_KEY_FILE}" \
+      "s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${DEV_USERNAME}/fre-claude" \
+      --region "${TF_BACKEND_REGION}" --profile "${AWS_PROFILE}" >/dev/null
   fi
+
+  INSTALLER_URL=$(_create_installer_bundle "${DEV_USERNAME}" "${BUNDLE_DIR}")
+  echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${DEV_USERNAME}/latest.zip"
+  echo ""
+  echo "Send this installer URL to ${DEV_USERNAME} (expires in 72 hours):"
+  echo "  ${INSTALLER_URL}"
 fi
 
 echo ""
