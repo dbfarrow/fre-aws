@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # remove-user.sh — Remove a user from the fre-aws environment.
+# Destroys the user's EC2 instance via down.sh, then removes them from the
+# S3 registry and cleans up IAM Identity Center and Secrets Manager entries.
 # Requires DEV_USERNAME env var (set by admin.sh).
-# On next './admin.sh up', the user's EC2 instance and EBS data will be destroyed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,16 +50,23 @@ fi
 # ---------------------------------------------------------------------------
 # Warn and confirm
 # ---------------------------------------------------------------------------
-echo "WARNING: Removing '${DEV_USERNAME}' from the registry."
-echo "         On the next './admin.sh up', their EC2 instance and EBS volume"
-echo "         will be PERMANENTLY DESTROYED. This cannot be undone."
+echo "WARNING: This will PERMANENTLY DESTROY '${DEV_USERNAME}'s EC2 instance"
+echo "         and EBS volume, then remove them from the user registry."
+echo "         This cannot be undone."
 echo ""
-read -r -p "Type '${DEV_USERNAME}' to confirm removal: " CONFIRM
+read -r -p "Type '${DEV_USERNAME}' to confirm: " CONFIRM
 
 if [[ "${CONFIRM}" != "${DEV_USERNAME}" ]]; then
   echo "Confirmation did not match. Aborted."
   exit 0
 fi
+
+# ---------------------------------------------------------------------------
+# Destroy EC2 infrastructure before removing from registry
+# (down.sh reads user config from the registry, so the entry must still exist)
+# ---------------------------------------------------------------------------
+echo ""
+SKIP_DOWN_CONFIRM=true bash "${SCRIPT_DIR}/down.sh" "${DEV_USERNAME}"
 
 # ---------------------------------------------------------------------------
 # Remove entry and upload
@@ -162,4 +170,4 @@ if [[ -n "${AWS_REGION:-}" ]]; then
 fi
 
 echo ""
-echo "Run './admin.sh up' to destroy their EC2 instance and EBS volume."
+echo "User '${DEV_USERNAME}' fully removed."

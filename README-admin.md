@@ -357,7 +357,7 @@ After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 | `user` | `DeveloperAccess` | None | Connect, start, stop |
 | `admin` | `ProjectAdminAccess` + `DeveloperAccess` | Full | Connect, start, stop |
 
-Admin users receive a two-profile `~/.aws/config`: `claude-code` (ProjectAdminAccess, for `admin.sh`) and `claude-code-dev` (DeveloperAccess, for `user.sh`). Each profile has its own SSO session so `admin.sh sso-login` and `user.sh sso-login` authenticate independently.
+Admin users receive a two-profile `~/.aws/config`: `claude-code` (ProjectAdminAccess, for `admin.sh`) and `claude-code-dev` (DeveloperAccess, for `connect`). Running `./admin.sh verify` confirms both profiles are active.
 
 ### Updating a user's SSH key
 
@@ -374,10 +374,9 @@ Two modes:
 
 ```bash
 ./admin.sh remove-user <username>
-./admin.sh up
 ```
 
-`remove-user` removes the user from the registry and warns you that their instance and EBS data will be destroyed on the next `up`. Their IAM Identity Center account remains — revoke it manually in the AWS Console if needed.
+`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step. Their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
 
 ### Re-sending the installer link
 
@@ -503,7 +502,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ### User management
 ```bash
 ./admin.sh add-user                     # interactive wizard: add a user
-./admin.sh remove-user <username>       # remove a user (destroys instance on next up)
+./admin.sh remove-user <username>       # destroy EC2 instance + remove from registry
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
@@ -514,9 +513,10 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ### Infrastructure
 ```bash
 ./admin.sh bootstrap                    # one-time: create S3, DynamoDB, KMS, permission sets
-./admin.sh up                           # terraform apply (provisions/updates all instances)
-./admin.sh down                         # terraform destroy (destroys everything — use with care)
-./admin.sh repair-state [--dry-run]     # import AWS resources missing from Terraform state
+./admin.sh up                           # provision base infrastructure + all user instances
+./admin.sh up <username>                # provision base (no-op if current) + one user's instance
+./admin.sh down                         # destroy all user instances, then base (full teardown)
+./admin.sh down <username>              # destroy one user's instance only; base is preserved
 ```
 
 ### Instance lifecycle
@@ -588,10 +588,30 @@ The SSH tunnel through SSM failed to establish.
 
 ### `EntityAlreadyExists` during `./admin.sh up`
 
-Terraform state is out of sync with what exists in AWS. Run:
+Terraform state is out of sync with what exists in AWS — a resource exists in AWS but is missing from the Terraform state file.
 
+The most common cause is a partial `up` that was interrupted, or a state file that was lost or reset. Because infrastructure is now split into base state and per-user state, you can repair them independently.
+
+**To inspect the base state:**
 ```bash
-./admin.sh repair-state [--dry-run] [username]
+./admin.sh shell
+terraform -chdir=terraform state list
 ```
 
-This imports the existing resources into Terraform state without recreating them.
+**To inspect a user's state:**
+```bash
+./admin.sh shell
+terraform -chdir=terraform/user init -backend-config="bucket=<bucket>" -backend-config="key=<project>/users/<username>/terraform.tfstate" -backend-config="region=<region>" -backend-config="dynamodb_table=<table>" -reconfigure
+terraform -chdir=terraform/user state list
+```
+
+**To import a missing resource manually** (example: IAM role for a user):
+```bash
+terraform -chdir=terraform/user import -var="username=<username>" ... aws_iam_role.user_ec2 <role-name>
+```
+
+In many cases the simplest fix is to destroy and reprovision the affected user:
+```bash
+./admin.sh down <username>   # destroys what's in state and in AWS
+./admin.sh up <username>     # reprovisions cleanly
+```

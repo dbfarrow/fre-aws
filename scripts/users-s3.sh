@@ -68,6 +68,9 @@ users_s3_upload() {
 
 # ---------------------------------------------------------------------------
 # users_render_tfvars <json_file> <tfvars_file>
+# DEPRECATED — no longer called by up.sh or down.sh.
+# Users are now provisioned individually via the terraform/user/ module.
+# Terraform no longer receives a users map variable.
 # Converts users.json → HCL tfvars format consumable by Terraform.
 #
 # Input JSON:

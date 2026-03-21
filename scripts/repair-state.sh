@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+# repair-state.sh — NOT COMPATIBLE with the current split-state architecture.
+#
+# This script was written for the monolithic state layout (all users in one
+# state file with for_each = var.users). It references TF_BACKEND_KEY (removed)
+# and monolithic resource addresses (e.g. aws_iam_role.user_ec2["alice"]) that
+# no longer exist in the base module.
+#
+# To inspect or repair state manually:
+#   terraform -chdir=terraform ...      (base resources)
+#   terraform -chdir=terraform/user ... (user resources, after -backend-config init)
+echo "ERROR: repair-state.sh is not compatible with the current split-state architecture." >&2
+echo "       References TF_BACKEND_KEY (removed) and monolithic resource addresses." >&2
+echo "       Use: terraform -chdir=terraform state ...      (base resources)" >&2
+echo "            terraform -chdir=terraform/user state ... (user resources, after init)" >&2
+exit 1
+
 # repair-state.sh — Import per-user AWS resources that exist in AWS but are
 # missing from Terraform state (e.g. after state loss or a partial apply).
 #

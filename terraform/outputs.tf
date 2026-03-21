@@ -1,13 +1,3 @@
-output "instance_ids" {
-  description = "Map of username to EC2 instance ID."
-  value       = { for k, v in module.user_ec2 : k => v.id }
-}
-
-output "instance_states" {
-  description = "Map of username to EC2 instance state."
-  value       = { for k, v in module.user_ec2 : k => v.instance_state }
-}
-
 output "vpc_id" {
   description = "VPC ID (shared across all user instances)."
   value       = module.vpc.vpc_id
@@ -16,6 +6,26 @@ output "vpc_id" {
 output "network_mode" {
   description = "Active network mode."
   value       = var.network_mode
+}
+
+output "subnet_id" {
+  description = "Subnet ID for user EC2 instances. Selected based on network_mode."
+  value       = local.use_private_subnet ? module.vpc.private_subnets[0] : module.vpc.public_subnets[0]
+}
+
+output "associate_public_ip" {
+  description = "Whether user EC2 instances receive a public IP. Derived from network_mode."
+  value       = !local.use_private_subnet
+}
+
+output "security_group_id" {
+  description = "EC2 security group ID shared across all user instances."
+  value       = module.ec2_sg.security_group_id
+}
+
+output "kms_key_arn" {
+  description = "KMS key ARN used for EBS encryption on all user instances."
+  value       = module.kms.key_arn
 }
 
 output "app_url" {
