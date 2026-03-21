@@ -86,10 +86,12 @@ INSTALLER_URL=$(_create_installer_bundle "${USERNAME}" "${LOCAL_BUNDLE_DIR}")
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${USERNAME}/latest.zip"
 
 # ---------------------------------------------------------------------------
-# Send onboarding email (if SENDER_EMAIL is configured)
+# Send onboarding email (or skip with --no-email / missing SENDER_EMAIL)
 # ---------------------------------------------------------------------------
 echo ""
-if [[ -n "${SENDER_EMAIL:-}" ]]; then
+if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+  echo "  --no-email: skipping email."
+elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   # In SES sandbox mode, the recipient must be verified before we can send.
   SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
     --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
@@ -123,7 +125,8 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
     --ses-region "${AWS_REGION}" \
     --sso-start-url "${SSO_START_URL:-}" \
     --user-email "${USER_EMAIL}" \
-    --installer-url "${INSTALLER_URL}"
+    --installer-url "${INSTALLER_URL}" \
+    ${LOGO_URL:+--logo-url "${LOGO_URL}"}
 else
   echo "  SENDER_EMAIL not set — skipping email. Send the URL below manually."
 fi

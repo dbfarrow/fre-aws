@@ -81,7 +81,9 @@ echo ""
 echo "=== Publish App Link: ${USERNAME} ==="
 echo ""
 
-if [[ -n "${SENDER_EMAIL:-}" ]]; then
+if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+  echo "  --no-email: skipping email."
+elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   echo "Sending app link email to ${USER_EMAIL}..."
   python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
     --to "${USER_EMAIL}" \
@@ -95,7 +97,8 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
     --ses-region "${AWS_REGION}" \
     --sso-start-url "" \
     --user-email "${USER_EMAIL}" \
-    --app-url "${APP_LINK_URL}"
+    --app-url "${APP_LINK_URL}" \
+    ${LOGO_URL:+--logo-url "${LOGO_URL}"}
 else
   echo "  SENDER_EMAIL not set — skipping email. Send the URL below manually."
 fi
