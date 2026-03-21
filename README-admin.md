@@ -218,11 +218,12 @@ No changes to Terraform or scripts needed — only the credential source changes
 2. Run `./admin.sh bootstrap` — it triggers the SES verification email automatically
 3. Click the link in the verification email from AWS
 
-**SES sandbox**: New AWS accounts can only send to verified addresses. To send to any user:
-- AWS Console → SES → Account dashboard → **Request production access**
-- Takes 24–48 hours; required before onboarding external users
+**SES sandbox**: New AWS accounts can only send to verified addresses. `add-user` and `publish-installer` handle this automatically:
+- If the recipient is not yet verified, AWS sends them a verification email and the command exits cleanly with instructions
+- Once the user clicks the verification link, run `./admin.sh publish-installer <username>` to send the onboarding email
+- To send to *any* address without per-recipient verification: AWS Console → SES → Account dashboard → **Request production access** (takes 24–48 hours)
 
-> If `SENDER_EMAIL` is not set, `add-user` still completes but skips the email step. Credentials are saved to `config/onboarding/<username>/` — forward the files manually.
+> If `SENDER_EMAIL` is not set, `add-user` still completes but skips the email step. The installer bundle is available in S3 — generate a pre-signed URL manually with `./admin.sh publish-installer <username>`.
 
 ---
 
@@ -340,9 +341,9 @@ The wizard automatically:
 - Creates an IAM Identity Center user and assigns the appropriate permission set(s)
 - Generates or accepts an SSH key pair for EC2 access
 - Generates `user.env` and `~/.aws/config` files ready for the new user
-- Saves an onboarding bundle to `config/onboarding/<username>/`
+- Saves an onboarding bundle to `config/onboarding/<username>/` and uploads the files to S3
 - Builds a self-contained installer zip and uploads it to S3
-- Emails a 72-hour pre-signed download link to the user via SES (if `SENDER_EMAIL` is set)
+- Emails a 72-hour pre-signed download link to the user via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically)
 
 The user installs with a single `curl + unzip + bash` one-liner — no `git` required on their Mac.
 
