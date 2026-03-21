@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # remove-user.sh — Remove a user from the fre-aws environment.
+# Destroys the user's EC2 instance via down.sh, then removes them from the
+# S3 registry and cleans up IAM Identity Center and Secrets Manager entries.
 # Requires DEV_USERNAME env var (set by admin.sh).
-# On next './admin.sh up', the user's EC2 instance and EBS data will be destroyed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
