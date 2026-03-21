@@ -4,21 +4,13 @@
 
 A set of related issues with the user onboarding flow. Should be designed and implemented together.
 
-### Issue 1: Onboarding files must live in S3, not on the admin's local machine
+### ~~Issue 1: Onboarding files must live in S3, not on the admin's local machine~~ ✅ Resolved (PR #5)
 
-Currently `config/onboarding/<username>/` (containing `user.env`, `aws-config`, and optionally the SSH private key `fre-claude`) exists only on the machine that ran `add-user`. Any admin operation that needs to rebuild the installer — `publish-installer`, `update-user-key` — fails on any other machine.
+`add-user` now uploads `user.env`, `aws-config`, and `fre-claude` (if generated) to S3 under `${PROJECT_NAME}/users/<username>/` immediately after writing local files. `publish-installer`, `update-user-key`, and `_create_installer_bundle` all download from S3 — no local bundle dir required.
 
-**Fix:** During `add-user`, upload the user-specific source files to S3:
-- `${PROJECT_NAME}/users/<username>/user.env`
-- `${PROJECT_NAME}/users/<username>/aws-config`
-- `${PROJECT_NAME}/users/<username>/fre-claude` (if generated)
+Local `config/onboarding/<username>/` is still written during `add-user` as a convenience artifact but is no longer required by any subsequent command.
 
-`publish-installer` downloads from S3 to a temp dir and builds the bundle from there. No local bundle dir required.
-
-**Open questions before implementing:**
-- What happens to the local `config/onboarding/<username>/` dir? Keep as a convenience artifact of the initial run, or stop creating/relying on it entirely?
-- Does `update-user-key` have the same dependency on the local bundle dir? (Read the script before finalising scope.)
-- Migration path for existing users whose files are only on disk — options: one-time `push-onboarding-files` command, or document "re-run publish-installer from the original machine first."
+Migration path for existing users: auto-migrate. When `_create_installer_bundle` is called with a local bundle dir and S3 files are absent, it copies local → S3 transparently (one-time, no manual step).
 
 ### Issue 2: Consolidate CLI and web onboarding into a single email
 
@@ -47,22 +39,11 @@ Commands like the `curl`/`unzip`/`bash` block are hard to read and error-prone t
 - What's the minimum viable HTML treatment — full branded template, or just semantic structure with a monospace code block for commands?
 - Does `publish-installer` also need the HTML treatment, or just `add-user`?
 
-### Issue 4: `add-user` should auto-verify recipient email in SES sandbox
+### ~~Issue 4: `add-user` should auto-verify recipient email in SES sandbox~~ ✅ Resolved (PR #5)
 
-Many deployments will operate permanently in the SES sandbox (getting out requires an AWS support request). In sandbox mode, SES will only send to verified email addresses. Currently `add-user` attempts to send the onboarding email at the end without checking whether the recipient is verified — it fails or silently drops the email if not.
+Both `add-user` and `publish-installer` now check SES verification status before sending. If the recipient is unverified, they trigger the AWS verification email and exit cleanly with a message directing the admin to run `./admin.sh publish-installer <username>` once the user clicks the link. All prior steps (IAM user, registry, installer bundle) are already complete at that point.
 
-There is already a standalone `verify-email` command that sends the SES verification email, but it's a separate manual step that's easy to forget.
-
-**Fix:** In `add-user`, after collecting the user's email address, call `aws sesv2 get-email-identity` to check verification status. If unverified:
-1. Automatically send the verification email (`aws sesv2 create-email-identity`)
-2. Print a clear message: "Verification email sent to {email}. Once the user clicks the verification link, re-run this command to complete onboarding."
-3. Exit cleanly
-
-The IAM Identity Center user creation that happened before this point is idempotent — re-running `add-user` for the same username skips SSO user creation and picks up from where it left off. On the second run, verification passes and onboarding completes normally.
-
-**Open questions:**
-- Should this check also be present in `publish-installer` (re-sending the onboarding email)? Verification could lapse if SES identity is deleted and re-created.
-- Should the standalone `verify-email` command be kept, removed, or just documented as "now handled automatically by add-user"?
+Note: the re-entry point is `publish-installer`, not `add-user` re-run (the registry already has the user so `add-user` would error). The standalone `verify-email` command remains available for manual pre-verification.
 
 ---
 
