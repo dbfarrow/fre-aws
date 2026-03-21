@@ -40,28 +40,11 @@ source "${SCRIPT_DIR}/users-s3.sh"
 USERNAME="${DEV_USERNAME}"
 
 # ---------------------------------------------------------------------------
-# Verify the onboarding bundle directory exists
-# ---------------------------------------------------------------------------
-BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${USERNAME}"
-
-if [[ ! -d "${BUNDLE_DIR}" ]]; then
-  echo "ERROR: Onboarding bundle not found: config/onboarding/${USERNAME}/" >&2
-  echo "       Run './admin.sh add-user' first to create the initial bundle." >&2
-  exit 1
-fi
-
-for f in user.env aws-config; do
-  if [[ ! -f "${BUNDLE_DIR}/${f}" ]]; then
-    echo "ERROR: ${f} not found in config/onboarding/${USERNAME}/" >&2
-    exit 1
-  fi
-done
-
-# ---------------------------------------------------------------------------
 # Look up user info from S3 registry
 # ---------------------------------------------------------------------------
 USERS_JSON=$(mktemp)
-trap 'rm -f "${USERS_JSON}"' EXIT
+USER_ENV_TMP=$(mktemp)
+trap 'rm -f "${USERS_JSON}" "${USER_ENV_TMP}"' EXIT
 
 users_s3_download "${USERS_JSON}"
 
@@ -73,8 +56,21 @@ fi
 USER_EMAIL=$(jq -r --arg u "${USERNAME}" '.[$u].user_email' "${USERS_JSON}")
 ROLE=$(jq -r       --arg u "${USERNAME}" '.[$u].role'       "${USERS_JSON}")
 
-# Derive the AWS profile name from the onboarding user.env
-AWS_PROFILE_FOR_DEV=$(grep '^AWS_PROFILE=' "${BUNDLE_DIR}/user.env" | cut -d= -f2)
+# Download user.env from S3 to extract the AWS profile name
+aws s3 cp "s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${USERNAME}/user.env" \
+  "${USER_ENV_TMP}" --region "${TF_BACKEND_REGION}" --profile "${AWS_PROFILE}" 2>/dev/null || {
+  # S3 not found — check for local bundle dir (one-time migration path)
+  LOCAL_BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${USERNAME}"
+  if [[ -f "${LOCAL_BUNDLE_DIR}/user.env" ]]; then
+    echo "  (Onboarding files for '${USERNAME}' not yet in S3 — will migrate during bundle creation.)"
+    cp "${LOCAL_BUNDLE_DIR}/user.env" "${USER_ENV_TMP}"
+  else
+    echo "ERROR: Onboarding files for '${USERNAME}' not found in S3." >&2
+    echo "       Run publish-installer from the original machine to migrate them." >&2
+    exit 1
+  fi
+}
+AWS_PROFILE_FOR_DEV=$(grep '^AWS_PROFILE=' "${USER_ENV_TMP}" | cut -d= -f2)
 
 # ---------------------------------------------------------------------------
 # Generate new installer bundle and upload to S3
@@ -83,7 +79,9 @@ echo "=== Publish Installer: ${USERNAME} ==="
 echo ""
 echo "Building installer bundle..."
 
-INSTALLER_URL=$(_create_installer_bundle "${USERNAME}" "${BUNDLE_DIR}")
+# Pass local bundle dir as fallback for auto-migration (no-op if S3 already has files)
+LOCAL_BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${USERNAME}"
+INSTALLER_URL=$(_create_installer_bundle "${USERNAME}" "${LOCAL_BUNDLE_DIR}")
 
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${USERNAME}/latest.zip"
 
@@ -92,6 +90,26 @@ echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${USERN
 # ---------------------------------------------------------------------------
 echo ""
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
+  # In SES sandbox mode, the recipient must be verified before we can send.
+  SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
+    --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    --query 'VerificationStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+  if [[ "${SES_STATUS}" != "SUCCESS" ]]; then
+    if [[ "${SES_STATUS}" == "NOT_FOUND" ]]; then
+      aws sesv2 create-email-identity --email-identity "${USER_EMAIL}" \
+        --region "${AWS_REGION}" --profile "${AWS_PROFILE}" >/dev/null
+    fi
+    echo "NOTE: ${USER_EMAIL} is not yet verified with SES (sandbox mode)."
+    echo "  A verification email has been sent to that address."
+    echo "  Once they click the verification link, re-run:"
+    echo "    ./admin.sh publish-installer ${USERNAME}"
+    echo ""
+    echo "Pre-signed URL (expires 72 hours):"
+    echo ""
+    echo "  ${INSTALLER_URL}"
+    exit 0
+  fi
+
   echo "Sending onboarding email to ${USER_EMAIL}..."
   python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
     --to "${USER_EMAIL}" \
