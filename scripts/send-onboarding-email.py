@@ -496,6 +496,179 @@ def build_html_unified(username, project, role, has_private_key,
 
 
 # ---------------------------------------------------------------------------
+# Admin onboarding builders
+# ---------------------------------------------------------------------------
+
+def build_body_admin(username, project, sso_start_url, aws_region,
+                     sso_region, repo_url, app_url=None):
+    """Plain-text admin onboarding: activation + config values + repo pointer."""
+    lines = [
+        f"Hi {username},",
+        "",
+        f"You have been provisioned as an admin in the {project} environment.",
+        "",
+        "Setup instructions:",
+        "",
+        "  1. Activate your AWS account:",
+        f"     a. Go to: {sso_start_url}",
+        f"     b. Enter your username: {username}",
+        "     c. Click \"Forgot password\"",
+        "     d. Complete the CAPTCHA",
+        "     e. Check your inbox for a password reset email and follow the",
+        "        link to set your password.",
+        "",
+    ]
+
+    step = 2
+
+    if repo_url:
+        lines += [
+            f"  {step}. Clone the repo:",
+            f"     git clone {repo_url}",
+            "",
+        ]
+    else:
+        lines += [
+            f"  {step}. Clone the {project} repo.",
+            "",
+        ]
+    step += 1
+
+    lines += [
+        f"  {step}. Configure your admin environment:",
+        "     cp config/admin.env.example config/admin.env",
+        "",
+        "     Fill in these deployment-specific values:",
+        "",
+        f"       PROJECT_NAME={project}",
+        f"       AWS_REGION={aws_region}",
+        f"       SSO_REGION={sso_region}",
+        f"       SSO_START_URL={sso_start_url}",
+        "",
+        "     See config/admin.env.example for all settings and descriptions.",
+        "",
+    ]
+    step += 1
+
+    lines += [
+        f"  {step}. Configure AWS credentials:",
+        f"     Your AWS profile config is at: config/onboarding/{username}/aws-config",
+        "     Copy it to ~/.aws/config (or append to existing):",
+        f"       cat config/onboarding/{username}/aws-config >> ~/.aws/config",
+        "",
+        "     Then authenticate:",
+        "       ./admin.sh sso-login",
+        "",
+    ]
+    step += 1
+
+    lines += [
+        f"  {step}. Verify your setup:",
+        "     ./admin.sh verify",
+        "",
+    ]
+
+    if app_url:
+        lines += [
+            "Browser access (no install required):",
+            "",
+            f"  {app_url}",
+            "",
+            "  The link expires in 72 hours. If it has expired, contact the project owner.",
+            "",
+        ]
+
+    lines += [
+        "Questions? Contact the project owner.",
+        "",
+        "—",
+        f"{project} automated onboarding",
+    ]
+    return "\n".join(lines)
+
+
+def build_html_admin(username, project, sso_start_url, aws_region,
+                     sso_region, repo_url, logo_url, app_url=None):
+    """HTML admin onboarding email."""
+    # Pre-compute strings that would put \n inside an f-string expression.
+    config_values = (
+        "PROJECT_NAME=" + project + "\n"
+        "AWS_REGION=" + aws_region + "\n"
+        "SSO_REGION=" + sso_region + "\n"
+        "SSO_START_URL=" + sso_start_url
+    )
+    aws_config_cmd = (
+        "cat config/onboarding/" + username + "/aws-config >> ~/.aws/config"
+    )
+
+    activation = f"""\
+    <p><strong>1. Activate your AWS account:</strong></p>
+    <ol type="a" style="margin-left:20px;">
+      <li>Go to: <a href="{sso_start_url}">{sso_start_url}</a></li>
+      <li>Enter your username: <strong><code>{username}</code></strong></li>
+      <li>Click <strong>"Forgot password"</strong></li>
+      <li>Complete the CAPTCHA</li>
+      <li>Check your inbox for a password reset email and follow the link to set your password.</li>
+    </ol>"""
+
+    if repo_url:
+        _pre_clone = _html_pre("git clone " + repo_url)
+        clone = f"""\
+    <p><strong>2. Clone the repo:</strong></p>
+    {_pre_clone}"""
+    else:
+        clone = f"<p><strong>2.</strong> Clone the <strong>{project}</strong> repo.</p>"
+
+    _pre_cfg_cp = _html_pre("cp config/admin.env.example config/admin.env")
+    _pre_cfg_vals = _html_pre(config_values)
+    config = f"""\
+    <p><strong>3. Configure your admin environment:</strong></p>
+    {_pre_cfg_cp}
+    <p>Fill in these deployment-specific values:</p>
+    {_pre_cfg_vals}
+    <p style="color:#666;font-size:13px;">See <code>config/admin.env.example</code> in the repo for all settings and descriptions.</p>"""
+
+    _pre_aws_copy = _html_pre(aws_config_cmd)
+    _pre_sso_login = _html_pre("./admin.sh sso-login")
+    aws_creds = f"""\
+    <p><strong>4. Configure AWS credentials:</strong></p>
+    <p>Your AWS profile config is at <code>config/onboarding/{username}/aws-config</code>.
+    Copy it to <code>~/.aws/config</code> (or append to existing):</p>
+    {_pre_aws_copy}
+    <p>Then authenticate:</p>
+    {_pre_sso_login}"""
+
+    _pre_verify = _html_pre("./admin.sh verify")
+    verify = f"""\
+    <p><strong>5. Verify your setup:</strong></p>
+    {_pre_verify}"""
+
+    app_section = ""
+    if app_url:
+        app_section = f"""\
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0;">
+    <h3 style="color:#333;">Browser access</h3>
+    <p>No install required — you can also access your environment in the browser:</p>
+    <p style="text-align:center;margin:28px 0;">
+      <a href="{app_url}" style="background:#0073bb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:4px;font-weight:bold;display:inline-block;">Open Development Environment</a>
+    </p>
+    <p style="color:#666;font-size:13px;">The link expires in 72 hours. If it has expired, contact the project owner for a new one.</p>"""
+
+    body_html = f"""\
+    <p>Hi {username},</p>
+    <p>You have been provisioned as an <strong>admin</strong> in the <strong>{project}</strong> environment.</p>
+    <h3 style="color:#333;">Setup instructions</h3>
+    {activation}
+    {clone}
+    {config}
+    {aws_creds}
+    {verify}
+    {app_section}
+    <p>Questions? Contact the project owner.</p>"""
+    return _html_card(project, logo_url, body_html)
+
+
+# ---------------------------------------------------------------------------
 # Message assembly and sending
 # ---------------------------------------------------------------------------
 
@@ -603,11 +776,44 @@ def main():
     parser.add_argument("--logo-url", default=None,
                         help="HTTPS URL of a banner image shown at the top of the email card. "
                              "Omit for a clean text-only header.")
+    parser.add_argument("--sso-region", default=None,
+                        help="AWS region where IAM Identity Center is configured. "
+                             "Required for admin onboarding email.")
+    parser.add_argument("--repo-url", default=None,
+                        help="Git clone URL for the project repo. "
+                             "Included in the admin onboarding email.")
 
     args = parser.parse_args()
 
     attachments = [parse_attachment(a) for a in args.attachment]
     logo_url = args.logo_url
+
+    if args.role == "admin" and args.sso_region:
+        # Admin onboarding — config values + repo pointer, no installer bundle
+        plain = build_body_admin(
+            username=args.username,
+            project=args.project,
+            sso_start_url=args.sso_start_url,
+            aws_region=args.aws_region,
+            sso_region=args.sso_region,
+            repo_url=args.repo_url or "",
+            app_url=args.app_url,
+        )
+        html = build_html_admin(
+            username=args.username,
+            project=args.project,
+            sso_start_url=args.sso_start_url,
+            aws_region=args.aws_region,
+            sso_region=args.sso_region,
+            repo_url=args.repo_url or "",
+            logo_url=logo_url,
+            app_url=args.app_url,
+        )
+        subject = f"[{args.project}] Admin environment setup"
+        msg = build_message(args.to, args.from_addr, subject, plain, html, [])
+        send_via_ses(msg, ses_region=args.ses_region, aws_cli_profile=args.aws_cli_profile)
+        print(f"  Admin onboarding email sent to {args.to}")
+        return
 
     if args.app_url and args.installer_url:
         # Unified mode — browser link + CLI installer in one email (Issue 2)
