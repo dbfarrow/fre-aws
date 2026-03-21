@@ -615,21 +615,42 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
 
   echo ""
   echo "Sending onboarding email to ${USER_EMAIL}..."
-  python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
-    --to "${USER_EMAIL}" \
-    --from "${SENDER_EMAIL}" \
-    --username "${NEW_USERNAME}" \
-    --project "${PROJECT_NAME}" \
-    --role "${ROLE}" \
-    --aws-profile "${AWS_PROFILE_FOR_DEV}" \
-    --aws-region "${AWS_REGION}" \
-    --aws-cli-profile "${AWS_PROFILE}" \
-    --ses-region "${AWS_REGION}" \
-    --sso-start-url "${SSO_START_URL}" \
-    --user-email "${USER_EMAIL}" \
-    --installer-url "${INSTALLER_URL}" \
-    ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
-    ${LOGO_URL:+--logo-url "${LOGO_URL}"}
+  if [[ "${ROLE}" == "admin" ]]; then
+    # Admin email: config values + repo pointer, no installer bundle
+    python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
+      --to "${USER_EMAIL}" \
+      --from "${SENDER_EMAIL}" \
+      --username "${NEW_USERNAME}" \
+      --project "${PROJECT_NAME}" \
+      --role "${ROLE}" \
+      --aws-profile "${AWS_PROFILE_FOR_DEV}" \
+      --aws-region "${AWS_REGION}" \
+      --aws-cli-profile "${AWS_PROFILE}" \
+      --ses-region "${AWS_REGION}" \
+      --sso-start-url "${SSO_START_URL}" \
+      --user-email "${USER_EMAIL}" \
+      --sso-region "${SSO_REGION}" \
+      ${REPO_URL:+--repo-url "${REPO_URL}"} \
+      ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
+      ${LOGO_URL:+--logo-url "${LOGO_URL}"}
+  else
+    # User email: installer bundle (+ optional app link)
+    python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
+      --to "${USER_EMAIL}" \
+      --from "${SENDER_EMAIL}" \
+      --username "${NEW_USERNAME}" \
+      --project "${PROJECT_NAME}" \
+      --role "${ROLE}" \
+      --aws-profile "${AWS_PROFILE_FOR_DEV}" \
+      --aws-region "${AWS_REGION}" \
+      --aws-cli-profile "${AWS_PROFILE}" \
+      --ses-region "${AWS_REGION}" \
+      --sso-start-url "${SSO_START_URL}" \
+      --user-email "${USER_EMAIL}" \
+      --installer-url "${INSTALLER_URL}" \
+      ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
+      ${LOGO_URL:+--logo-url "${LOGO_URL}"}
+  fi
 fi
 
 echo ""
