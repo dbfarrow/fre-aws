@@ -36,7 +36,10 @@ options:
   -h, --help            Show this help message and exit
 
 user management:
-  add-user              Interactive wizard to add a new user
+  add-user [file] [--no-email]
+                        Interactive wizard to add a new user; optionally load
+                        from a file. --no-email skips the onboarding email
+                        and prints the installer URL instead.
   remove-user <user> [--keep-sso]
                         Destroy a user's EC2 instance and remove them from
                         the registry. --keep-sso preserves the IAM Identity
@@ -83,14 +86,16 @@ development:
   shell                 Interactive container shell for debugging
 
 installer:
-  publish-installer <user>
+  publish-installer <user> [--no-email]
                         Re-generate installer bundle for a user, upload to
-                        S3, and print a new 72-hour pre-signed URL
+                        S3, and print a new 72-hour pre-signed URL.
+                        --no-email skips sending and prints the URL only.
 
 browser app:
-  publish-app-link <user>
+  publish-app-link <user> [--no-email]
                         Generate a 72-hour signed magic link for the browser
-                        app and optionally send it via email
+                        app and optionally send it via email.
+                        --no-email skips sending and prints the URL only.
 EOF
 }
 
@@ -389,11 +394,14 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh "${USERNAME:-}"
       ;;
     add-user)
-      if [[ -n "${USERNAME}" ]]; then
-        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
-          /workspace/scripts/add-user.sh "/workspace/${USERNAME}"
+      NO_EMAIL_FLAG=""
+      [[ "${2:-}" == "--no-email" || "${3:-}" == "--no-email" ]] && NO_EMAIL_FLAG="true"
+      if [[ -n "${USERNAME}" && "${USERNAME}" != "--no-email" ]]; then
+        docker run "${DOCKER_ARGS[@]}" --env "NO_EMAIL_SEND=${NO_EMAIL_FLAG}" \
+          "${IMAGE_NAME}" /workspace/scripts/add-user.sh "/workspace/${USERNAME}"
       else
-        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/add-user.sh
+        docker run "${DOCKER_ARGS[@]}" --env "NO_EMAIL_SEND=${NO_EMAIL_FLAG}" \
+          "${IMAGE_NAME}" /workspace/scripts/add-user.sh
       fi
       ;;
     remove-user)
@@ -507,14 +515,20 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     publish-installer)
       require_username
+      NO_EMAIL_FLAG=""
+      [[ "${3:-}" == "--no-email" ]] && NO_EMAIL_FLAG="true"
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
+        --env "NO_EMAIL_SEND=${NO_EMAIL_FLAG}" \
         "${IMAGE_NAME}" /workspace/scripts/publish-installer.sh
       ;;
     publish-app-link)
       require_username
+      NO_EMAIL_FLAG=""
+      [[ "${3:-}" == "--no-email" ]] && NO_EMAIL_FLAG="true"
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
+        --env "NO_EMAIL_SEND=${NO_EMAIL_FLAG}" \
         "${IMAGE_NAME}" /workspace/scripts/publish-app-link.sh
       ;;
     push-admin-keys)
