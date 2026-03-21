@@ -506,6 +506,13 @@ echo ""
 echo "Onboarding bundle saved to: config/onboarding/${NEW_USERNAME}/"
 
 # ---------------------------------------------------------------------------
+# Upload onboarding files to S3 (authoritative source for all admins/machines)
+# ---------------------------------------------------------------------------
+echo "Uploading onboarding files to S3..."
+_upload_onboarding_files "${NEW_USERNAME}" "${BUNDLE_DIR}"
+echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${NEW_USERNAME}/"
+
+# ---------------------------------------------------------------------------
 # Update S3 registry
 # ---------------------------------------------------------------------------
 jq \
@@ -564,6 +571,33 @@ fi
 # ---------------------------------------------------------------------------
 # Send onboarding email via SES
 # ---------------------------------------------------------------------------
+
+# In SES sandbox mode, the recipient address must be verified before we can
+# send. Check verification status; if unverified, trigger the verification
+# email and exit cleanly — the admin can re-send the onboarding email later
+# with: ./admin.sh publish-installer <username>
+if [[ -n "${SENDER_EMAIL:-}" ]]; then
+  SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
+    --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    --query 'VerificationStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+  if [[ "${SES_STATUS}" != "SUCCESS" ]]; then
+    if [[ "${SES_STATUS}" == "NOT_FOUND" ]]; then
+      aws sesv2 create-email-identity --email-identity "${USER_EMAIL}" \
+        --region "${AWS_REGION}" --profile "${AWS_PROFILE}" >/dev/null
+    fi
+    echo ""
+    echo "NOTE: ${USER_EMAIL} is not yet verified with SES (sandbox mode)."
+    echo "  A verification email has been sent to that address."
+    echo "  Once they click the verification link, send the onboarding email with:"
+    echo "    ./admin.sh publish-installer ${NEW_USERNAME}"
+    echo ""
+    echo "  The IAM user, S3 registry entry, and installer bundle are complete."
+    echo "  Run './admin.sh up ${NEW_USERNAME}' when ready to provision their EC2 instance."
+    echo ""
+    exit 0
+  fi
+fi
+
 echo ""
 echo "Sending onboarding email to ${USER_EMAIL}..."
 
