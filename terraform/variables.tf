@@ -14,28 +14,6 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-
-variable "instance_type" {
-  description = "EC2 instance type. t3.micro is Free Tier eligible for the first 12 months."
-  type        = string
-  default     = "t3.micro"
-}
-
-variable "use_spot" {
-  description = <<-EOT
-    Use EC2 Spot instances to reduce cost (60-90% cheaper than on-demand).
-    Spot instances can be interrupted with 2-minute notice; EBS data is preserved on stop.
-
-    WARNING — BREAKING CHANGE: changing this value on an existing environment destroys
-    and recreates ALL instances. Terraform switches the underlying resource type
-    (aws_spot_instance_request vs aws_instance), forcing replacement regardless of
-    user_data_replace_on_change. Only change before initial provisioning, or when
-    reprovisioning every instance from scratch is acceptable.
-  EOT
-  type        = bool
-  default     = false
-}
-
 variable "network_mode" {
   description = <<-EOT
     Controls VPC and EC2 network topology:
@@ -52,32 +30,10 @@ variable "network_mode" {
   }
 }
 
-variable "ebs_volume_size_gb" {
-  description = "Root EBS volume size in GB. Free Tier includes 30 GB. Must be >= the AMI's root snapshot size (typically 30 GB for Amazon Linux 2023)."
-  type        = number
-  default     = 30
-}
-
 variable "owner_email" {
   description = "Email of the instance owner; used as a resource tag."
   type        = string
   default     = ""
-}
-
-variable "admin_ssh_keys" {
-  description = "SSH public keys for admin access to all user instances. Auto-populated from the admin's SSH key by up.sh."
-  type        = list(string)
-  default     = []
-}
-
-variable "users" {
-  description = "Map of usernames to per-user configuration. Each entry creates a dedicated EC2 instance. See config/users.tfvars.example."
-  type = map(object({
-    ssh_public_key = string
-    git_user_name  = string
-    git_user_email = string
-  }))
-  default = {}
 }
 
 # ---- Billing ---------------------------------------------------------------
