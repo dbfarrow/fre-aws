@@ -400,6 +400,28 @@ def build_html_app_link(username, project, app_url, logo_url):
 def _html_cli_steps(username, role, project, has_private_key,
                     sso_start_url, user_email, installer_url, step_offset=1):
     """Return HTML for the numbered CLI setup steps starting at step_offset."""
+    # Pre-compute multi-line command strings — backslashes are forbidden inside
+    # f-string expression parts in Python < 3.12, so these must be variables.
+    cmd_install = (
+        "curl -fsSL '" + installer_url + "' -o /tmp/fre-setup.zip\n"
+        "unzip -d /tmp/fre-setup /tmp/fre-setup.zip\n"
+        "bash /tmp/fre-setup/install.sh"
+    )
+    cmd_github_key = (
+        "ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy\n"
+        "# GitHub: Settings \u2192 SSH and GPG keys \u2192 New SSH key \u2192 paste it"
+    )
+    cmd_daily = (
+        "~/fre-aws/user.sh sso-login   # re-authenticate (once per day)\n"
+        "~/fre-aws/user.sh start       # start your instance if it's stopped\n"
+        "~/fre-aws/user.sh connect     # connect to your instance\n"
+        "~/fre-aws/user.sh stop        # stop your instance when done"
+    )
+    note_username = _html_note(
+        f"Your AWS login name is <strong>{username}</strong> \u2014 not your email address. "
+        "You will need this when logging in after activation."
+    )
+
     step = step_offset
     html = f"""\
     <p><strong>{step}. Activate your AWS account:</strong></p>
@@ -409,20 +431,22 @@ def _html_cli_steps(username, role, project, has_private_key,
       <li>Enter your email address: <code>{user_email}</code></li>
       <li>Check your inbox for a verification email from AWS and follow the link to set your password.</li>
     </ol>
-    {_html_note(f'Your AWS login name is <strong>{username}</strong> — not your email address. You will need this when logging in after activation.')}
+    {note_username}
     """
     step += 1
 
+    _pre_install = _html_pre(cmd_install)
     html += f"""\
     <p><strong>{step}. Download and run the installer</strong> (link expires in 72 hours):</p>
-    {_html_pre(f"curl -fsSL '{installer_url}' -o /tmp/fre-setup.zip\nunzip -d /tmp/fre-setup /tmp/fre-setup.zip\nbash /tmp/fre-setup/install.sh")}
+    {_pre_install}
     """
     step += 1
 
     if has_private_key:
+        _pre_github = _html_pre(cmd_github_key)
         html += f"""\
     <p>The installer will place your SSH key at <code>~/.ssh/fre-claude</code>. Then add the public key to GitHub so git push/pull works:</p>
-    {_html_pre("ssh-keygen -y -f ~/.ssh/fre-claude | pbcopy\n# GitHub: Settings → SSH and GPG keys → New SSH key → paste it")}
+    {_pre_github}
     """
 
     html += f"""\
@@ -431,11 +455,12 @@ def _html_cli_steps(username, role, project, has_private_key,
     """
     step += 1
 
+    _pre_daily = _html_pre(cmd_daily)
     html += f"""\
     <p><strong>{step}. Connect to your development instance:</strong></p>
     {_html_pre("~/fre-aws/user.sh connect")}
     <h3 style="color:#333;">Daily use</h3>
-    {_html_pre("~/fre-aws/user.sh sso-login   # re-authenticate (once per day)\n~/fre-aws/user.sh start       # start your instance if it's stopped\n~/fre-aws/user.sh connect     # connect to your instance\n~/fre-aws/user.sh stop        # stop your instance when done")}
+    {_pre_daily}
     """
 
     if has_private_key:
