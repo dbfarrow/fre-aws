@@ -124,8 +124,9 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
     --aws-cli-profile "${AWS_PROFILE}" \
     --ses-region "${AWS_REGION}" \
     --sso-start-url "${SSO_START_URL:-}" \
-    --user-email "${USER_EMAIL}" \
+    --sso-region "${SSO_REGION:-}" \
     --installer-url "${INSTALLER_URL}" \
+    ${REPO_URL:+--repo-url "${REPO_URL}"} \
     ${LOGO_URL:+--logo-url "${LOGO_URL}"}
 else
   echo "  SENDER_EMAIL not set — skipping email. Send the URL below manually."
