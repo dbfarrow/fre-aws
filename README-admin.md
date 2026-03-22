@@ -223,7 +223,11 @@ No changes to Terraform or scripts needed — only the credential source changes
 - Once the user clicks the verification link, run `./admin.sh publish-installer <username>` to send the onboarding email
 - To send to *any* address without per-recipient verification: AWS Console → SES → Account dashboard → **Request production access** (takes 24–48 hours)
 
-> If `SENDER_EMAIL` is not set, `add-user` still completes but skips the email step. The installer bundle is available in S3 — generate a pre-signed URL manually with `./admin.sh publish-installer <username>`.
+> If `SENDER_EMAIL` is not set (or `--no-email` is passed), `add-user` still completes but skips the email step. The installer bundle is available in S3 — generate a pre-signed URL with `./admin.sh publish-installer <username> --no-email`.
+
+Two optional config variables customise the email appearance:
+- `LOGO_URL` — HTTPS URL of a banner image shown at the top of the email. Omit for a clean text header.
+- `REPO_URL` — Git clone URL included in admin onboarding emails so new admins know where to clone from.
 
 ---
 
@@ -341,15 +345,25 @@ The wizard automatically:
 - Creates an IAM Identity Center user and assigns the appropriate permission set(s)
 - Generates or accepts an SSH key pair for EC2 access
 - Generates `user.env` and `~/.aws/config` files ready for the new user
-- Saves an onboarding bundle to `config/onboarding/<username>/` and uploads the files to S3
-- Builds a self-contained installer zip and uploads it to S3
-- Emails a 72-hour pre-signed download link to the user via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically)
+- Uploads onboarding files to S3 and builds a self-contained installer zip
+- Sends an onboarding email via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically)
+
+User and admin emails differ:
+- **Users** receive a 72-hour pre-signed installer download link and step-by-step setup instructions
+- **Admins** receive an email with the deployment-specific config values to paste into their `.env` file, the full `~/.aws/config` stanza (both profiles, inlined — no file to copy), and the repo clone URL
 
 The user installs with a single `curl + unzip + bash` one-liner — no `git` required on their Mac.
 
 After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 
-**Note**: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` must be set in `config/admin.env`.
+**Note**: `SSO_REGION` and `SSO_START_URL` must be set in `config/admin.env`. `SENDER_EMAIL` is required unless you pass `--no-email`.
+
+Pass `--no-email` to skip sending and print the installer URL to the console instead:
+
+```bash
+./admin.sh add-user --no-email
+./admin.sh add-user <file> --no-email
+```
 
 #### Admin vs user role
 
@@ -385,9 +399,10 @@ The pre-signed installer URL expires after 72 hours. To generate a fresh one:
 
 ```bash
 ./admin.sh publish-installer <username>
+./admin.sh publish-installer <username> --no-email   # print URL only, skip email
 ```
 
-This uploads a new `latest.zip` to S3 and prints a new pre-signed URL. Send it to the user manually (or copy into an email). Useful after the initial link expires or after scripts are updated.
+This uploads a new `latest.zip` to S3, re-sends the onboarding email (if `SENDER_EMAIL` is set), and prints the pre-signed URL. Useful after the initial link expires or after scripts are updated.
 
 ### Sending a browser app link
 
@@ -395,6 +410,7 @@ If the browser app is enabled (`ENABLE_WEB_APP=true` and `WEB_APP_URL` set in `c
 
 ```bash
 ./admin.sh publish-app-link <username>
+./admin.sh publish-app-link <username> --no-email    # print URL only, skip email
 ```
 
 This generates a 72-hour signed magic link and prints the URL. If `SENDER_EMAIL` is set in `config/admin.env`, it also emails the link to the user automatically.
