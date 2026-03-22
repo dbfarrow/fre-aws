@@ -20,7 +20,6 @@ Usage (installer URL — no attachments):
     --aws-cli-profile claude-code \\
     --ses-region us-east-1 \\
     --sso-start-url https://... \\
-    --user-email alice@example.com \\
     --installer-url "https://s3.amazonaws.com/..."
 
 Usage (unified — browser link + CLI installer in one email):
@@ -760,8 +759,8 @@ def main():
                         help="AWS region where SES is configured")
     parser.add_argument("--sso-start-url", required=True,
                         help="IAM Identity Center portal URL for account activation")
-    parser.add_argument("--user-email", required=True,
-                        help="User's email address (shown in activation instructions)")
+    parser.add_argument("--user-email", default=None,
+                        help="Deprecated — no longer used")
     parser.add_argument("--installer-url", default=None,
                         help="Pre-signed S3 URL for the installer zip (72-hour expiry). "
                              "When provided, no file attachments are sent.")
