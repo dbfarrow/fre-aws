@@ -113,7 +113,7 @@ fi
 # VPC / infrastructure status
 # ---------------------------------------------------------------------------
 VPC_ID=$(aws ec2 describe-vpcs \
-  --filters "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+  --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
   --query 'Vpcs[0].VpcId' \
   --region "${AWS_REGION}" \
   --output text 2>/dev/null || echo "")
