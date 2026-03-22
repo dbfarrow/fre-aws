@@ -255,7 +255,7 @@ echo ""
 echo "--- Infrastructure ---"
 echo ""
 printf "  %-12s %s\n" "VPC:"   "${INFRA_STATUS}"
-printf "  %-12s s3://%s/%s\n" "State:" "${TF_BACKEND_BUCKET}" "${TF_BACKEND_KEY}"
+printf "  %-12s s3://%s/%s/\n" "State:" "${TF_BACKEND_BUCKET}" "${PROJECT_NAME}"
 echo ""
 
 echo "--- Billing ---"
