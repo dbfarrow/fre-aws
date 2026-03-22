@@ -180,6 +180,13 @@ module "user_ec2" {
   ]))
   user_data_replace_on_change = false
 
+  lifecycle {
+    # Prevent routine `up` runs from replacing the instance when Amazon
+    # publishes a new AL2023 AMI. To intentionally update the AMI, taint
+    # the resource: terraform taint module.user_ec2.aws_instance.this[0]
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.owner_tags, {
     ProjectName = var.project_name
     Username    = var.username
