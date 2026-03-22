@@ -34,6 +34,15 @@ source "${SCRIPT_DIR}/users-s3.sh"
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
+# Verify AWS credentials before doing anything
+# ---------------------------------------------------------------------------
+aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+  exit 1
+}
+
+# ---------------------------------------------------------------------------
 # Validate username
 # ---------------------------------------------------------------------------
 : "${DEV_USERNAME:?DEV_USERNAME must be set (use: ./admin.sh publish-installer <username>)}"

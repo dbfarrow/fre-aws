@@ -41,6 +41,15 @@ if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
   : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
 fi
 
+# ---------------------------------------------------------------------------
+# Verify AWS credentials before doing anything
+# ---------------------------------------------------------------------------
+aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+  exit 1
+}
+
 echo "=== Add User ==="
 echo ""
 
