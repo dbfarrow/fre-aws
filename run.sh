@@ -57,7 +57,8 @@ infrastructure:
                         Use --profile to specify a named AWS profile; omit to
                         use AWS_PROFILE from admin.env or the default profile
   up [user]             Create / update base infrastructure + all users (or just one user)
-  down [user]           Destroy one user's instance, or all infrastructure if no user given
+  down <user>           Destroy one user's instance (base infrastructure preserved)
+  down --all            Destroy all users + base infrastructure (full teardown)
   repair-state [--dry-run] [user]
                         Import resources that exist in AWS but are missing from
                         Terraform state (fixes EntityAlreadyExists errors)
@@ -391,7 +392,15 @@ if [[ "${MODE}" == "admin" ]]; then
         "${IMAGE_NAME}" /workspace/scripts/up.sh "${USERNAME:-}"
       ;;
     down)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh "${USERNAME:-}"
+      if [[ -z "${USERNAME}" ]]; then
+        echo "Usage: admin.sh down <username>        destroy one user's instance" >&2
+        echo "       admin.sh down --all             destroy all users + base infrastructure" >&2
+        exit 1
+      elif [[ "${USERNAME}" == "--all" ]]; then
+        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh
+      else
+        docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/down.sh "${USERNAME}"
+      fi
       ;;
     add-user)
       NO_EMAIL_FLAG=""
