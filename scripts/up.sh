@@ -189,12 +189,26 @@ for username in "${APPLY_USERS[@]}"; do
     -reconfigure
   echo ""
 
+  # Look up the existing instance's AMI (if any) to prevent replacement
+  # when Amazon publishes a new AMI. Empty string for new instances — Terraform
+  # then falls back to the latest AMI data source.
+  EXISTING_AMI=$(aws ec2 describe-instances \
+    --filters \
+      "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+      "Name=tag:Username,Values=${username}" \
+      "Name=instance-state-name,Values=running,stopped,stopping,pending" \
+    --query 'Reservations[0].Instances[0].ImageId' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null || echo "")
+  [[ "${EXISTING_AMI}" == "None" ]] && EXISTING_AMI=""
+
   EXTRA_USER_ARGS=()
   [[ -n "${ADMIN_KEYS_TFVARS}" ]] && EXTRA_USER_ARGS+=("-var-file=${ADMIN_KEYS_TFVARS}")
 
   echo "--- ${username}: terraform plan ---"
   terraform -chdir="${TF_USER_DIR}" plan \
     -var="username=${username}" \
+    -var="ami_id=${EXISTING_AMI}" \
     -var="ssh_public_key=${SSH_PUBLIC_KEY}" \
     -var="git_user_name=${GIT_USER_NAME}" \
     -var="git_user_email=${GIT_USER_EMAIL}" \

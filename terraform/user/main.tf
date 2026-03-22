@@ -2,6 +2,11 @@ locals {
   # Tag all resources with owner if provided
   owner_tags = var.owner_email != "" ? { Owner = var.owner_email } : {}
 
+  # Use the pinned AMI if provided (existing instance); fall back to latest for new instances.
+  # ami_id is populated by up.sh from the running instance's current AMI, so routine
+  # `up` runs never replace an existing instance just because Amazon published a new AMI.
+  resolved_ami = var.ami_id != "" ? var.ami_id : data.aws_ami.amazon_linux_2023.id
+
   # Bash snippet to append admin SSH keys to authorized_keys (empty string if none configured)
   admin_keys_block = length(var.admin_ssh_keys) == 0 ? "" : join("\n", concat(
     [
@@ -105,7 +110,7 @@ module "user_ec2" {
 
   name = "${var.project_name}-${var.username}-dev"
 
-  ami           = data.aws_ami.amazon_linux_2023.id
+  ami           = local.resolved_ami
   instance_type = var.instance_type
 
   # Network placement — pre-selected by base module based on network_mode
@@ -179,13 +184,6 @@ module "user_ec2" {
     file("${path.module}/../user_data_tail.sh"),
   ]))
   user_data_replace_on_change = false
-
-  lifecycle {
-    # Prevent routine `up` runs from replacing the instance when Amazon
-    # publishes a new AL2023 AMI. To intentionally update the AMI, taint
-    # the resource: terraform taint module.user_ec2.aws_instance.this[0]
-    ignore_changes = [ami]
-  }
 
   tags = merge(local.owner_tags, {
     ProjectName = var.project_name
