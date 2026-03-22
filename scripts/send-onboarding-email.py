@@ -499,7 +499,7 @@ def build_html_unified(username, project, role, has_private_key,
 # ---------------------------------------------------------------------------
 
 def build_body_admin(username, project, sso_start_url, aws_region,
-                     sso_region, repo_url, app_url=None):
+                     sso_region, repo_url, account_id=None, app_url=None):
     """Plain-text admin onboarding: activation + config values + repo pointer."""
     lines = [
         f"Hi {username},",
@@ -549,16 +549,53 @@ def build_body_admin(username, project, sso_start_url, aws_region,
     ]
     step += 1
 
-    lines += [
-        f"  {step}. Configure AWS credentials:",
-        f"     Your AWS profile config is at: config/onboarding/{username}/aws-config",
-        "     Copy it to ~/.aws/config (or append to existing):",
-        f"       cat config/onboarding/{username}/aws-config >> ~/.aws/config",
-        "",
-        "     Then authenticate:",
-        "       ./admin.sh sso-login",
-        "",
-    ]
+    if account_id:
+        aws_config_content = (
+            f"# Admin profile — use for admin.sh (ProjectAdminAccess)\n"
+            f"[profile claude-code]\n"
+            f"sso_session = {project}-admin\n"
+            f"sso_account_id = {account_id}\n"
+            f"sso_role_name = ProjectAdminAccess\n"
+            f"region = {aws_region}\n"
+            f"\n"
+            f"# Developer profile — use for user.sh connect (DeveloperAccess)\n"
+            f"[profile claude-code-dev]\n"
+            f"sso_session = {project}-dev\n"
+            f"sso_account_id = {account_id}\n"
+            f"sso_role_name = DeveloperAccess\n"
+            f"region = {aws_region}\n"
+            f"\n"
+            f"[sso-session {project}-admin]\n"
+            f"sso_start_url = {sso_start_url}\n"
+            f"sso_region = {sso_region}\n"
+            f"sso_registration_scopes = sso:account:access\n"
+            f"\n"
+            f"[sso-session {project}-dev]\n"
+            f"sso_start_url = {sso_start_url}\n"
+            f"sso_region = {sso_region}\n"
+            f"sso_registration_scopes = sso:account:access"
+        )
+        lines += [
+            f"  {step}. Configure AWS credentials:",
+            "     Append the following to ~/.aws/config:",
+            "",
+        ]
+        for cfg_line in aws_config_content.splitlines():
+            lines.append("       " + cfg_line)
+        lines += [
+            "",
+            "     Then authenticate:",
+            "       ./admin.sh sso-login",
+            "",
+        ]
+    else:
+        lines += [
+            f"  {step}. Configure AWS credentials:",
+            f"     Copy config/onboarding/{username}/aws-config to ~/.aws/config",
+            "     (or append to an existing file), then run:",
+            "       ./admin.sh sso-login",
+            "",
+        ]
     step += 1
 
     lines += [
@@ -587,7 +624,7 @@ def build_body_admin(username, project, sso_start_url, aws_region,
 
 
 def build_html_admin(username, project, sso_start_url, aws_region,
-                     sso_region, repo_url, logo_url, app_url=None):
+                     sso_region, repo_url, logo_url, account_id=None, app_url=None):
     """HTML admin onboarding email."""
     # Pre-compute strings that would put \n inside an f-string expression.
     config_values = (
@@ -596,9 +633,34 @@ def build_html_admin(username, project, sso_start_url, aws_region,
         "SSO_REGION=" + sso_region + "\n"
         "SSO_START_URL=" + sso_start_url
     )
-    aws_config_cmd = (
-        "cat config/onboarding/" + username + "/aws-config >> ~/.aws/config"
-    )
+    if account_id:
+        aws_config_content = (
+            "# Admin profile — use for admin.sh (ProjectAdminAccess)\n"
+            "[profile claude-code]\n"
+            "sso_session = " + project + "-admin\n"
+            "sso_account_id = " + account_id + "\n"
+            "sso_role_name = ProjectAdminAccess\n"
+            "region = " + aws_region + "\n"
+            "\n"
+            "# Developer profile — use for user.sh connect (DeveloperAccess)\n"
+            "[profile claude-code-dev]\n"
+            "sso_session = " + project + "-dev\n"
+            "sso_account_id = " + account_id + "\n"
+            "sso_role_name = DeveloperAccess\n"
+            "region = " + aws_region + "\n"
+            "\n"
+            "[sso-session " + project + "-admin]\n"
+            "sso_start_url = " + sso_start_url + "\n"
+            "sso_region = " + sso_region + "\n"
+            "sso_registration_scopes = sso:account:access\n"
+            "\n"
+            "[sso-session " + project + "-dev]\n"
+            "sso_start_url = " + sso_start_url + "\n"
+            "sso_region = " + sso_region + "\n"
+            "sso_registration_scopes = sso:account:access"
+        )
+    else:
+        aws_config_content = "cat config/onboarding/" + username + "/aws-config >> ~/.aws/config"
 
     activation = f"""\
     <p><strong>1. Activate your AWS account:</strong></p>
@@ -627,13 +689,19 @@ def build_html_admin(username, project, sso_start_url, aws_region,
     {_pre_cfg_vals}
     <p style="color:#666;font-size:13px;">See <code>config/admin.env.example</code> in the repo for all settings and descriptions.</p>"""
 
-    _pre_aws_copy = _html_pre(aws_config_cmd)
+    _pre_aws_content = _html_pre(aws_config_content)
     _pre_sso_login = _html_pre("./admin.sh sso-login")
+    if account_id:
+        aws_creds_intro = "<p>Append the following to <code>~/.aws/config</code>:</p>"
+    else:
+        aws_creds_intro = (
+            f"<p>Copy <code>config/onboarding/{username}/aws-config</code> "
+            f"to <code>~/.aws/config</code> (or append to existing):</p>"
+        )
     aws_creds = f"""\
     <p><strong>4. Configure AWS credentials:</strong></p>
-    <p>Your AWS profile config is at <code>config/onboarding/{username}/aws-config</code>.
-    Copy it to <code>~/.aws/config</code> (or append to existing):</p>
-    {_pre_aws_copy}
+    {aws_creds_intro}
+    {_pre_aws_content}
     <p>Then authenticate:</p>
     {_pre_sso_login}"""
 
@@ -779,6 +847,9 @@ def main():
     parser.add_argument("--repo-url", default=None,
                         help="Git clone URL for the project repo. "
                              "Included in the admin onboarding email.")
+    parser.add_argument("--account-id", default=None,
+                        help="AWS account ID. Used to inline aws-config content "
+                             "in the admin onboarding email.")
 
     args = parser.parse_args()
 
@@ -794,6 +865,7 @@ def main():
             aws_region=args.aws_region,
             sso_region=args.sso_region,
             repo_url=args.repo_url or "",
+            account_id=args.account_id,
             app_url=args.app_url,
         )
         html = build_html_admin(
@@ -804,6 +876,7 @@ def main():
             sso_region=args.sso_region,
             repo_url=args.repo_url or "",
             logo_url=logo_url,
+            account_id=args.account_id,
             app_url=args.app_url,
         )
         subject = f"[{args.project}] Admin environment setup"

@@ -638,6 +638,7 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
       --ses-region "${AWS_REGION}" \
       --sso-start-url "${SSO_START_URL}" \
       --sso-region "${SSO_REGION}" \
+      --account-id "${TF_BACKEND_ACCOUNT_ID}" \
       ${REPO_URL:+--repo-url "${REPO_URL}"} \
       ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
       ${LOGO_URL:+--logo-url "${LOGO_URL}"}
