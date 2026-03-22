@@ -96,7 +96,6 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
     --aws-cli-profile "${AWS_PROFILE}" \
     --ses-region "${AWS_REGION}" \
     --sso-start-url "" \
-    --user-email "${USER_EMAIL}" \
     --app-url "${APP_LINK_URL}" \
     ${LOGO_URL:+--logo-url "${LOGO_URL}"}
 else

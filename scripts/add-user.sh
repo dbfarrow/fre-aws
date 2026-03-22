@@ -637,7 +637,6 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
       --aws-cli-profile "${AWS_PROFILE}" \
       --ses-region "${AWS_REGION}" \
       --sso-start-url "${SSO_START_URL}" \
-      --user-email "${USER_EMAIL}" \
       --sso-region "${SSO_REGION}" \
       ${REPO_URL:+--repo-url "${REPO_URL}"} \
       ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
@@ -655,7 +654,6 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
       --aws-cli-profile "${AWS_PROFILE}" \
       --ses-region "${AWS_REGION}" \
       --sso-start-url "${SSO_START_URL}" \
-      --user-email "${USER_EMAIL}" \
       --installer-url "${INSTALLER_URL}" \
       ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
       ${LOGO_URL:+--logo-url "${LOGO_URL}"}

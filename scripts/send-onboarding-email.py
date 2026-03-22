@@ -759,8 +759,6 @@ def main():
                         help="AWS region where SES is configured")
     parser.add_argument("--sso-start-url", required=True,
                         help="IAM Identity Center portal URL for account activation")
-    parser.add_argument("--user-email", default=None,
-                        help="Deprecated — no longer used")
     parser.add_argument("--installer-url", default=None,
                         help="Pre-signed S3 URL for the installer zip (72-hour expiry). "
                              "When provided, no file attachments are sent.")
