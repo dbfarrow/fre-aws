@@ -386,6 +386,15 @@ else
       else
         state_col="${state}"
       fi
+      last_seen_raw=$(aws ssm describe-sessions \
+        --state History \
+        --filters "key=Target,value=${instance_id}" \
+        --query 'max_by(Sessions, &StartDate).StartDate' \
+        --region "${AWS_REGION}" \
+        --output text 2>/dev/null || echo "")
+      if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
+        state_col="${state_col}  •  last seen $(format_time "${last_seen_raw}")"
+      fi
       printf "  %-20s %-22s %-12s %-10s %s\n" \
         "${username}" "${instance_id}" "${type}" "${role}" "${state_col}"
     else
