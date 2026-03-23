@@ -65,6 +65,26 @@ Split the monolithic Terraform state into separate state files per user, plus a 
 
 ---
 
+## Merge `list` and `stat` commands
+
+`list` and `stat` serve overlapping purposes and share duplicated code: identical `format_time()` / `format_reason()` helpers, the same EC2 `describe-instances` query, and the same SSO orphan detection block. The user table in `stat` is essentially a superset of `list`.
+
+**Proposal:** Make `stat` the single command (it already includes everything `list` shows, plus identity, config, billing, and infrastructure status). Keep `list` as an alias or a thin wrapper that calls `stat --users-only` to preserve the fast daily-use case without the billing API calls.
+
+**Options:**
+- `stat` — full output (current behavior)
+- `stat --users` or `list` — users table only, skip billing/infra sections (fast path, no Cost Explorer call)
+- `list -v` verbose mode → `stat --users --verbose` or just fold into `stat --verbose`
+
+**What to deduplicate:**
+- `format_time()` and `format_reason()` — extract to a shared lib (e.g. `scripts/lib.sh`) sourced by both
+- EC2 `describe-instances` call — already identical in both files
+- SSO orphan detection block — ~20 lines, identical in both files
+
+**Migration:** `list` command in `run.sh` can remain as an alias to `stat --users` so existing muscle memory works.
+
+---
+
 ## Billing / cost visibility improvements
 
 The `stat` command has a basic billing section (MTD spend, forecast, per-service breakdown via Cost Explorer). Things worth expanding:

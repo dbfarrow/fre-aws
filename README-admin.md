@@ -525,6 +525,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
 ./admin.sh list                         # list all users and their instance state
 ./admin.sh list -v                      # verbose: show email, role, SSH key, git config
+./admin.sh stat                         # full environment status: identity, billing, infra, users
 ```
 
 ### Infrastructure
@@ -532,7 +533,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh bootstrap                    # one-time: create S3, DynamoDB, KMS, permission sets
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
-./admin.sh down                         # destroy all user instances, then base (full teardown)
+./admin.sh down --all                   # destroy all user instances, then base (full teardown)
 ./admin.sh down <username>              # destroy one user's instance only; base is preserved
 ```
 
