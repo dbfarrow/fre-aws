@@ -86,6 +86,9 @@ if [[ "${KEEP_SSO_USER:-}" == "true" ]]; then
   echo ""
   echo "IAM Identity Center user '${DEV_USERNAME}' preserved (--keep-sso)."
   echo "  Re-adding this username will reuse the existing Identity Center account."
+elif [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo ""
+  echo "IDENTITY_MODE=external — skipping IAM Identity Center cleanup."
 elif [[ -z "${SSO_REGION:-}" ]]; then
   echo ""
   echo "SSO_REGION not set — skipping IAM Identity Center cleanup."

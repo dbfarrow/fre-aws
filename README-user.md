@@ -230,7 +230,7 @@ Your AWS SSO session has expired. Run `~/fre-aws/user.sh sso-login` to re-authen
 Your instance may be stopped. Run `~/fre-aws/user.sh start`, wait about 30 seconds, then try `~/fre-aws/user.sh connect` again. If it's still not found, contact your admin — your instance may not have been provisioned yet.
 
 **`ForbiddenException: No access` after SSO login**
-The browser login succeeded but your AWS user hasn't been granted access to the account — this is an admin-side setup step. Contact your admin and ask them to verify you're assigned the `DeveloperAccess` permission set in IAM Identity Center.
+The browser login succeeded but your AWS user hasn't been granted access to the account — this is an admin-side setup step. Contact your admin and ask them to verify you're assigned the correct permission set in IAM Identity Center.
 
 **`ERROR: No SSH key found`**
 The installer normally places your SSH key at `~/fre-aws/.ssh/fre-claude`. If it's missing, re-run the installer from Step 3. If the link has expired, ask your admin to run `./admin.sh publish-installer <your-username>` to generate a fresh one. If re-running the installer doesn't help, ask your admin to run `./admin.sh update-user-key <your-username>` to generate a new key and send a new installer link.

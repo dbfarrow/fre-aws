@@ -95,6 +95,45 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# VPC quota pre-flight check
+# Only relevant when a new VPC would be created (project VPC doesn't exist yet).
+# Default AWS limit is 5 VPCs per region; enterprise accounts may differ.
+# ---------------------------------------------------------------------------
+echo "--- VPC quota check ---"
+PROJECT_VPC_ID=$(aws ec2 describe-vpcs \
+  --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+  --query 'Vpcs[0].VpcId' \
+  --region "${AWS_REGION}" \
+  --output text 2>/dev/null || echo "")
+[[ "${PROJECT_VPC_ID}" == "None" ]] && PROJECT_VPC_ID=""
+
+if [[ -z "${PROJECT_VPC_ID}" ]]; then
+  VPC_COUNT=$(aws ec2 describe-vpcs \
+    --query 'length(Vpcs)' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null || echo "0")
+  VPC_QUOTA=$(aws service-quotas get-service-quota \
+    --service-code vpc \
+    --quota-code L-F678F1CE \
+    --region "${AWS_REGION}" \
+    --query 'Quota.Value' \
+    --output text 2>/dev/null || echo "5")
+  VPC_QUOTA="${VPC_QUOTA%.*}"  # strip decimal from float output (e.g. "5.0" → "5")
+  if [[ "${VPC_COUNT}" -ge "${VPC_QUOTA}" ]]; then
+    echo ""
+    echo "ERROR: VPC limit reached in ${AWS_REGION}." >&2
+    echo "       Current VPCs: ${VPC_COUNT}  /  Limit: ${VPC_QUOTA}" >&2
+    echo "       Delete an unused VPC or request a quota increase before running up." >&2
+    echo "         AWS Console → Service Quotas → Amazon VPC → VPCs per Region" >&2
+    exit 1
+  fi
+  echo "  OK (${VPC_COUNT} of ${VPC_QUOTA} VPCs used — a new VPC will be created)"
+else
+  echo "  OK (${PROJECT_NAME}-vpc already exists: ${PROJECT_VPC_ID})"
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
 # Phase 1: Base infrastructure
 # ---------------------------------------------------------------------------
 echo "=== Phase 1: base infrastructure ==="
@@ -189,18 +228,11 @@ for username in "${APPLY_USERS[@]}"; do
     -reconfigure
   echo ""
 
-  # Look up the existing instance's AMI (if any) to prevent replacement
-  # when Amazon publishes a new AMI. Empty string for new instances — Terraform
-  # then falls back to the latest AMI data source.
-  EXISTING_AMI=$(aws ec2 describe-instances \
-    --filters \
-      "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
-      "Name=tag:Username,Values=${username}" \
-      "Name=instance-state-name,Values=running,stopped,stopping,pending" \
-    --query 'Reservations[0].Instances[0].ImageId' \
-    --region "${AWS_REGION}" \
-    --output text 2>/dev/null || echo "")
-  [[ "${EXISTING_AMI}" == "None" ]] && EXISTING_AMI=""
+  # Read the existing instance's AMI directly from Terraform state. This is more
+  # reliable than looking up EC2 tags, which can be absent on spot instances if
+  # tag propagation failed silently on a previous apply. Empty for new instances.
+  EXISTING_AMI=$(terraform -chdir="${TF_USER_DIR}" output -raw instance_ami 2>/dev/null || echo "")
+  [[ "${EXISTING_AMI}" == "null" ]] && EXISTING_AMI=""
 
   EXTRA_USER_ARGS=()
   [[ -n "${ADMIN_KEYS_TFVARS}" ]] && EXTRA_USER_ARGS+=("-var-file=${ADMIN_KEYS_TFVARS}")
@@ -225,6 +257,26 @@ for username in "${APPLY_USERS[@]}"; do
     "${EXTRA_USER_ARGS[@]}" \
     -out="${TF_USER_DIR}/.tfplan_${username}"
   echo ""
+
+  # Safety check: if the plan would replace the EC2 instance, warn loudly and
+  # require explicit confirmation. Replacement destroys the EBS volume and all data.
+  PLAN_SHOW=$(terraform -chdir="${TF_USER_DIR}" show -no-color "${TF_USER_DIR}/.tfplan_${username}" 2>/dev/null || echo "")
+  if echo "${PLAN_SHOW}" | grep -E "must be replaced" | grep -qE "aws_instance|aws_spot_instance_request"; then
+    echo ""
+    echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "  WARNING: This plan will DESTROY and RECREATE ${username}'s EC2 instance."
+    echo "           The EBS volume and all data on it will be permanently lost."
+    echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo ""
+    read -r -p "  Type 'replace ${username}' to confirm: " REPLACE_CONFIRM
+    if [[ "${REPLACE_CONFIRM}" != "replace ${username}" ]]; then
+      echo "  Aborted. Skipping ${username}."
+      rm -f "${TF_USER_DIR}/.tfplan_${username}"
+      echo ""
+      continue
+    fi
+    echo ""
+  fi
 
   read -r -p "Apply plan for ${username}? [y/N] " CONFIRM
   if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then

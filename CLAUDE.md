@@ -61,6 +61,15 @@ git checkout main && git pull        # sync local main after merge
 ### PR scope discipline (Claude-specific)
 Claude should continuously ask: *has the work in progress grown beyond the reasonable scope of a single PR?* When it has — when uncommitted changes span multiple independent concerns, or when a new direction emerges mid-implementation — Claude will call this out explicitly and propose stopping to open a PR for the current work before continuing. The goal is PRs that are independently reviewable and meaningful, not large mixed-concern diffs.
 
+### Documentation completeness (Claude-specific)
+Before declaring any feature PR ready for review, Claude must verify that all documentation is current for the feature. This includes:
+- `README-admin.md` — any new commands, config variables, behavioral changes, or operational considerations
+- `README-user.md` — anything that affects the user-facing experience
+- `CLAUDE.md` — any new architectural decisions, constraints, or development principles
+- Inline code comments — anywhere the logic isn't self-evident
+
+A PR is not ready for review if a user or future Claude reading the docs would have an incomplete or inaccurate picture of how the feature works.
+
 ---
 
 ## Core Principles
@@ -73,11 +82,23 @@ This project applies Zero Trust principles where free-tier AWS constraints allow
 | No SSH / no port 22 | ✅ | All EC2 access via SSM Session Manager (SSH tunneled over SSM) |
 | No EC2 public IP | ⚠️ | Default mode (`public`) gives EC2 a public IP; `private_nat` removes it |
 | No long-lived credentials | ✅ | IAM Identity Center (SSO) with short-lived session tokens |
-| Least-privilege IAM | ✅ | DeveloperAccess and ProjectAdminAccess permission sets scoped per user |
+| Least-privilege IAM | ✅ | `{project}-developer-access` and `{project}-admin-access` permission sets scoped per project |
 | IMDSv2 enforced | ✅ | `http_tokens = "required"` on all instances |
 | Encryption at rest | ✅ | KMS-backed EBS and S3 |
 | Security groups deny by default | ✅ | No ingress rules on EC2 |
 | Audit logging | ❌ Deferred | CloudTrail and VPC Flow Logs not enabled (cost); add before production |
+
+### User Data Protection
+
+**Never destroy user data without explicit, specific acknowledgment from the operator.**
+
+User data lives on EBS volumes attached to EC2 instances. Destroying an instance or its EBS volume is permanent and unrecoverable. This principle applies to all code — scripts, Terraform, and automation:
+
+- **Terraform changes**: before implementing any infrastructure change, consider whether it could produce a `ForceNew` replacement of an EC2 instance or EBS volume. If there is any such risk — even in an edge case — the implementation must either eliminate the risk or present the operator with a clear alternative path that avoids destruction.
+- **Script changes**: any script operation that could result in instance termination or volume deletion must require explicit typed confirmation (not just `y`), describe exactly what will be destroyed, and make clear the action is irreversible.
+- **No silent destruction**: Terraform plan output must be inspected before apply whenever EC2 or EBS resources are in scope. If a plan shows replacement, the operator must be stopped and warned before the apply proceeds — not after.
+
+When reviewing or writing Terraform code, actively check for `ForceNew` attributes on `aws_instance`, `aws_spot_instance_request`, and `aws_ebs_volume` resources. Common triggers: `ami`, `subnet_id`, `key_name`, `user_data` (when `user_data_replace_on_change = true`). If a desired change would trigger any of these, find an alternative approach (targeted apply, state manipulation, separate resource creation before cutover) and present it rather than proceeding.
 
 ### Terraform Module Strategy
 All AWS resource provisioning uses **community modules from [terraform-aws-modules](https://registry.terraform.io/namespaces/terraform-aws-modules)** (maintained by Anton Babenko). Direct resource blocks are only used when no suitable module exists.
@@ -129,8 +150,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
 │   ├── stat.sh                  # Full environment status: identity, billing, instances
 │   ├── list.sh                  # Users + EC2 instance state summary
-│   ├── add-user.sh              # Add user to S3 registry + Identity Center
-│   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center)
+│   ├── add-user.sh              # Add user to S3 registry; creates Identity Center user in managed mode
+│   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -146,10 +167,10 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 
 ## Multi-User Model
 
-Each user gets their own EC2 instance, IAM Identity Center user, and S3 registry entry. Users are managed via:
+Each user gets their own EC2 instance and S3 registry entry. In managed mode (`IDENTITY_MODE=managed`), an IAM Identity Center user is also created. Users are managed via:
 
 ```
-./admin.sh add-user <username>     # Provision Identity Center user + S3 entry
+./admin.sh add-user <username>     # S3 registry entry + Identity Center user (managed mode only)
 ./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
 ./admin.sh list                    # Show all users + instance state + timestamps
 ./admin.sh stat                    # Full environment status including billing
@@ -200,7 +221,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 | Terraform (~1.9+) | IaC provisioning via terraform-aws-modules |
 | AWS CLI (v2) | SSO authentication, EC2 lifecycle, SSM sessions |
 | AWS SSM Session Manager | Secure shell access — SSH tunneled over SSM, no port 22 |
-| IAM Identity Center | Per-user SSO with DeveloperAccess + ProjectAdminAccess permission sets |
+| IAM Identity Center | Per-user SSO with `{project}-developer-access` + `{project}-admin-access` permission sets |
 | tmux | Session persistence across SSH disconnects |
 | Python 3 + zoneinfo | Timestamp formatting (AWS ISO 8601 → local timezone) |
 | Bash | All user-facing scripts |

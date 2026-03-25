@@ -63,6 +63,11 @@ resource "aws_iam_role" "user_ec2" {
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+    Username    = var.username
+  })
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_core" {
@@ -98,6 +103,11 @@ resource "aws_iam_role_policy" "ec2_self_stop" {
 resource "aws_iam_instance_profile" "user_ec2" {
   name = "${var.project_name}-${var.username}-ec2-profile"
   role = aws_iam_role.user_ec2.name
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+    Username    = var.username
+  })
 }
 
 # ---------------------------------------------------------------------------

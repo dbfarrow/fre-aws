@@ -35,10 +35,12 @@ source "${SCRIPT_DIR}/app-link.sh"
 # ---------------------------------------------------------------------------
 # Prerequisite checks — fail fast with clear messages
 # ---------------------------------------------------------------------------
-: "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
-: "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
-if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
-  : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+  : "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
+  : "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
+  if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
+    : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -125,22 +127,22 @@ fi
 if [[ -z "${ROLE:-}" ]]; then
   echo ""
   echo "Role:"
-  echo "  1) user   (DeveloperAccess — scoped to own instance)  [default]"
-  echo "  2) admin  (ProjectAdminAccess — full project access)"
+  echo "  1) user   (${PROJECT_NAME}-developer-access — scoped to own instance)  [default]"
+  echo "  2) admin  (${PROJECT_NAME}-admin-access — full project access)"
   read -r -p "Select role [1]: " ROLE_CHOICE
   ROLE_CHOICE="${ROLE_CHOICE:-1}"
   case "${ROLE_CHOICE}" in
-    1|user)  ROLE="user";  PS_NAME="DeveloperAccess" ;;
-    2|admin) ROLE="admin"; PS_NAME="ProjectAdminAccess" ;;
+    1|user)  ROLE="user";  PS_NAME="${PROJECT_NAME}-developer-access" ;;
+    2|admin) ROLE="admin"; PS_NAME="${PROJECT_NAME}-admin-access" ;;
     *)
       echo "  Invalid choice. Defaulting to user." >&2
-      ROLE="user"; PS_NAME="DeveloperAccess"
+      ROLE="user"; PS_NAME="${PROJECT_NAME}-developer-access"
       ;;
   esac
 else
   case "${ROLE}" in
-    user)  PS_NAME="DeveloperAccess" ;;
-    admin) PS_NAME="ProjectAdminAccess" ;;
+    user)  PS_NAME="${PROJECT_NAME}-developer-access" ;;
+    admin) PS_NAME="${PROJECT_NAME}-admin-access" ;;
     *)
       echo "ERROR: Invalid ROLE '${ROLE}': must be 'user' or 'admin'." >&2
       exit 1
@@ -158,6 +160,19 @@ SSH_KEY_PASSPHRASE=""
 
 if [[ -n "${SSH_PUBLIC_KEY:-}" ]]; then
   echo "SSH public key provided."
+  echo ""
+elif [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "External identity mode: you must supply your own SSH public key."
+  while true; do
+    read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
+    if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
+      echo "  SSH public key cannot be empty." >&2; continue
+    fi
+    if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
+      echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
+    fi
+    break
+  done
   echo ""
 elif [[ -n "${USER_FILE}" ]]; then
   # File mode, no key supplied — auto-generate with passphrase
@@ -249,7 +264,10 @@ fi
 
 # ---------------------------------------------------------------------------
 # IAM Identity Center: create user and account assignment
+# (skipped in external identity mode)
 # ---------------------------------------------------------------------------
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+
 echo ""
 echo "Creating IAM Identity Center user..."
 
@@ -396,12 +414,12 @@ if [[ -z "${PS_ARN}" ]]; then
 fi
 
 # Remove any existing assignments for the OTHER known permission sets.
-# Admin users keep both ProjectAdminAccess AND DeveloperAccess; only
-# remove the one that doesn't belong to the target role.
-for OTHER_PS_NAME in "DeveloperAccess" "ProjectAdminAccess"; do
+# Admin users keep both ${PROJECT_NAME}-admin-access AND ${PROJECT_NAME}-developer-access;
+# only remove the one that doesn't belong to the target role.
+for OTHER_PS_NAME in "${PROJECT_NAME}-developer-access" "${PROJECT_NAME}-admin-access"; do
   [[ "${OTHER_PS_NAME}" == "${PS_NAME}" ]] && continue
-  # Admin users always have DeveloperAccess — don't remove it
-  [[ "${ROLE}" == "admin" && "${OTHER_PS_NAME}" == "DeveloperAccess" ]] && continue
+  # Admin users always have ${PROJECT_NAME}-developer-access — don't remove it
+  [[ "${ROLE}" == "admin" && "${OTHER_PS_NAME}" == "${PROJECT_NAME}-developer-access" ]] && continue
   OTHER_PS_ARN=$(_find_ps_arn "${OTHER_PS_NAME}")
   [[ -z "${OTHER_PS_ARN}" ]] && continue
 
@@ -431,23 +449,23 @@ done
 # Assign the primary permission set and wait for async provisioning to complete
 _assign_ps "${PS_NAME}" "${PS_ARN}"
 
-# Admin users also get DeveloperAccess so ./user.sh connect works for them
+# Admin users also get ${PROJECT_NAME}-developer-access so ./user.sh connect works for them
 if [[ "${ROLE}" == "admin" ]]; then
-  DEV_PS_ARN=$(_find_ps_arn "DeveloperAccess")
+  DEV_PS_ARN=$(_find_ps_arn "${PROJECT_NAME}-developer-access")
   if [[ -z "${DEV_PS_ARN}" ]]; then
-    echo "ERROR: DeveloperAccess permission set not found." >&2
+    echo "ERROR: ${PROJECT_NAME}-developer-access permission set not found." >&2
     echo "       Run './admin.sh bootstrap' to create it." >&2
     exit 1
   fi
-  _assign_ps "DeveloperAccess" "${DEV_PS_ARN}"
+  _assign_ps "${PROJECT_NAME}-developer-access" "${DEV_PS_ARN}"
 fi
 
 # ---------------------------------------------------------------------------
 # Generate user.env and aws-config
 # ---------------------------------------------------------------------------
-# Admin users get two profiles: claude-code (ProjectAdminAccess, for admin.sh)
-# and claude-code-dev (DeveloperAccess, for user.sh connect).
-# Regular users get one profile: claude-code (DeveloperAccess).
+# Admin users get two profiles: claude-code (${PROJECT_NAME}-admin-access, for admin.sh)
+# and claude-code-dev (${PROJECT_NAME}-developer-access, for user.sh connect).
+# Regular users get one profile: claude-code (${PROJECT_NAME}-developer-access).
 if [[ "${ROLE}" == "admin" ]]; then
   AWS_PROFILE_FOR_DEV="claude-code-dev"
   DEVELOPER_ENV="MY_USERNAME=${NEW_USERNAME}
@@ -456,18 +474,18 @@ AWS_PROFILE=${AWS_PROFILE_FOR_DEV}
 AWS_REGION=${AWS_REGION}
 TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
 "
-  AWS_CONFIG="# Admin profile — use for admin.sh (ProjectAdminAccess)
+  AWS_CONFIG="# Admin profile — use for admin.sh (${PROJECT_NAME}-admin-access)
 [profile claude-code]
 sso_session = ${PROJECT_NAME}-admin
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
-sso_role_name = ProjectAdminAccess
+sso_role_name = ${PROJECT_NAME}-admin-access
 region = ${AWS_REGION}
 
-# Developer profile — use for user.sh connect (DeveloperAccess)
+# Developer profile — use for user.sh connect (${PROJECT_NAME}-developer-access)
 [profile ${AWS_PROFILE_FOR_DEV}]
 sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
-sso_role_name = DeveloperAccess
+sso_role_name = ${PROJECT_NAME}-developer-access
 region = ${AWS_REGION}
 
 [sso-session ${PROJECT_NAME}-admin]
@@ -491,7 +509,7 @@ TF_BACKEND_BUCKET=${TF_BACKEND_BUCKET}
   AWS_CONFIG="[profile ${AWS_PROFILE_FOR_DEV}]
 sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${TF_BACKEND_ACCOUNT_ID}
-sso_role_name = DeveloperAccess
+sso_role_name = ${PROJECT_NAME}-developer-access
 region = ${AWS_REGION}
 
 [sso-session ${PROJECT_NAME}-dev]
@@ -525,6 +543,8 @@ echo "Uploading onboarding files to S3..."
 _upload_onboarding_files "${NEW_USERNAME}" "${BUNDLE_DIR}"
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${NEW_USERNAME}/"
 
+fi  # end managed-only block (IC + config + bundle)
+
 # ---------------------------------------------------------------------------
 # Update S3 registry
 # ---------------------------------------------------------------------------
@@ -548,6 +568,7 @@ mv "${USERS_JSON}.tmp" "${USERS_JSON}"
 users_s3_upload "${USERS_JSON}"
 echo "User '${NEW_USERNAME}' added to S3 registry."
 
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
 # ---------------------------------------------------------------------------
 # Generate installer bundle and upload to S3
 # ---------------------------------------------------------------------------
@@ -661,20 +682,26 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   fi
 fi
 
+fi  # end managed-only block (installer + email)
+
 echo ""
 echo "=== Done ==="
 echo ""
-echo "  IAM Identity Center user: ${NEW_USERNAME}"
-if [[ "${ROLE}" == "admin" ]]; then
-  echo "  Permission sets:          ProjectAdminAccess + DeveloperAccess"
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "  User '${NEW_USERNAME}' added to S3 registry."
 else
-  echo "  Permission set:           ${PS_NAME}"
-fi
-echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
-if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
-  echo "  Email:                    skipped (--no-email)"
-else
-  echo "  Email sent to:            ${USER_EMAIL}"
+  echo "  IAM Identity Center user: ${NEW_USERNAME}"
+  if [[ "${ROLE}" == "admin" ]]; then
+    echo "  Permission sets:          ${PROJECT_NAME}-admin-access + ${PROJECT_NAME}-developer-access"
+  else
+    echo "  Permission set:           ${PS_NAME}"
+  fi
+  echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
+  if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+    echo "  Email:                    skipped (--no-email)"
+  else
+    echo "  Email sent to:            ${USER_EMAIL}"
+  fi
 fi
 echo ""
-echo "Next: run './admin.sh up' to provision their EC2 instance."
+echo "Next: run './admin.sh up ${NEW_USERNAME}' to provision their EC2 instance."

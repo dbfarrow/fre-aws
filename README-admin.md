@@ -12,6 +12,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
   - [Upgrading from Option B to Option A](#upgrading-from-option-b-to-option-a)
+- [Identity Management Mode](#identity-management-mode)
 - [Email Setup (AWS SES)](#email-setup-aws-ses)
 - [Local Configuration](#local-configuration)
 - [Cost Considerations](#cost-considerations)
@@ -45,10 +46,10 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | Requirement | Notes |
 |-------------|-------|
 | AWS account | Any account — free tier, personal, or organizational |
-| AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates a tighter `ProjectAdminAccess` permission set automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
+| AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`ProjectAdminAccess` and `DeveloperAccess`).
+> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`).
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -90,7 +91,7 @@ If no agent is running, the tooling falls back to mounting `~/.ssh` into the con
 
 ## Credential Setup
 
-`./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates a tighter `ProjectAdminAccess` permission set scoped to what this project actually needs. After that one-time step, you reassign yourself to `ProjectAdminAccess` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
+`./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets scoped to what this project actually needs. After that one-time step, you reassign yourself to `{project}-admin-access` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
 
 The two options below describe how you hold that initial AdministratorAccess:
 
@@ -125,8 +126,8 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
    - IAM Identity Center → Permission sets → Create → **Predefined policy** → `AdministratorAccess`
    - Under **AWS accounts**, assign yourself → `AdministratorAccess`
 
-   > `./admin.sh bootstrap` will create `ProjectAdminAccess` (a tighter set) and `DeveloperAccess` automatically.
-   > After bootstrap, you can reassign yourself to `ProjectAdminAccess` and drop `AdministratorAccess`.
+   > `./admin.sh bootstrap` will create `{project}-admin-access` and `{project}-developer-access` automatically.
+   > After bootstrap, you can reassign yourself to `{project}-admin-access` and drop `AdministratorAccess`.
 
 5. Collect these values from the AWS Console:
 
@@ -157,7 +158,7 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 > SSO sessions expire (typically 8–12 hours). Run `./admin.sh sso-login` again when prompted.
 
-> **After running bootstrap**: Reassign yourself to `ProjectAdminAccess` in IAM Identity Center → AWS accounts, then update `sso_role_name = ProjectAdminAccess` in `~/.aws/config` and re-run `./admin.sh sso-login`.
+> **After running bootstrap**: Reassign yourself to `{project}-admin-access` in IAM Identity Center → AWS accounts, then update `sso_role_name = {project}-admin-access` in `~/.aws/config` and re-run `./admin.sh sso-login`.
 
 ---
 
@@ -210,7 +211,43 @@ No changes to Terraform or scripts needed — only the credential source changes
 
 ---
 
+## Identity Management Mode
+
+`IDENTITY_MODE` in `config/admin.env` controls how fre-aws interacts with IAM Identity Center. This is an important architectural decision — choose based on who owns your SSO setup.
+
+| Mode | `IDENTITY_MODE` | When to use |
+|------|----------------|-------------|
+| **Managed** | `managed` *(default)* | fre-aws creates and manages Identity Center users, assigns permission sets, generates credentials, and sends onboarding emails. Best for fresh AWS accounts where fre-aws is the SSO admin. |
+| **External** | `external` | An external IdP (Okta, Azure AD, etc.) manages Identity Center. Users already have their own AWS credentials and SSH keys. fre-aws only manages EC2 instances and the S3 user registry. |
+
+### Managed mode (default)
+
+`add-user` creates everything a new user needs from scratch:
+- Creates an IAM Identity Center user and assigns `{project}-developer-access` (or `{project}-admin-access` + `{project}-developer-access` for admins)
+- Generates or accepts an SSH key pair for EC2 access
+- Builds an `~/.aws/config` and installer bundle for the user
+- Sends an onboarding email with a one-liner installer URL
+
+Required config: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` (or pass `--no-email`).
+
+### External mode
+
+The account's IdP manages all Identity Center users and permission assignments — fre-aws does not touch them. `add-user` only records the user in the S3 registry.
+
+What users are expected to bring:
+- **AWS credentials** — via the org's IdP (they already have these)
+- **SSH public key** — their own key; no auto-generation
+- **Docker and Git** — users in this mode are assumed to be technical
+
+`remove-user` in external mode destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact (the IdP owns it).
+
+To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required (though `SSO_REGION` can remain set — `list` uses it to show any IC users not in the fre-aws registry).
+
+---
+
 ## Email Setup (AWS SES)
+
+> **Managed mode only.** Email setup is not required when `IDENTITY_MODE=external`.
 
 `add-user` delivers SSH keys and AWS configs to new users via email. To enable it:
 
@@ -314,15 +351,16 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 10. ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS,
                                                                permission sets, SES verification
                                                                (runs as AdministratorAccess)
-11. Switch to ProjectAdminAccess                            ← bootstrap just created this set;
+11. Switch to {project}-admin-access                        ← bootstrap just created this set;
     (Option A) IAM Identity Center → AWS accounts              assign yourself to it, update
-               assign yourself to ProjectAdminAccess            sso_role_name in ~/.aws/config,
+               assign yourself to {project}-admin-access        sso_role_name in ~/.aws/config,
                re-run ./admin.sh sso-login                      re-run sso-login
     (Option B) no action needed                             ← IAM user access keys are unchanged;
-                                                               ProjectAdminAccess is for SSO users
+                                                               {project}-admin-access is for SSO users
 12. ./admin.sh add-user                                     ← interactive wizard: adds a user,
-                                                               creates IAM Identity Center account,
-                                                               emails credentials
+                                                               creates IAM Identity Center account
+                                                               and emails credentials (managed mode);
+                                                               S3 registry entry only (external mode)
 13. ./admin.sh up                                           ← provisions all AWS infrastructure
 14. ./admin.sh connect <username>                           ← verify it works
 ```
@@ -339,40 +377,41 @@ User configuration is stored in S3 and shared across all admins. The CLI keeps i
 ./admin.sh add-user
 ```
 
-The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key (generate or provide), git name, and git email.
+The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key, git name, and git email.
 
-The wizard automatically:
+What happens next depends on `IDENTITY_MODE` — see [Identity Management Mode](#identity-management-mode) for the full breakdown.
+
+**In managed mode**, the wizard additionally:
 - Creates an IAM Identity Center user and assigns the appropriate permission set(s)
 - Generates or accepts an SSH key pair for EC2 access
-- Generates `user.env` and `~/.aws/config` files ready for the new user
-- Uploads onboarding files to S3 and builds a self-contained installer zip
-- Sends an onboarding email via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically)
+- Builds `user.env` and `~/.aws/config` files ready for the new user
+- Uploads an installer bundle to S3 and sends an onboarding email
 
 User and admin emails differ:
 - **Users** receive a 72-hour pre-signed installer download link and step-by-step setup instructions
-- **Admins** receive an email with the deployment-specific config values to paste into their `.env` file, the full `~/.aws/config` stanza (both profiles, inlined — no file to copy), and the repo clone URL
+- **Admins** receive the deployment-specific config values, their full `~/.aws/config` stanza (inlined — no file to copy), and the repo clone URL
 
 The user installs with a single `curl + unzip + bash` one-liner — no `git` required on their Mac.
 
-After `add-user`, run `./admin.sh up` to provision their EC2 instance.
-
-**Note**: `SSO_REGION` and `SSO_START_URL` must be set in `config/admin.env`. `SENDER_EMAIL` is required unless you pass `--no-email`.
-
-Pass `--no-email` to skip sending and print the installer URL to the console instead:
+Pass `--no-email` to skip the email and print the installer URL to the console instead:
 
 ```bash
 ./admin.sh add-user --no-email
 ./admin.sh add-user <file> --no-email
 ```
 
+**In external mode**, the wizard records the user in the S3 registry and prompts for their SSH public key — nothing else. Users provide their own AWS credentials and tooling.
+
+After `add-user`, run `./admin.sh up <username>` to provision their EC2 instance.
+
 #### Admin vs user role
 
 | Role | Permission sets | `admin.sh` access | `user.sh` access |
 |------|----------------|-------------------|------------------|
-| `user` | `DeveloperAccess` | None | Connect, start, stop |
-| `admin` | `ProjectAdminAccess` + `DeveloperAccess` | Full | Connect, start, stop |
+| `user` | `{project}-developer-access` | None | Connect, start, stop |
+| `admin` | `{project}-admin-access` + `{project}-developer-access` | Full | Connect, start, stop |
 
-Admin users receive a two-profile `~/.aws/config`: `claude-code` (ProjectAdminAccess, for `admin.sh`) and `claude-code-dev` (DeveloperAccess, for `connect`). Running `./admin.sh verify` confirms both profiles are active.
+Admin users receive a two-profile `~/.aws/config`: `claude-code` (`{project}-admin-access`, for `admin.sh`) and `claude-code-dev` (`{project}-developer-access`, for `connect`). Running `./admin.sh verify` confirms both profiles are active.
 
 ### Updating a user's SSH key
 
@@ -391,7 +430,11 @@ Two modes:
 ./admin.sh remove-user <username>
 ```
 
-`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step. Their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
+`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step.
+
+In **managed mode**, their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
+
+In **external mode**, the Identity Center account is always left intact — the IdP owns it, not fre-aws.
 
 ### Re-sending the installer link
 
@@ -523,8 +566,8 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
-./admin.sh list                         # list all users and their instance state
-./admin.sh list -v                      # verbose: show email, role, SSH key, git config
+./admin.sh list                         # list all users, instance state, and last seen timestamp
+./admin.sh list -v                      # verbose: show email, role, SSH key, git config, last seen
 ./admin.sh stat                         # full environment status: identity, billing, infra, users
 ```
 
@@ -537,6 +580,10 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh down <username>              # destroy one user's instance only; base is preserved
 ```
 
+**`up` pre-flight checks:**
+- **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
+- **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
+
 ### Instance lifecycle
 ```bash
 ./admin.sh start [username]             # start an instance (omit username to start all)
@@ -545,7 +592,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Connecting
 ```bash
-./admin.sh connect <username>           # SSH into an instance (uses DeveloperAccess)
+./admin.sh connect <username>           # SSH into an instance (uses {project}-developer-access)
 ./admin.sh refresh <username>           # push session_start.sh + tmux.conf + autoshutdown timer
 ./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
@@ -579,7 +626,7 @@ An error occurred (ForbiddenException) when calling the GetRoleCredentials opera
 
 The SSO token is valid, but the user hasn't been assigned to the AWS account with the required permission set. Being in the IAM Identity Center directory is not enough.
 
-**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign `ProjectAdminAccess` (for admins) or `DeveloperAccess` (for users).
+**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign `{project}-admin-access` (for admins) or `{project}-developer-access` (for users).
 
 **Diagnostic** (run inside `./admin.sh shell`):
 ```bash
