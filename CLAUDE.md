@@ -129,8 +129,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
 │   ├── stat.sh                  # Full environment status: identity, billing, instances
 │   ├── list.sh                  # Users + EC2 instance state summary
-│   ├── add-user.sh              # Add user to S3 registry + Identity Center
-│   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center)
+│   ├── add-user.sh              # Add user to S3 registry; creates Identity Center user in managed mode
+│   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -146,10 +146,10 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 
 ## Multi-User Model
 
-Each user gets their own EC2 instance, IAM Identity Center user, and S3 registry entry. Users are managed via:
+Each user gets their own EC2 instance and S3 registry entry. In managed mode (`IDENTITY_MODE=managed`), an IAM Identity Center user is also created. Users are managed via:
 
 ```
-./admin.sh add-user <username>     # Provision Identity Center user + S3 entry
+./admin.sh add-user <username>     # S3 registry entry + Identity Center user (managed mode only)
 ./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
 ./admin.sh list                    # Show all users + instance state + timestamps
 ./admin.sh stat                    # Full environment status including billing

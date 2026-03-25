@@ -321,8 +321,9 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
     (Option B) no action needed                             ← IAM user access keys are unchanged;
                                                                ProjectAdminAccess is for SSO users
 12. ./admin.sh add-user                                     ← interactive wizard: adds a user,
-                                                               creates IAM Identity Center account,
-                                                               emails credentials
+                                                               creates IAM Identity Center account
+                                                               and emails credentials (managed mode);
+                                                               S3 registry entry only (external mode)
 13. ./admin.sh up                                           ← provisions all AWS infrastructure
 14. ./admin.sh connect <username>                           ← verify it works
 ```
@@ -342,11 +343,11 @@ User configuration is stored in S3 and shared across all admins. The CLI keeps i
 The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key (generate or provide), git name, and git email.
 
 The wizard automatically:
-- Creates an IAM Identity Center user and assigns the appropriate permission set(s)
-- Generates or accepts an SSH key pair for EC2 access
-- Generates `user.env` and `~/.aws/config` files ready for the new user
-- Uploads onboarding files to S3 and builds a self-contained installer zip
-- Sends an onboarding email via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically)
+- Creates an IAM Identity Center user and assigns the appropriate permission set(s) *(managed mode only)*
+- Generates or accepts an SSH key pair for EC2 access *(external mode: own key required; no auto-generate)*
+- Generates `user.env` and `~/.aws/config` files ready for the new user *(managed mode only)*
+- Uploads onboarding files to S3 and builds a self-contained installer zip *(managed mode only)*
+- Sends an onboarding email via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically) *(managed mode only)*
 
 User and admin emails differ:
 - **Users** receive a 72-hour pre-signed installer download link and step-by-step setup instructions
@@ -356,7 +357,7 @@ The user installs with a single `curl + unzip + bash` one-liner — no `git` req
 
 After `add-user`, run `./admin.sh up` to provision their EC2 instance.
 
-**Note**: `SSO_REGION` and `SSO_START_URL` must be set in `config/admin.env`. `SENDER_EMAIL` is required unless you pass `--no-email`.
+**Note** *(managed mode)*: `SSO_REGION` and `SSO_START_URL` must be set in `config/admin.env`. `SENDER_EMAIL` is required unless you pass `--no-email`. In external mode (`IDENTITY_MODE=external`), none of these are required — only S3 registry and EC2 operations run.
 
 Pass `--no-email` to skip sending and print the installer URL to the console instead:
 
