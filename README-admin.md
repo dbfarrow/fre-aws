@@ -580,6 +580,10 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh down <username>              # destroy one user's instance only; base is preserved
 ```
 
+**`up` pre-flight checks:**
+- **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
+- **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
+
 ### Instance lifecycle
 ```bash
 ./admin.sh start [username]             # start an instance (omit username to start all)
