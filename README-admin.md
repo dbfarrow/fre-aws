@@ -12,6 +12,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
   - [Upgrading from Option B to Option A](#upgrading-from-option-b-to-option-a)
+- [Identity Management Mode](#identity-management-mode)
 - [Email Setup (AWS SES)](#email-setup-aws-ses)
 - [Local Configuration](#local-configuration)
 - [Cost Considerations](#cost-considerations)
@@ -210,7 +211,43 @@ No changes to Terraform or scripts needed — only the credential source changes
 
 ---
 
+## Identity Management Mode
+
+`IDENTITY_MODE` in `config/admin.env` controls how fre-aws interacts with IAM Identity Center. This is an important architectural decision — choose based on who owns your SSO setup.
+
+| Mode | `IDENTITY_MODE` | When to use |
+|------|----------------|-------------|
+| **Managed** | `managed` *(default)* | fre-aws creates and manages Identity Center users, assigns permission sets, generates credentials, and sends onboarding emails. Best for fresh AWS accounts where fre-aws is the SSO admin. |
+| **External** | `external` | An external IdP (Okta, Azure AD, etc.) manages Identity Center. Users already have their own AWS credentials and SSH keys. fre-aws only manages EC2 instances and the S3 user registry. |
+
+### Managed mode (default)
+
+`add-user` creates everything a new user needs from scratch:
+- Creates an IAM Identity Center user and assigns `DeveloperAccess` (or `ProjectAdminAccess` + `DeveloperAccess` for admins)
+- Generates or accepts an SSH key pair for EC2 access
+- Builds an `~/.aws/config` and installer bundle for the user
+- Sends an onboarding email with a one-liner installer URL
+
+Required config: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` (or pass `--no-email`).
+
+### External mode
+
+The account's IdP manages all Identity Center users and permission assignments — fre-aws does not touch them. `add-user` only records the user in the S3 registry.
+
+What users are expected to bring:
+- **AWS credentials** — via the org's IdP (they already have these)
+- **SSH public key** — their own key; no auto-generation
+- **Docker and Git** — users in this mode are assumed to be technical
+
+`remove-user` in external mode destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact (the IdP owns it).
+
+To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required (though `SSO_REGION` can remain set — `list -v` uses it to show orphaned IC users).
+
+---
+
 ## Email Setup (AWS SES)
+
+> **Managed mode only.** Email setup is not required when `IDENTITY_MODE=external`.
 
 `add-user` delivers SSH keys and AWS configs to new users via email. To enable it:
 
@@ -340,31 +377,32 @@ User configuration is stored in S3 and shared across all admins. The CLI keeps i
 ./admin.sh add-user
 ```
 
-The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key (generate or provide), git name, and git email.
+The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key, git name, and git email.
 
-The wizard automatically:
-- Creates an IAM Identity Center user and assigns the appropriate permission set(s) *(managed mode only)*
-- Generates or accepts an SSH key pair for EC2 access *(external mode: own key required; no auto-generate)*
-- Generates `user.env` and `~/.aws/config` files ready for the new user *(managed mode only)*
-- Uploads onboarding files to S3 and builds a self-contained installer zip *(managed mode only)*
-- Sends an onboarding email via SES (if `SENDER_EMAIL` is set; handles SES sandbox verification automatically) *(managed mode only)*
+What happens next depends on `IDENTITY_MODE` — see [Identity Management Mode](#identity-management-mode) for the full breakdown.
+
+**In managed mode**, the wizard additionally:
+- Creates an IAM Identity Center user and assigns the appropriate permission set(s)
+- Generates or accepts an SSH key pair for EC2 access
+- Builds `user.env` and `~/.aws/config` files ready for the new user
+- Uploads an installer bundle to S3 and sends an onboarding email
 
 User and admin emails differ:
 - **Users** receive a 72-hour pre-signed installer download link and step-by-step setup instructions
-- **Admins** receive an email with the deployment-specific config values to paste into their `.env` file, the full `~/.aws/config` stanza (both profiles, inlined — no file to copy), and the repo clone URL
+- **Admins** receive the deployment-specific config values, their full `~/.aws/config` stanza (inlined — no file to copy), and the repo clone URL
 
 The user installs with a single `curl + unzip + bash` one-liner — no `git` required on their Mac.
 
-After `add-user`, run `./admin.sh up` to provision their EC2 instance.
-
-**Note** *(managed mode)*: `SSO_REGION` and `SSO_START_URL` must be set in `config/admin.env`. `SENDER_EMAIL` is required unless you pass `--no-email`. In external mode (`IDENTITY_MODE=external`), none of these are required — only S3 registry and EC2 operations run.
-
-Pass `--no-email` to skip sending and print the installer URL to the console instead:
+Pass `--no-email` to skip the email and print the installer URL to the console instead:
 
 ```bash
 ./admin.sh add-user --no-email
 ./admin.sh add-user <file> --no-email
 ```
+
+**In external mode**, the wizard records the user in the S3 registry and prompts for their SSH public key — nothing else. Users provide their own AWS credentials and tooling.
+
+After `add-user`, run `./admin.sh up <username>` to provision their EC2 instance.
 
 #### Admin vs user role
 
@@ -392,7 +430,11 @@ Two modes:
 ./admin.sh remove-user <username>
 ```
 
-`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step. Their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
+`remove-user` destroys the user's EC2 instance and EBS volume, then removes them from the registry in a single step.
+
+In **managed mode**, their IAM Identity Center account is also deleted unless you pass `--keep-sso` (useful when you want to re-add the same username later without re-doing AWS account setup).
+
+In **external mode**, the Identity Center account is always left intact — the IdP owns it, not fre-aws.
 
 ### Re-sending the installer link
 
