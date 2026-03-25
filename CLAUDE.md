@@ -79,6 +79,18 @@ This project applies Zero Trust principles where free-tier AWS constraints allow
 | Security groups deny by default | ✅ | No ingress rules on EC2 |
 | Audit logging | ❌ Deferred | CloudTrail and VPC Flow Logs not enabled (cost); add before production |
 
+### User Data Protection
+
+**Never destroy user data without explicit, specific acknowledgment from the operator.**
+
+User data lives on EBS volumes attached to EC2 instances. Destroying an instance or its EBS volume is permanent and unrecoverable. This principle applies to all code — scripts, Terraform, and automation:
+
+- **Terraform changes**: before implementing any infrastructure change, consider whether it could produce a `ForceNew` replacement of an EC2 instance or EBS volume. If there is any such risk — even in an edge case — the implementation must either eliminate the risk or present the operator with a clear alternative path that avoids destruction.
+- **Script changes**: any script operation that could result in instance termination or volume deletion must require explicit typed confirmation (not just `y`), describe exactly what will be destroyed, and make clear the action is irreversible.
+- **No silent destruction**: Terraform plan output must be inspected before apply whenever EC2 or EBS resources are in scope. If a plan shows replacement, the operator must be stopped and warned before the apply proceeds — not after.
+
+When reviewing or writing Terraform code, actively check for `ForceNew` attributes on `aws_instance`, `aws_spot_instance_request`, and `aws_ebs_volume` resources. Common triggers: `ami`, `subnet_id`, `key_name`, `user_data` (when `user_data_replace_on_change = true`). If a desired change would trigger any of these, find an alternative approach (targeted apply, state manipulation, separate resource creation before cutover) and present it rather than proceeding.
+
 ### Terraform Module Strategy
 All AWS resource provisioning uses **community modules from [terraform-aws-modules](https://registry.terraform.io/namespaces/terraform-aws-modules)** (maintained by Anton Babenko). Direct resource blocks are only used when no suitable module exists.
 
