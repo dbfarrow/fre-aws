@@ -209,17 +209,18 @@ resource "aws_lambda_function" "app_api" {
 # ---------------------------------------------------------------------------
 # SSM Session Preferences — auto-switch to developer user
 # ---------------------------------------------------------------------------
-# Session Manager checks the account for a customer-managed document named
-# SSM-SessionManagerRunShell; if found, it takes precedence over the
-# AWS-managed default. The shell profile runs "sudo su - developer" which
-# works because ssm-user can sudo to root and root can su to developer
-# (direct "sudo -u developer" is blocked in this account).
+# The document name is project-scoped to avoid colliding with an existing
+# SSM-SessionManagerRunShell document (enterprise accounts often have one
+# pre-configured by the platform team with session recording, KMS, etc.).
+# The federation role policy references this specific document name.
+# The shell profile runs "sudo su - developer" which works because ssm-user
+# can sudo to root and root can su to developer.
 # The developer login shell triggers session_start.sh (tmux + Claude).
 # ---------------------------------------------------------------------------
 
 resource "aws_ssm_document" "session_preferences" {
   count         = local.web_app_enabled ? 1 : 0
-  name          = "SSM-SessionManagerRunShell"
+  name          = "${var.project_name}-session-preferences"
   document_type = "Session"
 
   content = jsonencode({
@@ -364,7 +365,7 @@ resource "aws_iam_role_policy" "app_federation" {
       {
         Effect   = "Allow"
         Action   = "ssm:StartSession"
-        Resource = "arn:aws:ssm:${var.aws_region}:*:document/SSM-SessionManagerRunShell"
+        Resource = "arn:aws:ssm:${var.aws_region}:*:document/${var.project_name}-session-preferences"
       }
     ]
   })
