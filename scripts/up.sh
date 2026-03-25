@@ -228,18 +228,11 @@ for username in "${APPLY_USERS[@]}"; do
     -reconfigure
   echo ""
 
-  # Look up the existing instance's AMI (if any) to prevent replacement
-  # when Amazon publishes a new AMI. Empty string for new instances — Terraform
-  # then falls back to the latest AMI data source.
-  EXISTING_AMI=$(aws ec2 describe-instances \
-    --filters \
-      "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
-      "Name=tag:Username,Values=${username}" \
-      "Name=instance-state-name,Values=running,stopped,stopping,pending" \
-    --query 'Reservations[0].Instances[0].ImageId' \
-    --region "${AWS_REGION}" \
-    --output text 2>/dev/null || echo "")
-  [[ "${EXISTING_AMI}" == "None" ]] && EXISTING_AMI=""
+  # Read the existing instance's AMI directly from Terraform state. This is more
+  # reliable than looking up EC2 tags, which can be absent on spot instances if
+  # tag propagation failed silently on a previous apply. Empty for new instances.
+  EXISTING_AMI=$(terraform -chdir="${TF_USER_DIR}" output -raw instance_ami 2>/dev/null || echo "")
+  [[ "${EXISTING_AMI}" == "null" ]] && EXISTING_AMI=""
 
   EXTRA_USER_ARGS=()
   [[ -n "${ADMIN_KEYS_TFVARS}" ]] && EXTRA_USER_ARGS+=("-var-file=${ADMIN_KEYS_TFVARS}")
@@ -264,6 +257,26 @@ for username in "${APPLY_USERS[@]}"; do
     "${EXTRA_USER_ARGS[@]}" \
     -out="${TF_USER_DIR}/.tfplan_${username}"
   echo ""
+
+  # Safety check: if the plan would replace the EC2 instance, warn loudly and
+  # require explicit confirmation. Replacement destroys the EBS volume and all data.
+  PLAN_SHOW=$(terraform -chdir="${TF_USER_DIR}" show -no-color "${TF_USER_DIR}/.tfplan_${username}" 2>/dev/null || echo "")
+  if echo "${PLAN_SHOW}" | grep -qE "must be replaced|forces replacement"; then
+    echo ""
+    echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "  WARNING: This plan will DESTROY and RECREATE ${username}'s EC2 instance."
+    echo "           The EBS volume and all data on it will be permanently lost."
+    echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo ""
+    read -r -p "  Type 'replace ${username}' to confirm: " REPLACE_CONFIRM
+    if [[ "${REPLACE_CONFIRM}" != "replace ${username}" ]]; then
+      echo "  Aborted. Skipping ${username}."
+      rm -f "${TF_USER_DIR}/.tfplan_${username}"
+      echo ""
+      continue
+    fi
+    echo ""
+  fi
 
   read -r -p "Apply plan for ${username}? [y/N] " CONFIRM
   if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
