@@ -261,7 +261,7 @@ for username in "${APPLY_USERS[@]}"; do
   # Safety check: if the plan would replace the EC2 instance, warn loudly and
   # require explicit confirmation. Replacement destroys the EBS volume and all data.
   PLAN_SHOW=$(terraform -chdir="${TF_USER_DIR}" show -no-color "${TF_USER_DIR}/.tfplan_${username}" 2>/dev/null || echo "")
-  if echo "${PLAN_SHOW}" | grep -qE "must be replaced|forces replacement"; then
+  if echo "${PLAN_SHOW}" | grep -E "must be replaced" | grep -qE "aws_instance|aws_spot_instance_request"; then
     echo ""
     echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo "  WARNING: This plan will DESTROY and RECREATE ${username}'s EC2 instance."
