@@ -73,7 +73,7 @@ This project applies Zero Trust principles where free-tier AWS constraints allow
 | No SSH / no port 22 | ✅ | All EC2 access via SSM Session Manager (SSH tunneled over SSM) |
 | No EC2 public IP | ⚠️ | Default mode (`public`) gives EC2 a public IP; `private_nat` removes it |
 | No long-lived credentials | ✅ | IAM Identity Center (SSO) with short-lived session tokens |
-| Least-privilege IAM | ✅ | DeveloperAccess and ProjectAdminAccess permission sets scoped per user |
+| Least-privilege IAM | ✅ | `{project}-developer-access` and `{project}-admin-access` permission sets scoped per project |
 | IMDSv2 enforced | ✅ | `http_tokens = "required"` on all instances |
 | Encryption at rest | ✅ | KMS-backed EBS and S3 |
 | Security groups deny by default | ✅ | No ingress rules on EC2 |
@@ -200,7 +200,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 | Terraform (~1.9+) | IaC provisioning via terraform-aws-modules |
 | AWS CLI (v2) | SSO authentication, EC2 lifecycle, SSM sessions |
 | AWS SSM Session Manager | Secure shell access — SSH tunneled over SSM, no port 22 |
-| IAM Identity Center | Per-user SSO with DeveloperAccess + ProjectAdminAccess permission sets |
+| IAM Identity Center | Per-user SSO with `{project}-developer-access` + `{project}-admin-access` permission sets |
 | tmux | Session persistence across SSH disconnects |
 | Python 3 + zoneinfo | Timestamp formatting (AWS ISO 8601 → local timezone) |
 | Bash | All user-facing scripts |

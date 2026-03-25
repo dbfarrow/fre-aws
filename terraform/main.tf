@@ -35,7 +35,7 @@ module "kms" {
   # the ViaService condition ensures the key can only be used through EC2,
   # and GrantIsForAWSResource ensures CreateGrant is only used for AWS services.
   # Without this, only principals with explicit kms:CreateGrant (e.g. AdminAccess)
-  # can start instances with encrypted EBS — DeveloperAccess would fail.
+  # can start instances with encrypted EBS — {project}-developer-access would fail.
   key_statements = [
     {
       sid = "AllowEBSEncryption"
@@ -134,6 +134,10 @@ resource "aws_vpc_endpoint" "ssm" {
 
   security_group_ids  = [module.ssm_endpoint_sg[0].security_group_id]
   private_dns_enabled = true
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }
 
 resource "aws_vpc_endpoint" "ec2messages" {
@@ -146,6 +150,10 @@ resource "aws_vpc_endpoint" "ec2messages" {
 
   security_group_ids  = [module.ssm_endpoint_sg[0].security_group_id]
   private_dns_enabled = true
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }
 
 resource "aws_vpc_endpoint" "ssmmessages" {
@@ -158,6 +166,10 @@ resource "aws_vpc_endpoint" "ssmmessages" {
 
   security_group_ids  = [module.ssm_endpoint_sg[0].security_group_id]
   private_dns_enabled = true
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }
 
 # Security group for VPC endpoints (allows HTTPS from within VPC)
@@ -182,6 +194,10 @@ module "ssm_endpoint_sg" {
   ]
 
   egress_rules = ["all-all"]
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }
 
 # ---------------------------------------------------------------------------
@@ -201,4 +217,8 @@ module "ec2_sg" {
 
   # Allow all outbound (SSM, package installs, Claude API)
   egress_rules = ["all-all"]
+
+  tags = merge(local.owner_tags, {
+    ProjectName = var.project_name
+  })
 }

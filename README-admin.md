@@ -46,10 +46,10 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | Requirement | Notes |
 |-------------|-------|
 | AWS account | Any account — free tier, personal, or organizational |
-| AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates a tighter `ProjectAdminAccess` permission set automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
+| AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`ProjectAdminAccess` and `DeveloperAccess`).
+> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`).
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -91,7 +91,7 @@ If no agent is running, the tooling falls back to mounting `~/.ssh` into the con
 
 ## Credential Setup
 
-`./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates a tighter `ProjectAdminAccess` permission set scoped to what this project actually needs. After that one-time step, you reassign yourself to `ProjectAdminAccess` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
+`./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets scoped to what this project actually needs. After that one-time step, you reassign yourself to `{project}-admin-access` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
 
 The two options below describe how you hold that initial AdministratorAccess:
 
@@ -126,8 +126,8 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
    - IAM Identity Center → Permission sets → Create → **Predefined policy** → `AdministratorAccess`
    - Under **AWS accounts**, assign yourself → `AdministratorAccess`
 
-   > `./admin.sh bootstrap` will create `ProjectAdminAccess` (a tighter set) and `DeveloperAccess` automatically.
-   > After bootstrap, you can reassign yourself to `ProjectAdminAccess` and drop `AdministratorAccess`.
+   > `./admin.sh bootstrap` will create `{project}-admin-access` and `{project}-developer-access` automatically.
+   > After bootstrap, you can reassign yourself to `{project}-admin-access` and drop `AdministratorAccess`.
 
 5. Collect these values from the AWS Console:
 
@@ -158,7 +158,7 @@ IAM Identity Center provides short-lived credentials and enforces MFA by design.
 
 > SSO sessions expire (typically 8–12 hours). Run `./admin.sh sso-login` again when prompted.
 
-> **After running bootstrap**: Reassign yourself to `ProjectAdminAccess` in IAM Identity Center → AWS accounts, then update `sso_role_name = ProjectAdminAccess` in `~/.aws/config` and re-run `./admin.sh sso-login`.
+> **After running bootstrap**: Reassign yourself to `{project}-admin-access` in IAM Identity Center → AWS accounts, then update `sso_role_name = {project}-admin-access` in `~/.aws/config` and re-run `./admin.sh sso-login`.
 
 ---
 
@@ -223,7 +223,7 @@ No changes to Terraform or scripts needed — only the credential source changes
 ### Managed mode (default)
 
 `add-user` creates everything a new user needs from scratch:
-- Creates an IAM Identity Center user and assigns `DeveloperAccess` (or `ProjectAdminAccess` + `DeveloperAccess` for admins)
+- Creates an IAM Identity Center user and assigns `{project}-developer-access` (or `{project}-admin-access` + `{project}-developer-access` for admins)
 - Generates or accepts an SSH key pair for EC2 access
 - Builds an `~/.aws/config` and installer bundle for the user
 - Sends an onboarding email with a one-liner installer URL
@@ -351,12 +351,12 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 10. ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS,
                                                                permission sets, SES verification
                                                                (runs as AdministratorAccess)
-11. Switch to ProjectAdminAccess                            ← bootstrap just created this set;
+11. Switch to {project}-admin-access                        ← bootstrap just created this set;
     (Option A) IAM Identity Center → AWS accounts              assign yourself to it, update
-               assign yourself to ProjectAdminAccess            sso_role_name in ~/.aws/config,
+               assign yourself to {project}-admin-access        sso_role_name in ~/.aws/config,
                re-run ./admin.sh sso-login                      re-run sso-login
     (Option B) no action needed                             ← IAM user access keys are unchanged;
-                                                               ProjectAdminAccess is for SSO users
+                                                               {project}-admin-access is for SSO users
 12. ./admin.sh add-user                                     ← interactive wizard: adds a user,
                                                                creates IAM Identity Center account
                                                                and emails credentials (managed mode);
@@ -408,10 +408,10 @@ After `add-user`, run `./admin.sh up <username>` to provision their EC2 instance
 
 | Role | Permission sets | `admin.sh` access | `user.sh` access |
 |------|----------------|-------------------|------------------|
-| `user` | `DeveloperAccess` | None | Connect, start, stop |
-| `admin` | `ProjectAdminAccess` + `DeveloperAccess` | Full | Connect, start, stop |
+| `user` | `{project}-developer-access` | None | Connect, start, stop |
+| `admin` | `{project}-admin-access` + `{project}-developer-access` | Full | Connect, start, stop |
 
-Admin users receive a two-profile `~/.aws/config`: `claude-code` (ProjectAdminAccess, for `admin.sh`) and `claude-code-dev` (DeveloperAccess, for `connect`). Running `./admin.sh verify` confirms both profiles are active.
+Admin users receive a two-profile `~/.aws/config`: `claude-code` (`{project}-admin-access`, for `admin.sh`) and `claude-code-dev` (`{project}-developer-access`, for `connect`). Running `./admin.sh verify` confirms both profiles are active.
 
 ### Updating a user's SSH key
 
@@ -588,7 +588,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Connecting
 ```bash
-./admin.sh connect <username>           # SSH into an instance (uses DeveloperAccess)
+./admin.sh connect <username>           # SSH into an instance (uses {project}-developer-access)
 ./admin.sh refresh <username>           # push session_start.sh + tmux.conf + autoshutdown timer
 ./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
@@ -622,7 +622,7 @@ An error occurred (ForbiddenException) when calling the GetRoleCredentials opera
 
 The SSO token is valid, but the user hasn't been assigned to the AWS account with the required permission set. Being in the IAM Identity Center directory is not enough.
 
-**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign `ProjectAdminAccess` (for admins) or `DeveloperAccess` (for users).
+**Fix:** IAM Identity Center → AWS accounts → select your account → Assign users or groups → find the user → assign `{project}-admin-access` (for admins) or `{project}-developer-access` (for users).
 
 **Diagnostic** (run inside `./admin.sh shell`):
 ```bash

@@ -130,6 +130,12 @@ $AWS s3api put-public-access-block \
   --public-access-block-configuration \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 echo "  Public access blocked."
+
+# Tag the bucket for cost allocation and project identification
+$AWS s3api put-bucket-tagging \
+  --bucket "${BUCKET_NAME}" \
+  --tagging "TagSet=[{Key=ProjectName,Value=${PROJECT_NAME}},{Key=ManagedBy,Value=fre-aws}]"
+echo "  Tags applied."
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -148,6 +154,13 @@ else
   echo "  Table created."
   echo "  Waiting for table to become active..."
   $AWS dynamodb wait table-exists --table-name "${DYNAMODB_TABLE}"
+fi
+
+# Tag the table (idempotent — tag-resource is safe to re-run)
+TABLE_ARN=$($AWS dynamodb describe-table --table-name "${DYNAMODB_TABLE}" --query 'Table.TableArn' --output text 2>/dev/null || echo "")
+if [[ -n "${TABLE_ARN}" ]]; then
+  $AWS dynamodb tag-resource --resource-arn "${TABLE_ARN}" --tags "Key=ProjectName,Value=${PROJECT_NAME}" "Key=ManagedBy,Value=fre-aws"
+  echo "  Tags applied."
 fi
 echo ""
 
@@ -194,7 +207,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # IAM Identity Center permission sets (only if SSO_REGION is configured)
-# Creates DeveloperAccess and ProjectAdminAccess permission sets idempotently.
+# Creates ${PROJECT_NAME}-developer-access and ${PROJECT_NAME}-admin-access permission sets idempotently.
 # ---------------------------------------------------------------------------
 if [[ -n "${SSO_REGION:-}" ]]; then
   echo "Setting up IAM Identity Center permission sets (region: ${SSO_REGION})..."
@@ -255,11 +268,11 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       echo "${arn}"
     }
 
-    # ---- DeveloperAccess ------------------------------------------------
+    # ---- ${PROJECT_NAME}-developer-access ----------------------------------------
     # Scoped policy: users can manage EC2 and connect via SSM.
     # Per-user instance isolation is enforced at the SSH layer (each instance
     # only accepts its owner's key), not via IAM tag conditions.
-    DEV_PS_ARN=$(_ensure_ps "DeveloperAccess" \
+    DEV_PS_ARN=$(_ensure_ps "${PROJECT_NAME}-developer-access" \
       "Scoped ${PROJECT_NAME} user access: connect to own instance only")
 
     POLICY_FILE=$(mktemp)
@@ -304,13 +317,13 @@ POLICY
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${DEV_PS_ARN}" \
       --inline-policy "file://${POLICY_FILE}" >/dev/null
-    echo "  'DeveloperAccess': policy applied."
+    echo "  '${PROJECT_NAME}-developer-access': policy applied."
     rm -f "${POLICY_FILE}"
 
-    # ---- ProjectAdminAccess ---------------------------------------------
+    # ---- ${PROJECT_NAME}-admin-access ----------------------------------------
     # PowerUserAccess (all services except IAM) plus the specific IAM
     # permissions Terraform needs to create and manage EC2 instance roles.
-    ADMIN_PS_ARN=$(_ensure_ps "ProjectAdminAccess" \
+    ADMIN_PS_ARN=$(_ensure_ps "${PROJECT_NAME}-admin-access" \
       "${PROJECT_NAME} admin: run bootstrap/up/down, manage users and infrastructure")
 
     aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
@@ -318,8 +331,8 @@ POLICY
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
       --managed-policy-arn "arn:aws:iam::aws:policy/PowerUserAccess" 2>/dev/null \
-      && echo "  'ProjectAdminAccess': attached PowerUserAccess." \
-      || echo "  'ProjectAdminAccess': PowerUserAccess already attached."
+      && echo "  '${PROJECT_NAME}-admin-access': attached PowerUserAccess." \
+      || echo "  '${PROJECT_NAME}-admin-access': PowerUserAccess already attached."
 
     POLICY_FILE=$(mktemp)
     cat > "${POLICY_FILE}" << 'POLICY'
@@ -364,7 +377,7 @@ POLICY
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
       --inline-policy "file://${POLICY_FILE}" >/dev/null
-    echo "  'ProjectAdminAccess': IAM policy applied."
+    echo "  '${PROJECT_NAME}-admin-access': IAM policy applied."
     rm -f "${POLICY_FILE}"
 
     # -------------------------------------------------------------------------
@@ -413,11 +426,11 @@ POLICY
     }
 
     echo ""
-    _provision_ps "DeveloperAccess"    "${DEV_PS_ARN}"
-    _provision_ps "ProjectAdminAccess" "${ADMIN_PS_ARN}"
+    _provision_ps "${PROJECT_NAME}-developer-access" "${DEV_PS_ARN}"
+    _provision_ps "${PROJECT_NAME}-admin-access"     "${ADMIN_PS_ARN}"
 
     # -------------------------------------------------------------------------
-    # Assign ProjectAdminAccess to the admin user identified by OWNER_EMAIL.
+    # Assign ${PROJECT_NAME}-admin-access to the admin user identified by OWNER_EMAIL.
     # -------------------------------------------------------------------------
     IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
       sso-admin list-instances \
@@ -440,8 +453,8 @@ POLICY
           --permission-set-arn "${ADMIN_PS_ARN}" \
           --principal-type USER \
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
-          && echo "  Assigned ProjectAdminAccess to ${OWNER_EMAIL}." \
-          || echo "  ProjectAdminAccess already assigned to ${OWNER_EMAIL}."
+          && echo "  Assigned ${PROJECT_NAME}-admin-access to ${OWNER_EMAIL}." \
+          || echo "  ${PROJECT_NAME}-admin-access already assigned to ${OWNER_EMAIL}."
         aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
@@ -450,17 +463,17 @@ POLICY
           --permission-set-arn "${DEV_PS_ARN}" \
           --principal-type USER \
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
-          && echo "  Assigned DeveloperAccess to ${OWNER_EMAIL}." \
-          || echo "  DeveloperAccess already assigned to ${OWNER_EMAIL}."
+          && echo "  Assigned ${PROJECT_NAME}-developer-access to ${OWNER_EMAIL}." \
+          || echo "  ${PROJECT_NAME}-developer-access already assigned to ${OWNER_EMAIL}."
         echo "  Add both profiles to ~/.aws/config (see aws-config-sso.example), then re-run sso-login."
       else
         echo "  Could not find Identity Center user with email '${OWNER_EMAIL}'."
-        echo "  Assign ProjectAdminAccess manually: IAM Identity Center → AWS accounts."
+        echo "  Assign ${PROJECT_NAME}-admin-access manually: IAM Identity Center → AWS accounts."
       fi
     else
       echo "  Assign permission sets in IAM Identity Center → AWS accounts:"
-      echo "    Admins:      ProjectAdminAccess"
-      echo "    Developers:  DeveloperAccess"
+      echo "    Admins:      ${PROJECT_NAME}-admin-access"
+      echo "    Developers:  ${PROJECT_NAME}-developer-access"
       echo "  Then update sso_role_name in ~/.aws/config to match."
     fi
     echo ""
@@ -488,7 +501,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # Write admin AWS profile config (if SSO is configured)
 # Lets a first-time admin transition from their existing high-privilege profile
-# to the ProjectAdminAccess / DeveloperAccess profiles created above.
+# to the ${PROJECT_NAME}-admin-access / ${PROJECT_NAME}-developer-access profiles created above.
 # ---------------------------------------------------------------------------
 if [[ -n "${SSO_REGION:-}" ]]; then
   AWS_CONFIG_FILE="${SCRIPT_DIR}/../config/aws-config-admin.example"
@@ -497,18 +510,18 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 # Generated by bootstrap.sh — append to ~/.aws/config, then re-run sso-login.
 # This file is gitignored; regenerate anytime by re-running './admin.sh bootstrap'.
 
-# Admin profile — used by admin.sh for all management operations (ProjectAdminAccess)
+# Admin profile — used by admin.sh for all management operations (${PROJECT_NAME}-admin-access)
 [profile claude-code]
 sso_session = ${PROJECT_NAME}-admin
 sso_account_id = ${ACCOUNT_ID}
-sso_role_name = ProjectAdminAccess
+sso_role_name = ${PROJECT_NAME}-admin-access
 region = ${AWS_REGION}
 
-# Developer profile — used by admin.sh connect / user.sh connect (DeveloperAccess)
+# Developer profile — used by admin.sh connect / user.sh connect (${PROJECT_NAME}-developer-access)
 [profile claude-code-dev]
 sso_session = ${PROJECT_NAME}-dev
 sso_account_id = ${ACCOUNT_ID}
-sso_role_name = DeveloperAccess
+sso_role_name = ${PROJECT_NAME}-developer-access
 region = ${AWS_REGION}
 
 [sso-session ${PROJECT_NAME}-admin]
