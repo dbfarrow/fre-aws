@@ -241,7 +241,7 @@ What users are expected to bring:
 
 `remove-user` in external mode destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact (the IdP owns it).
 
-To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required (though `SSO_REGION` can remain set — `list -v` uses it to show orphaned IC users).
+To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required (though `SSO_REGION` can remain set — `list` uses it to show any IC users not in the fre-aws registry).
 
 ---
 
@@ -566,8 +566,8 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
-./admin.sh list                         # list all users and their instance state
-./admin.sh list -v                      # verbose: show email, role, SSH key, git config
+./admin.sh list                         # list all users, instance state, and last seen timestamp
+./admin.sh list -v                      # verbose: show email, role, SSH key, git config, last seen
 ./admin.sh stat                         # full environment status: identity, billing, infra, users
 ```
 
