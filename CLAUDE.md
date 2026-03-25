@@ -61,6 +61,15 @@ git checkout main && git pull        # sync local main after merge
 ### PR scope discipline (Claude-specific)
 Claude should continuously ask: *has the work in progress grown beyond the reasonable scope of a single PR?* When it has — when uncommitted changes span multiple independent concerns, or when a new direction emerges mid-implementation — Claude will call this out explicitly and propose stopping to open a PR for the current work before continuing. The goal is PRs that are independently reviewable and meaningful, not large mixed-concern diffs.
 
+### Documentation completeness (Claude-specific)
+Before declaring any feature PR ready for review, Claude must verify that all documentation is current for the feature. This includes:
+- `README-admin.md` — any new commands, config variables, behavioral changes, or operational considerations
+- `README-user.md` — anything that affects the user-facing experience
+- `CLAUDE.md` — any new architectural decisions, constraints, or development principles
+- Inline code comments — anywhere the logic isn't self-evident
+
+A PR is not ready for review if a user or future Claude reading the docs would have an incomplete or inaccurate picture of how the feature works.
+
 ---
 
 ## Core Principles
