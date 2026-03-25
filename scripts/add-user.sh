@@ -35,10 +35,12 @@ source "${SCRIPT_DIR}/app-link.sh"
 # ---------------------------------------------------------------------------
 # Prerequisite checks — fail fast with clear messages
 # ---------------------------------------------------------------------------
-: "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
-: "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
-if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
-  : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+  : "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
+  : "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
+  if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
+    : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -159,6 +161,19 @@ SSH_KEY_PASSPHRASE=""
 if [[ -n "${SSH_PUBLIC_KEY:-}" ]]; then
   echo "SSH public key provided."
   echo ""
+elif [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "External identity mode: you must supply your own SSH public key."
+  while true; do
+    read -r -p "SSH public key (paste full key, e.g. ssh-ed25519 AAAA...): " SSH_PUBLIC_KEY
+    if [[ -z "${SSH_PUBLIC_KEY}" ]]; then
+      echo "  SSH public key cannot be empty." >&2; continue
+    fi
+    if ! [[ "${SSH_PUBLIC_KEY}" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com) ]]; then
+      echo "  WARNING: Key does not start with a recognized SSH key type. Proceeding anyway."
+    fi
+    break
+  done
+  echo ""
 elif [[ -n "${USER_FILE}" ]]; then
   # File mode, no key supplied — auto-generate with passphrase
   PRIV_KEY_PATH="/tmp/${NEW_USERNAME}-fre-claude"
@@ -249,7 +264,10 @@ fi
 
 # ---------------------------------------------------------------------------
 # IAM Identity Center: create user and account assignment
+# (skipped in external identity mode)
 # ---------------------------------------------------------------------------
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+
 echo ""
 echo "Creating IAM Identity Center user..."
 
@@ -525,6 +543,8 @@ echo "Uploading onboarding files to S3..."
 _upload_onboarding_files "${NEW_USERNAME}" "${BUNDLE_DIR}"
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${NEW_USERNAME}/"
 
+fi  # end managed-only block (IC + config + bundle)
+
 # ---------------------------------------------------------------------------
 # Update S3 registry
 # ---------------------------------------------------------------------------
@@ -548,6 +568,7 @@ mv "${USERS_JSON}.tmp" "${USERS_JSON}"
 users_s3_upload "${USERS_JSON}"
 echo "User '${NEW_USERNAME}' added to S3 registry."
 
+if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
 # ---------------------------------------------------------------------------
 # Generate installer bundle and upload to S3
 # ---------------------------------------------------------------------------
@@ -661,20 +682,26 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   fi
 fi
 
+fi  # end managed-only block (installer + email)
+
 echo ""
 echo "=== Done ==="
 echo ""
-echo "  IAM Identity Center user: ${NEW_USERNAME}"
-if [[ "${ROLE}" == "admin" ]]; then
-  echo "  Permission sets:          ProjectAdminAccess + DeveloperAccess"
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "  User '${NEW_USERNAME}' added to S3 registry."
 else
-  echo "  Permission set:           ${PS_NAME}"
-fi
-echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
-if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
-  echo "  Email:                    skipped (--no-email)"
-else
-  echo "  Email sent to:            ${USER_EMAIL}"
+  echo "  IAM Identity Center user: ${NEW_USERNAME}"
+  if [[ "${ROLE}" == "admin" ]]; then
+    echo "  Permission sets:          ProjectAdminAccess + DeveloperAccess"
+  else
+    echo "  Permission set:           ${PS_NAME}"
+  fi
+  echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
+  if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+    echo "  Email:                    skipped (--no-email)"
+  else
+    echo "  Email sent to:            ${USER_EMAIL}"
+  fi
 fi
 echo ""
-echo "Next: run './admin.sh up' to provision their EC2 instance."
+echo "Next: run './admin.sh up ${NEW_USERNAME}' to provision their EC2 instance."
