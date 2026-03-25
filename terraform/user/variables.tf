@@ -92,3 +92,15 @@ variable "admin_ssh_keys" {
   type        = list(string)
   default     = []
 }
+
+variable "ami_id" {
+  description = <<-EOT
+    AMI ID to use for the EC2 instance. When set, Terraform uses this exact AMI
+    instead of fetching the latest AL2023 AMI — preventing unintended instance
+    replacement when Amazon publishes a new AMI. up.sh populates this from the
+    running instance's current AMI. Leave empty ("") to use the latest AMI
+    (correct for new instances that have never been provisioned).
+  EOT
+  type        = string
+  default     = ""
+}

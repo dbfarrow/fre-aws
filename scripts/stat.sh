@@ -113,7 +113,7 @@ fi
 # VPC / infrastructure status
 # ---------------------------------------------------------------------------
 VPC_ID=$(aws ec2 describe-vpcs \
-  --filters "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+  --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
   --query 'Vpcs[0].VpcId' \
   --region "${AWS_REGION}" \
   --output text 2>/dev/null || echo "")
@@ -122,6 +122,42 @@ if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
   INFRA_STATUS="not deployed  (run './admin.sh up')"
 else
   INFRA_STATUS="${VPC_ID}"
+fi
+
+# ---------------------------------------------------------------------------
+# Web app URL — query CloudFront via Resource Groups Tagging API (us-east-1).
+# Compare against WEB_APP_URL in admin.env and flag mismatches.
+# ---------------------------------------------------------------------------
+DEPLOYED_APP_URL=""
+APP_URL_STATUS=""
+if [[ "${ENABLE_WEB_APP:-false}" == "true" ]]; then
+  CF_ARN=$(aws resourcegroupstaggingapi get-resources \
+    --tag-filters "Key=ProjectName,Values=${PROJECT_NAME}" \
+    --resource-type-filters "cloudfront:distribution" \
+    --query 'ResourceTagMappingList[0].ResourceARN' \
+    --region us-east-1 \
+    --output text 2>/dev/null || echo "")
+
+  if [[ -n "${CF_ARN}" && "${CF_ARN}" != "None" ]]; then
+    CF_ID="${CF_ARN##*/}"
+    CF_DOMAIN=$(aws cloudfront get-distribution \
+      --id "${CF_ID}" \
+      --query 'Distribution.DomainName' \
+      --output text 2>/dev/null || echo "")
+    [[ -n "${CF_DOMAIN}" && "${CF_DOMAIN}" != "None" ]] && DEPLOYED_APP_URL="https://${CF_DOMAIN}"
+  fi
+
+  if [[ -n "${DEPLOYED_APP_URL}" ]]; then
+    CONFIGURED_URL="${WEB_APP_URL:-}"
+    # Normalise trailing slash for comparison
+    DEPLOYED_NORM="${DEPLOYED_APP_URL%/}"
+    CONFIGURED_NORM="${CONFIGURED_URL%/}"
+    if [[ -z "${CONFIGURED_URL}" ]]; then
+      APP_URL_STATUS="  ⚠  WEB_APP_URL not set in admin.env — update it to: ${DEPLOYED_APP_URL}"
+    elif [[ "${DEPLOYED_NORM}" != "${CONFIGURED_NORM}" ]]; then
+      APP_URL_STATUS="  ⚠  mismatch: admin.env has ${CONFIGURED_URL}"
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -255,7 +291,15 @@ echo ""
 echo "--- Infrastructure ---"
 echo ""
 printf "  %-12s %s\n" "VPC:"   "${INFRA_STATUS}"
-printf "  %-12s s3://%s/%s\n" "State:" "${TF_BACKEND_BUCKET}" "${TF_BACKEND_KEY}"
+printf "  %-12s s3://%s/%s/\n" "State:" "${TF_BACKEND_BUCKET}" "${PROJECT_NAME}"
+if [[ "${ENABLE_WEB_APP:-false}" == "true" ]]; then
+  if [[ -n "${DEPLOYED_APP_URL}" ]]; then
+    printf "  %-12s %s\n" "Web app:" "${DEPLOYED_APP_URL}"
+    [[ -n "${APP_URL_STATUS}" ]] && printf "  %-12s %s\n" "" "${APP_URL_STATUS}"
+  else
+    printf "  %-12s %s\n" "Web app:" "not deployed  (run './admin.sh up')"
+  fi
+fi
 echo ""
 
 echo "--- Billing ---"
@@ -341,6 +385,15 @@ else
         state_col="${state}  $(format_reason "${reason}")"
       else
         state_col="${state}"
+      fi
+      last_seen_raw=$(aws ssm describe-sessions \
+        --state History \
+        --filters "key=Target,value=${instance_id}" \
+        --query 'max_by(Sessions, &StartDate).StartDate' \
+        --region "${AWS_REGION}" \
+        --output text 2>/dev/null || echo "")
+      if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
+        state_col="${state_col}  •  last seen $(format_time "${last_seen_raw}")"
       fi
       printf "  %-20s %-22s %-12s %-10s %s\n" \
         "${username}" "${instance_id}" "${type}" "${role}" "${state_col}"

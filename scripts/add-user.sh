@@ -26,6 +26,8 @@ source "${SCRIPT_DIR}/../config/backend.env"
 source "${SCRIPT_DIR}/users-s3.sh"
 # shellcheck source=scripts/installer-bundle.sh
 source "${SCRIPT_DIR}/installer-bundle.sh"
+# shellcheck source=scripts/app-link.sh
+source "${SCRIPT_DIR}/app-link.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
@@ -35,7 +37,18 @@ source "${SCRIPT_DIR}/installer-bundle.sh"
 # ---------------------------------------------------------------------------
 : "${SSO_REGION:?SSO_REGION must be set in config/admin.env (IAM Identity Center region)}"
 : "${SSO_START_URL:?SSO_START_URL must be set in config/admin.env (IAM Identity Center portal URL)}"
-: "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+if [[ "${NO_EMAIL_SEND:-}" != "true" ]]; then
+  : "${SENDER_EMAIL:?SENDER_EMAIL must be set in config/admin.env (verified SES sender address)}"
+fi
+
+# ---------------------------------------------------------------------------
+# Verify AWS credentials before doing anything
+# ---------------------------------------------------------------------------
+aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+  exit 1
+}
 
 echo "=== Add User ==="
 echo ""
@@ -543,6 +556,14 @@ echo "Building installer bundle..."
 INSTALLER_URL=$(_create_installer_bundle "${NEW_USERNAME}" "${BUNDLE_DIR}")
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${NEW_USERNAME}/latest.zip"
 
+# Generate app link if WEB_APP_URL is configured
+APP_LINK_URL=""
+if [[ -n "${WEB_APP_URL:-}" ]]; then
+  echo ""
+  echo "Generating app link..."
+  APP_LINK_URL=$(_generate_app_link_url "${NEW_USERNAME}")
+fi
+
 # ---------------------------------------------------------------------------
 # Store SSH key passphrase in Secrets Manager (if a key was auto-generated)
 # ---------------------------------------------------------------------------
@@ -569,14 +590,18 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" && -n "${SSH_KEY_PASSPHRASE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Send onboarding email via SES
+# Send onboarding email via SES (or skip with --no-email)
 # ---------------------------------------------------------------------------
-
-# In SES sandbox mode, the recipient address must be verified before we can
-# send. Check verification status; if unverified, trigger the verification
-# email and exit cleanly — the admin can re-send the onboarding email later
-# with: ./admin.sh publish-installer <username>
-if [[ -n "${SENDER_EMAIL:-}" ]]; then
+if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+  echo ""
+  echo "  --no-email: skipping email. Send URLs manually:"
+  echo "    ${INSTALLER_URL}"
+  [[ -n "${APP_LINK_URL}" ]] && echo "    ${APP_LINK_URL}"
+elif [[ -n "${SENDER_EMAIL:-}" ]]; then
+  # In SES sandbox mode, the recipient address must be verified before we can
+  # send. Check verification status; if unverified, trigger the verification
+  # email and exit cleanly — the admin can re-send the onboarding email later
+  # with: ./admin.sh publish-installer <username>
   SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
     --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
     --query 'VerificationStatus' --output text 2>/dev/null || echo "NOT_FOUND")
@@ -596,24 +621,45 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
     echo ""
     exit 0
   fi
+
+  echo ""
+  echo "Sending onboarding email to ${USER_EMAIL}..."
+  if [[ "${ROLE}" == "admin" ]]; then
+    # Admin email: config values + repo pointer, no installer bundle
+    python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
+      --to "${USER_EMAIL}" \
+      --from "${SENDER_EMAIL}" \
+      --username "${NEW_USERNAME}" \
+      --project "${PROJECT_NAME}" \
+      --role "${ROLE}" \
+      --aws-profile "${AWS_PROFILE_FOR_DEV}" \
+      --aws-region "${AWS_REGION}" \
+      --aws-cli-profile "${AWS_PROFILE}" \
+      --ses-region "${AWS_REGION}" \
+      --sso-start-url "${SSO_START_URL}" \
+      --sso-region "${SSO_REGION}" \
+      --account-id "${TF_BACKEND_ACCOUNT_ID}" \
+      ${REPO_URL:+--repo-url "${REPO_URL}"} \
+      ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
+      ${LOGO_URL:+--logo-url "${LOGO_URL}"}
+  else
+    # User email: installer bundle (+ optional app link)
+    python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
+      --to "${USER_EMAIL}" \
+      --from "${SENDER_EMAIL}" \
+      --username "${NEW_USERNAME}" \
+      --project "${PROJECT_NAME}" \
+      --role "${ROLE}" \
+      --aws-profile "${AWS_PROFILE_FOR_DEV}" \
+      --aws-region "${AWS_REGION}" \
+      --aws-cli-profile "${AWS_PROFILE}" \
+      --ses-region "${AWS_REGION}" \
+      --sso-start-url "${SSO_START_URL}" \
+      --installer-url "${INSTALLER_URL}" \
+      ${APP_LINK_URL:+--app-url "${APP_LINK_URL}"} \
+      ${LOGO_URL:+--logo-url "${LOGO_URL}"}
+  fi
 fi
-
-echo ""
-echo "Sending onboarding email to ${USER_EMAIL}..."
-
-python3 "${SCRIPT_DIR}/send-onboarding-email.py" \
-  --to "${USER_EMAIL}" \
-  --from "${SENDER_EMAIL}" \
-  --username "${NEW_USERNAME}" \
-  --project "${PROJECT_NAME}" \
-  --role "${ROLE}" \
-  --aws-profile "${AWS_PROFILE_FOR_DEV}" \
-  --aws-region "${AWS_REGION}" \
-  --aws-cli-profile "${AWS_PROFILE}" \
-  --ses-region "${AWS_REGION}" \
-  --sso-start-url "${SSO_START_URL}" \
-  --user-email "${USER_EMAIL}" \
-  --installer-url "${INSTALLER_URL}"
 
 echo ""
 echo "=== Done ==="
@@ -625,6 +671,10 @@ else
   echo "  Permission set:           ${PS_NAME}"
 fi
 echo "  Bundle:                   config/onboarding/${NEW_USERNAME}/"
-echo "  Email sent to:            ${USER_EMAIL}"
+if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+  echo "  Email:                    skipped (--no-email)"
+else
+  echo "  Email sent to:            ${USER_EMAIL}"
+fi
 echo ""
 echo "Next: run './admin.sh up' to provision their EC2 instance."

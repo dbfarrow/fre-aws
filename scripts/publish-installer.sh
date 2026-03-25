@@ -34,6 +34,15 @@ source "${SCRIPT_DIR}/users-s3.sh"
 : "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
+# Verify AWS credentials before doing anything
+# ---------------------------------------------------------------------------
+aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+  exit 1
+}
+
+# ---------------------------------------------------------------------------
 # Validate username
 # ---------------------------------------------------------------------------
 : "${DEV_USERNAME:?DEV_USERNAME must be set (use: ./admin.sh publish-installer <username>)}"
@@ -86,10 +95,12 @@ INSTALLER_URL=$(_create_installer_bundle "${USERNAME}" "${LOCAL_BUNDLE_DIR}")
 echo "  Uploaded to s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/installers/${USERNAME}/latest.zip"
 
 # ---------------------------------------------------------------------------
-# Send onboarding email (if SENDER_EMAIL is configured)
+# Send onboarding email (or skip with --no-email / missing SENDER_EMAIL)
 # ---------------------------------------------------------------------------
 echo ""
-if [[ -n "${SENDER_EMAIL:-}" ]]; then
+if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
+  echo "  --no-email: skipping email."
+elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   # In SES sandbox mode, the recipient must be verified before we can send.
   SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
     --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
@@ -122,8 +133,11 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
     --aws-cli-profile "${AWS_PROFILE}" \
     --ses-region "${AWS_REGION}" \
     --sso-start-url "${SSO_START_URL:-}" \
-    --user-email "${USER_EMAIL}" \
-    --installer-url "${INSTALLER_URL}"
+    --sso-region "${SSO_REGION:-}" \
+    --account-id "${TF_BACKEND_ACCOUNT_ID:-}" \
+    --installer-url "${INSTALLER_URL}" \
+    ${REPO_URL:+--repo-url "${REPO_URL}"} \
+    ${LOGO_URL:+--logo-url "${LOGO_URL}"}
 else
   echo "  SENDER_EMAIL not set — skipping email. Send the URL below manually."
 fi

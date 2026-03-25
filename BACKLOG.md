@@ -12,32 +12,13 @@ Local `config/onboarding/<username>/` is still written during `add-user` as a co
 
 Migration path for existing users: auto-migrate. When `_create_installer_bundle` is called with a local bundle dir and S3 files are absent, it copies local → S3 transparently (one-time, no manual step).
 
-### Issue 2: Consolidate CLI and web onboarding into a single email
+### ~~Issue 2: Consolidate CLI and web onboarding into a single email~~ ✅ Resolved (PR #6)
 
-When `ENABLE_WEB_APP=true`, the admin currently runs two separate commands for a new user: `add-user` (sends CLI installer email) and `publish-app-link` (sends browser link email). The user receives two uncoordinated emails.
+`add-user` now generates a browser app link when `WEB_APP_URL` is set and sends a single unified email: browser link section at the top (large button, no-install path), CLI installer steps below. The app link token generation is shared via `scripts/app-link.sh` (`_generate_app_link_url()`), which both `add-user` and `publish-app-link` source. `publish-app-link` remains available for re-sending the magic link to existing users.
 
-**Fix:** `add-user` should send a single email that covers the appropriate path(s) based on config:
-- `ENABLE_WEB_APP=false` — CLI installer only (current behavior, unchanged)
-- `ENABLE_WEB_APP=true` — one email presenting both paths: browser link at the top (zero-install, start here), CLI installer below (for users who prefer the native experience)
+### ~~Issue 3: HTML email with plain-text fallback~~ ✅ Resolved (PR #6)
 
-`publish-app-link` can remain as a standalone command for re-sending the magic link to an existing user, but it should no longer be part of the initial onboarding flow when web app is enabled.
-
-**Open questions before implementing:**
-- When web app is enabled, does `add-user` need to generate the signed magic link token inline, or can it delegate to the same logic used by `publish-app-link`? (Read both scripts before deciding.)
-- Should the unified email always include both paths, or only the web link when web app is enabled (omitting CLI as a secondary option)?
-
-### Issue 3: HTML email with plain-text fallback
-
-Commands like the `curl`/`unzip`/`bash` block are hard to read and error-prone to copy-paste in plain text. The factually incorrect AWS login instruction is also harder to fix cleanly in plain text.
-
-**Fix:**
-- Emails should be HTML with a plain-text fallback (standard MIME multipart)
-- Commands should be in styled `<pre>`/`<code>` blocks that are clearly copy-pasteable
-- Fix the factually incorrect AWS login instruction: the login name in IAM Identity Center is the `username` field (e.g. `alice`), not the email address. The activation step (password reset flow, uses email address) and the login step need to be clearly separated and correctly described.
-
-**Open questions before implementing:**
-- What's the minimum viable HTML treatment — full branded template, or just semantic structure with a monospace code block for commands?
-- Does `publish-installer` also need the HTML treatment, or just `add-user`?
+All onboarding emails now send `multipart/alternative` (plain text + HTML). Styled card layout with inline CSS (Gmail-safe): white card on grey background, monospace `<pre>` command blocks, optional HTTPS banner image via `LOGO_URL` in `admin.env`. The AWS activation instructions were also corrected: username entry comes first on the SSO portal login page (before "Forgot password"), and the password reset is sent automatically — the user never types their email address.
 
 ### ~~Issue 4: `add-user` should auto-verify recipient email in SES sandbox~~ ✅ Resolved (PR #5)
 
@@ -47,19 +28,11 @@ Note: the re-entry point is `publish-installer`, not `add-user` re-run (the regi
 
 ---
 
-### Issue 5: Email sending should be suppressible
+### ~~Issue 5: Email sending should be suppressible~~ ✅ Resolved (PR #6)
 
-Several commands send emails to end users as a side effect: `add-user`, `publish-installer`, `publish-app-link`, and possibly `update-user-key`. During development, testing, or re-publishing without re-onboarding, sending the email is disruptive and confusing.
+`--no-email` flag added to `add-user`, `publish-installer`, and `publish-app-link`. Skips SES send and prints the URL(s) to the console instead. `SENDER_EMAIL` is not required when `--no-email` is passed to `add-user`. Passed into containers via `NO_EMAIL_SEND` env var, consistent with the `--keep-sso` / `KEEP_SSO_USER` pattern.
 
-**Recommendation: `--no-email` flag on all email-sending commands.** Default behavior (sends email) is preserved for the normal onboarding workflow. The flag suppresses sending when you just want to regenerate credentials or test the flow. The pre-signed URL / magic link is always printed to stdout regardless, so the admin can share it manually if needed.
-
-Affects:
-- `./admin.sh add-user` — `--no-email` to provision without sending
-- `./admin.sh publish-installer <user>` — `--no-email` to refresh the S3 bundle and get the URL without re-emailing the user
-- `./admin.sh publish-app-link <user>` — `--no-email` to get the magic link URL without emailing
-- `./admin.sh update-user-key <user>` — verify whether this also sends email; apply same flag if so
-
-The flag should be passed through from `run.sh` dispatch into each script via an env var (consistent with how `--keep-sso` is handled for `remove-user`).
+`update-user-key` does not send email (verified: it only uploads key files to S3 and updates the registry), so no flag needed there.
 
 ---
 
@@ -89,6 +62,26 @@ Split the monolithic Terraform state into separate state files per user, plus a 
 - How does `up.sh` orchestrate base + N users? Sequential loop, or parallel?
 - Does `down` without a username require explicit confirmation per-user or one top-level confirmation?
 - How are base outputs (VPC ID, subnet IDs, security group IDs) passed into the user module — remote state data source or output variables written to S3?
+
+---
+
+## Merge `list` and `stat` commands
+
+`list` and `stat` serve overlapping purposes and share duplicated code: identical `format_time()` / `format_reason()` helpers, the same EC2 `describe-instances` query, and the same SSO orphan detection block. The user table in `stat` is essentially a superset of `list`.
+
+**Proposal:** Make `stat` the single command (it already includes everything `list` shows, plus identity, config, billing, and infrastructure status). Keep `list` as an alias or a thin wrapper that calls `stat --users-only` to preserve the fast daily-use case without the billing API calls.
+
+**Options:**
+- `stat` — full output (current behavior)
+- `stat --users` or `list` — users table only, skip billing/infra sections (fast path, no Cost Explorer call)
+- `list -v` verbose mode → `stat --users --verbose` or just fold into `stat --verbose`
+
+**What to deduplicate:**
+- `format_time()` and `format_reason()` — extract to a shared lib (e.g. `scripts/lib.sh`) sourced by both
+- EC2 `describe-instances` call — already identical in both files
+- SSO orphan detection block — ~20 lines, identical in both files
+
+**Migration:** `list` command in `run.sh` can remain as an alias to `stat --users` so existing muscle memory works.
 
 ---
 

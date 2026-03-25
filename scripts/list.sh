@@ -179,6 +179,15 @@ elif [[ "${VERBOSE}" == true ]]; then
         app_link=$(_make_app_link "${username}")
         [[ -n "${app_link}" ]] && printf "    %-16s %s\n" "login url:" "${app_link}"
       fi
+      last_seen_raw=$(aws ssm describe-sessions \
+        --state History \
+        --filters "key=Target,value=${instance_id}" \
+        --query 'max_by(Sessions, &StartDate).StartDate' \
+        --region "${AWS_REGION}" \
+        --output text 2>/dev/null || echo "")
+      if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
+        printf "    %-16s %s\n" "last seen:" "$(format_time "${last_seen_raw}")"
+      fi
     else
       printf "    %-16s %s\n" "instance:" "(not provisioned — run ./admin.sh up)"
     fi
@@ -220,6 +229,15 @@ else
       if [[ "${state}" == "running" ]]; then
         app_link=$(_make_app_link "${username}")
         [[ -n "${app_link}" ]] && state_col="${state_col}  ${app_link:0:50}…"
+      fi
+      last_seen_raw=$(aws ssm describe-sessions \
+        --state History \
+        --filters "key=Target,value=${instance_id}" \
+        --query 'max_by(Sessions, &StartDate).StartDate' \
+        --region "${AWS_REGION}" \
+        --output text 2>/dev/null || echo "")
+      if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
+        state_col="${state_col}  •  last seen $(format_time "${last_seen_raw}")"
       fi
       printf "  %-20s %-22s %-12s %s\n" "${username}" "${instance_id}" "${type}" "${state_col}"
     else
