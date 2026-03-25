@@ -391,7 +391,7 @@ else
         --filters "key=Target,value=${instance_id}" \
         --query 'max_by(Sessions, &StartDate).StartDate' \
         --region "${AWS_REGION}" \
-        --output text 2>/dev/null || echo "")
+        --output text 2>/dev/null | head -1 || echo "")
       if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
         state_col="${state_col}  •  last seen $(format_time "${last_seen_raw}")"
       fi

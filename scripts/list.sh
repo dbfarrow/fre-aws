@@ -184,7 +184,7 @@ elif [[ "${VERBOSE}" == true ]]; then
         --filters "key=Target,value=${instance_id}" \
         --query 'max_by(Sessions, &StartDate).StartDate' \
         --region "${AWS_REGION}" \
-        --output text 2>/dev/null || echo "")
+        --output text 2>/dev/null | head -1 || echo "")
       if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
         printf "    %-16s %s\n" "last seen:" "$(format_time "${last_seen_raw}")"
       fi
@@ -203,7 +203,7 @@ elif [[ "${VERBOSE}" == true ]]; then
     printf "    %-16s %s\n" "email:"    "${user_email}"
     printf "    %-16s %s\n" "role:"     "${role}"
     printf "    %-16s %s\n" "git name:" "${git_name}"
-    printf "    %-16s %s\n" "git email:""${git_email}"
+    printf "    %-16s %s\n" "git email:" "${git_email}"
     printf "    %-16s %s\n" "ssh key:"  "${ssh_key_short}"
     echo ""
   done <<< "${CONFIGURED_USERS}"
@@ -235,7 +235,7 @@ else
         --filters "key=Target,value=${instance_id}" \
         --query 'max_by(Sessions, &StartDate).StartDate' \
         --region "${AWS_REGION}" \
-        --output text 2>/dev/null || echo "")
+        --output text 2>/dev/null | head -1 || echo "")
       if [[ -n "${last_seen_raw}" && "${last_seen_raw}" != "None" ]]; then
         state_col="${state_col}  •  last seen $(format_time "${last_seen_raw}")"
       fi
