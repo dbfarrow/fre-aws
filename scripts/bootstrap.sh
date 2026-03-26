@@ -350,11 +350,13 @@ else
   echo "             GetRolePolicy, PutRolePolicy, DeleteRolePolicy  → *"
   echo "        iam: GetSAMLProvider, ListSAMLProviders  → *"
   if [[ -n "${SSO_REGION:-}" ]]; then
-    echo "    • Provision both permission sets to account ${ACCOUNT_ID}"
+    echo ""
+    echo "  Both permission sets:"
+    echo "  • Provisioned to account ${ACCOUNT_ID}"
     if [[ -n "${OWNER_EMAIL:-}" ]]; then
-      echo "    • Assign both permission sets to: ${OWNER_EMAIL}"
+      echo "  • Assigned to: ${OWNER_EMAIL}"
     else
-      echo "    • (OWNER_EMAIL not set — assign permission sets manually after bootstrap)"
+      echo "  • (OWNER_EMAIL not set — assign to yourself manually in IAM Identity Center after bootstrap)"
     fi
   fi
 fi
