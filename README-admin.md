@@ -241,7 +241,9 @@ What users are expected to bring:
 
 `remove-user` in external mode destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact (the IdP owns it).
 
-To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required (though `SSO_REGION` can remain set — `list` uses it to show any IC users not in the fre-aws registry).
+To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_START_URL` and `SENDER_EMAIL` are not required.
+
+> **`SSO_REGION` is still required.** Bootstrap creates the `{project}-developer-access` and `{project}-admin-access` permission sets in Identity Center regardless of identity mode — users still need them to reach their EC2 instances via SSM. Set `SSO_REGION` to the region where your Identity Center instance lives.
 
 ---
 
