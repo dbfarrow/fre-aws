@@ -573,7 +573,9 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Infrastructure
 ```bash
-./admin.sh bootstrap                    # one-time: create S3, DynamoDB, KMS, permission sets
+./admin.sh bootstrap                    # one-time: create S3, DynamoDB, KMS, permission sets (prompts before applying)
+./admin.sh bootstrap --plan             # show what bootstrap will create without making any changes
+./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
 ./admin.sh down --all                   # destroy all user instances, then base (full teardown)
