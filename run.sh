@@ -8,8 +8,8 @@
 # Both symlinks point here; mode is detected via basename.
 set -euo pipefail
 
-# Derive image name from PROJECT_NAME in admin.env when available.
-# Falls back to "fre-aws" for first-run before config exists.
+# Derive image name from PROJECT_NAME in admin.env.
+# Falls back to "fre-aws" only if admin.env doesn't exist yet (repo cloned but not configured).
 IMAGE_NAME="fre-aws"
 _REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ -f "${_REPO_DIR}/config/admin.env" ]]; then
