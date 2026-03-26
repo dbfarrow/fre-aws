@@ -49,7 +49,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, KMS key, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`).
+> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`).
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -348,8 +348,9 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
                                                                SENDER_EMAIL, etc.
 8.  ./admin.sh sso-login                                    ← authenticate (Option A only)
 9.  ./admin.sh verify                                       ← confirm credentials work
-10. ./admin.sh bootstrap                                    ← creates S3, DynamoDB, KMS,
-                                                               permission sets, SES verification
+10. ./admin.sh bootstrap --plan                             ← preview exactly what will be created
+    ./admin.sh bootstrap                                    ← creates S3, DynamoDB, permission sets,
+                                                               SES verification; prompts before applying
                                                                (runs as AdministratorAccess)
 11. Switch to {project}-admin-access                        ← bootstrap just created this set;
     (Option A) IAM Identity Center → AWS accounts              assign yourself to it, update
@@ -573,7 +574,9 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Infrastructure
 ```bash
-./admin.sh bootstrap                    # one-time: create S3, DynamoDB, KMS, permission sets
+./admin.sh bootstrap                    # one-time: create S3, DynamoDB, permission sets, SES verification (prompts before applying)
+./admin.sh bootstrap --plan             # show what bootstrap will create without making any changes
+./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
 ./admin.sh down --all                   # destroy all user instances, then base (full teardown)

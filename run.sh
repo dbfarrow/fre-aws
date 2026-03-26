@@ -52,10 +52,12 @@ user management:
                         -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
-  bootstrap [--profile <name>]
-                        One-time setup (S3, DynamoDB, KMS, SES verification)
-                        Use --profile to specify a named AWS profile; omit to
-                        use AWS_PROFILE from admin.env or the default profile
+  bootstrap [--plan] [--yes] [--profile <name>]
+                        One-time setup (S3, DynamoDB, SES verification,
+                        IAM Identity Center permission sets).
+                        --plan   Show what will be created without making changes.
+                        --yes    Skip the confirmation prompt.
+                        --profile Use a named AWS profile instead of admin.env.
   up [user]             Create / update base infrastructure + all users (or just one user)
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
@@ -372,14 +374,23 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     bootstrap)
       BOOTSTRAP_PROFILE=""
-      if [[ "${USERNAME:-}" == "--profile" && -n "${3:-}" ]]; then
-        BOOTSTRAP_PROFILE="${3}"
-      elif [[ "${USERNAME:-}" == --profile=* ]]; then
-        BOOTSTRAP_PROFILE="${USERNAME#--profile=}"
-      fi
+      BOOTSTRAP_ARGS=()
+      _skip_next=false
+      for _arg in "${@:2}"; do
+        if [[ "${_skip_next}" == true ]]; then
+          BOOTSTRAP_PROFILE="${_arg}"
+          _skip_next=false
+          continue
+        fi
+        case "${_arg}" in
+          --profile)    _skip_next=true ;;
+          --profile=*)  BOOTSTRAP_PROFILE="${_arg#--profile=}" ;;
+          --plan|--dry-run|--yes|-y) BOOTSTRAP_ARGS+=("${_arg}") ;;
+        esac
+      done
       docker run "${DOCKER_ARGS[@]}" \
         --env "BOOTSTRAP_PROFILE_OVERRIDE=${BOOTSTRAP_PROFILE}" \
-        "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh
+        "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
       ;;
     up)
       ADMIN_SSH_PUB_KEY=""
