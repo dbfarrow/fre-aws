@@ -304,45 +304,52 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
   else
     printf "  %-24s %-36s %s\n" "SES sender"        "${SENDER_EMAIL}"               "VERIFY  (verification email will be sent)"
   fi
+else
+  printf "  %-24s %-36s %s\n" "SES sender"          "(not configured)"              "SKIP"
+  echo "    (set SENDER_EMAIL in admin.env to enable automated onboarding emails)"
 fi
 
+echo ""
 if [[ -n "${SSO_REGION:-}" ]]; then
-  echo ""
   echo "  IAM Identity Center  (region: ${SSO_REGION})"
-  echo "  ──────────────────────────────────────────────────────────────────"
+else
+  echo "  IAM Identity Center  (SSO_REGION not set in admin.env — permission sets will be skipped)"
+fi
+echo "  ──────────────────────────────────────────────────────────────────"
 
-  if [[ -z "${SSO_INSTANCE_ARN}" ]]; then
-    echo "  WARNING: No Identity Center instance found — permission sets will be skipped."
+if [[ -n "${SSO_REGION:-}" && -z "${SSO_INSTANCE_ARN}" ]]; then
+  echo "  WARNING: No Identity Center instance found in region ${SSO_REGION} — permission sets will be skipped."
+else
+  if [[ -z "${SSO_REGION:-}" ]]; then
+    _dev_ps_status="SKIP    (set SSO_REGION in admin.env to enable)"
+    _admin_ps_status="SKIP    (set SSO_REGION in admin.env to enable)"
   else
-    if [[ -z "${DEV_PS_ARN}" ]]; then
-      printf "  %-55s %s\n" "${PROJECT_NAME}-developer-access" "CREATE"
-    else
-      printf "  %-55s %s\n" "${PROJECT_NAME}-developer-access" "exists  (inline policy will be updated)"
-    fi
-    echo "    Grants users access to connect to their own EC2 instance:"
-    echo "    • ec2: StartInstances, StopInstances, DescribeInstances, DescribeInstanceStatus  → *"
-    echo "    • ssm: StartSession  → EC2 instances + AWS-StartSSHSession document"
-    echo "    • ssm: TerminateSession, ResumeSession  → own sessions only"
-    echo "    • s3: GetObject  → s3://${BUCKET_NAME}/${PROJECT_NAME}/installers/*"
-    echo "    • secretsmanager: GetSecretValue  → ${PROJECT_NAME}/*/ssh-key-passphrase-*"
-    echo ""
-    if [[ -z "${ADMIN_PS_ARN}" ]]; then
-      printf "  %-55s %s\n" "${PROJECT_NAME}-admin-access" "CREATE"
-    else
-      printf "  %-55s %s\n" "${PROJECT_NAME}-admin-access" "exists  (inline policy will be updated)"
-    fi
-    echo "    Grants admins access to manage the full environment:"
-    echo "    • PowerUserAccess (AWS managed — all services except IAM)"
-    echo "    • TerraformIAM (inline — specific IAM actions Terraform needs to manage EC2 roles):"
-    echo "        iam: CreateRole, DeleteRole, GetRole, TagRole, UntagRole,"
-    echo "             UpdateAssumeRolePolicy, AttachRolePolicy, DetachRolePolicy,"
-    echo "             ListRolePolicies, ListAttachedRolePolicies, ListInstanceProfilesForRole,"
-    echo "             CreateInstanceProfile, DeleteInstanceProfile, GetInstanceProfile,"
-    echo "             TagInstanceProfile, AddRoleToInstanceProfile, RemoveRoleFromInstanceProfile,"
-    echo "             PassRole, CreatePolicy, CreatePolicyVersion, DeletePolicy, DeletePolicyVersion,"
-    echo "             GetPolicy, GetPolicyVersion, ListPolicyVersions, TagPolicy,"
-    echo "             GetRolePolicy, PutRolePolicy, DeleteRolePolicy  → *"
-    echo "        iam: GetSAMLProvider, ListSAMLProviders  → *"
+    [[ -z "${DEV_PS_ARN}" ]]   && _dev_ps_status="CREATE"   || _dev_ps_status="exists  (inline policy will be updated)"
+    [[ -z "${ADMIN_PS_ARN}" ]] && _admin_ps_status="CREATE" || _admin_ps_status="exists  (inline policy will be updated)"
+  fi
+
+  printf "  %-55s %s\n" "${PROJECT_NAME}-developer-access" "${_dev_ps_status}"
+  echo "    Grants users access to connect to their own EC2 instance:"
+  echo "    • ec2: StartInstances, StopInstances, DescribeInstances, DescribeInstanceStatus  → *"
+  echo "    • ssm: StartSession  → EC2 instances + AWS-StartSSHSession document"
+  echo "    • ssm: TerminateSession, ResumeSession  → own sessions only"
+  echo "    • s3: GetObject  → s3://${BUCKET_NAME}/${PROJECT_NAME}/installers/*"
+  echo "    • secretsmanager: GetSecretValue  → ${PROJECT_NAME}/*/ssh-key-passphrase-*"
+  echo ""
+  printf "  %-55s %s\n" "${PROJECT_NAME}-admin-access" "${_admin_ps_status}"
+  echo "    Grants admins access to manage the full environment:"
+  echo "    • PowerUserAccess (AWS managed — all services except IAM)"
+  echo "    • TerraformIAM (inline — specific IAM actions Terraform needs to manage EC2 roles):"
+  echo "        iam: CreateRole, DeleteRole, GetRole, TagRole, UntagRole,"
+  echo "             UpdateAssumeRolePolicy, AttachRolePolicy, DetachRolePolicy,"
+  echo "             ListRolePolicies, ListAttachedRolePolicies, ListInstanceProfilesForRole,"
+  echo "             CreateInstanceProfile, DeleteInstanceProfile, GetInstanceProfile,"
+  echo "             TagInstanceProfile, AddRoleToInstanceProfile, RemoveRoleFromInstanceProfile,"
+  echo "             PassRole, CreatePolicy, CreatePolicyVersion, DeletePolicy, DeletePolicyVersion,"
+  echo "             GetPolicy, GetPolicyVersion, ListPolicyVersions, TagPolicy,"
+  echo "             GetRolePolicy, PutRolePolicy, DeleteRolePolicy  → *"
+  echo "        iam: GetSAMLProvider, ListSAMLProviders  → *"
+  if [[ -n "${SSO_REGION:-}" ]]; then
     echo "    • Provision both permission sets to account ${ACCOUNT_ID}"
     if [[ -n "${OWNER_EMAIL:-}" ]]; then
       echo "    • Assign both permission sets to: ${OWNER_EMAIL}"
