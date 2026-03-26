@@ -156,6 +156,11 @@ fi
 # ---------------------------------------------------------------------------
 # Build image if missing (first-run convenience)
 # ---------------------------------------------------------------------------
+if ! docker info &>/dev/null; then
+  echo "ERROR: Docker daemon is not running or not responding." >&2
+  echo "       Start Docker Desktop (or OrbStack/Rancher Desktop) and try again." >&2
+  exit 1
+fi
 if ! docker image inspect "${IMAGE_NAME}" &>/dev/null; then
   echo "Docker image '${IMAGE_NAME}' not found. Building..."
   docker build -t "${IMAGE_NAME}" "$(dirname "$0")"
