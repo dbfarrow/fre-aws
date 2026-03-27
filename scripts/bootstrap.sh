@@ -74,8 +74,6 @@ if [[ -n "${AWS_PROFILE}" ]]; then
   fi
 fi
 
-BUCKET_NAME="${PROJECT_NAME}-tfstate"
-DYNAMODB_TABLE="${PROJECT_NAME}-tflock"
 USERS_KEY="${PROJECT_NAME}/users.json"
 
 PROFILE_ARGS=()
@@ -92,8 +90,6 @@ echo "=== fre-aws bootstrap ==="
 echo "  Project:  ${PROJECT_NAME}"
 echo "  Region:   ${AWS_REGION}"
 echo "  Profile:  ${AWS_PROFILE:-<default>}"
-echo "  Bucket:   ${BUCKET_NAME}"
-echo "  DynamoDB: ${DYNAMODB_TABLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -113,6 +109,12 @@ CALLER_IDENTITY=$($AWS sts get-caller-identity --output json 2>&1) || {
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
 echo "  Authenticated as: $(echo "$CALLER_IDENTITY" | jq -r '.Arn')"
 echo "  Account ID: ${ACCOUNT_ID}"
+echo ""
+
+BUCKET_NAME="${PROJECT_NAME}-${ACCOUNT_ID}-tfstate"
+DYNAMODB_TABLE="${PROJECT_NAME}-${ACCOUNT_ID}-tflock"
+echo "  Bucket:   ${BUCKET_NAME}"
+echo "  DynamoDB: ${DYNAMODB_TABLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
