@@ -61,12 +61,13 @@ user management:
                         -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
-  bootstrap [--plan] [--yes] [--profile <name>]
+  bootstrap [--plan] [--yes] [--profile <name>] [--region <region>]
                         One-time setup (S3, DynamoDB, SES verification,
                         IAM Identity Center permission sets).
-                        --plan   Show what will be created without making changes.
-                        --yes    Skip the confirmation prompt.
+                        --plan    Show what will be created without making changes.
+                        --yes     Skip the confirmation prompt.
                         --profile Use a named AWS profile instead of admin.env.
+                        --region  Override the deploy region from admin.env.
   up [user]             Create / update base infrastructure + all users (or just one user)
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
@@ -388,22 +389,29 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     bootstrap)
       BOOTSTRAP_PROFILE=""
+      BOOTSTRAP_REGION=""
       BOOTSTRAP_ARGS=()
-      _skip_next=false
+      _skip_next=""
       for _arg in "${@:2}"; do
-        if [[ "${_skip_next}" == true ]]; then
-          BOOTSTRAP_PROFILE="${_arg}"
-          _skip_next=false
+        if [[ -n "${_skip_next}" ]]; then
+          case "${_skip_next}" in
+            profile) BOOTSTRAP_PROFILE="${_arg}" ;;
+            region)  BOOTSTRAP_REGION="${_arg}" ;;
+          esac
+          _skip_next=""
           continue
         fi
         case "${_arg}" in
-          --profile)    _skip_next=true ;;
+          --profile)    _skip_next=profile ;;
           --profile=*)  BOOTSTRAP_PROFILE="${_arg#--profile=}" ;;
+          --region)     _skip_next=region ;;
+          --region=*)   BOOTSTRAP_REGION="${_arg#--region=}" ;;
           --plan|--dry-run|--yes|-y) BOOTSTRAP_ARGS+=("${_arg}") ;;
         esac
       done
       docker run "${DOCKER_ARGS[@]}" \
         --env "BOOTSTRAP_PROFILE_OVERRIDE=${BOOTSTRAP_PROFILE}" \
+        --env "BOOTSTRAP_REGION_OVERRIDE=${BOOTSTRAP_REGION}" \
         "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
       ;;
     up)

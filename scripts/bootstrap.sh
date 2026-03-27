@@ -20,9 +20,10 @@ PLAN_ONLY=false
 AUTO_APPROVE=false
 for arg in "$@"; do
   case "${arg}" in
-    --plan|--dry-run) PLAN_ONLY=true ;;
-    --yes|-y)         AUTO_APPROVE=true ;;
-    --profile|--profile=*) ;; # handled below via BOOTSTRAP_PROFILE_OVERRIDE
+    --plan|--dry-run)      PLAN_ONLY=true ;;
+    --yes|-y)              AUTO_APPROVE=true ;;
+    --profile|--profile=*) ;; # handled via BOOTSTRAP_PROFILE_OVERRIDE env var
+    --region|--region=*)   ;; # handled via BOOTSTRAP_REGION_OVERRIDE env var
     *) echo "ERROR: Unknown option: ${arg}" >&2; exit 1 ;;
   esac
 done
@@ -39,11 +40,38 @@ source "$CONFIG_FILE"
 
 : "${PROJECT_NAME:?PROJECT_NAME must be set in config/admin.env}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
-# AWS_PROFILE is optional — falls back to the AWS CLI default profile when not set.
-# Override at runtime with: ./admin.sh bootstrap --profile <name>
+
+# Apply CLI overrides (set via env vars by run.sh)
 AWS_PROFILE="${AWS_PROFILE:-}"
-if [[ -n "${BOOTSTRAP_PROFILE_OVERRIDE:-}" ]]; then
-  AWS_PROFILE="${BOOTSTRAP_PROFILE_OVERRIDE}"
+[[ -n "${BOOTSTRAP_PROFILE_OVERRIDE:-}" ]] && AWS_PROFILE="${BOOTSTRAP_PROFILE_OVERRIDE}"
+[[ -n "${BOOTSTRAP_REGION_OVERRIDE:-}" ]]  && AWS_REGION="${BOOTSTRAP_REGION_OVERRIDE}"
+
+# ---------------------------------------------------------------------------
+# Profile existence check — if the configured profile doesn't exist yet (e.g.
+# before first bootstrap), fall back to default credentials and prompt the
+# admin to confirm the deploy region, since their default creds may target a
+# different region.
+# ---------------------------------------------------------------------------
+if [[ -n "${AWS_PROFILE}" ]]; then
+  if ! aws configure list-profiles 2>/dev/null | grep -qx "${AWS_PROFILE}"; then
+    echo "NOTE: Profile '${AWS_PROFILE}' not found in ~/.aws/config."
+    echo "      Falling back to default AWS credentials for bootstrap."
+    echo "      After bootstrap completes, append config/aws-config-admin.example"
+    echo "      to ~/.aws/config, then re-run './admin.sh sso-login'."
+    echo ""
+    AWS_PROFILE=""
+
+    # Prompt to confirm deploy region — default creds may target a different region
+    _default_region=$(aws configure get region 2>/dev/null || echo "")
+    if [[ "${_default_region}" != "${AWS_REGION}" ]]; then
+      echo "  Default credentials region : ${_default_region:-<not set>}"
+      echo "  admin.env deploy region    : ${AWS_REGION}"
+      echo ""
+      read -r -p "  Region to use for bootstrap [${AWS_REGION}]: " _region_input
+      [[ -n "${_region_input}" ]] && AWS_REGION="${_region_input}"
+      echo ""
+    fi
+  fi
 fi
 
 BUCKET_NAME="${PROJECT_NAME}-tfstate"
