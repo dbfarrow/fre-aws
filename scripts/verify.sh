@@ -41,6 +41,13 @@ check_profile() {
       echo ""
       return 2
     fi
+    if echo "${out}" | grep -qi "ForbiddenException\|No access\|not authorized"; then
+      echo "  ERROR: SSO session valid but role is not accessible." >&2
+      echo "         The permission set may not be assigned to your user in Identity Center." >&2
+      echo "         If you just tore down and are rebuilding: run './admin.sh bootstrap' first." >&2
+      echo ""
+      return 1
+    fi
     echo "  ERROR: credentials not valid or expired." >&2
     echo "         ${out}" >&2
     echo ""
