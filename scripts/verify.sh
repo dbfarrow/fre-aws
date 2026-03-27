@@ -78,7 +78,13 @@ check_profile() {
 # Admin context: check both admin and dev profiles
 # ---------------------------------------------------------------------------
 if [[ "${IS_ADMIN}" == true ]]; then
-  DEV_PROFILE="${AWS_PROFILE}-dev"
+  if [[ -n "${CONNECT_PROFILE:-}" ]]; then
+    DEV_PROFILE="${CONNECT_PROFILE}"
+  elif [[ -n "${AWS_PROFILE:-}" ]]; then
+    DEV_PROFILE="${AWS_PROFILE}-dev"
+  else
+    DEV_PROFILE=""
+  fi
   ADMIN_OK=true
   DEV_OK=true
 
@@ -86,9 +92,10 @@ if [[ "${IS_ADMIN}" == true ]]; then
     [[ $? -eq 1 ]] && ADMIN_OK=false
   }
 
-  # In managed mode, also verify the derived dev profile used by 'connect'.
+  # In managed mode, also verify the connect profile used by 'connect'.
   # In external mode, connect uses AWS_PROFILE directly — no fre-aws dev profile exists.
-  if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+  # Skip if no dev profile could be derived (AWS_PROFILE unset, no CONNECT_PROFILE).
+  if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${DEV_PROFILE}" ]]; then
     check_profile "${DEV_PROFILE}" "connect" || {
       [[ $? -eq 1 ]] && DEV_OK=false
     }
