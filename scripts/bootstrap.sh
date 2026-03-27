@@ -275,6 +275,14 @@ if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
     && REGISTRY_EXISTS=true || true
 fi
 
+# Canonical settings (always overwritten to pick up admin.env changes)
+SETTINGS_KEY="${PROJECT_NAME}/settings.json"
+SETTINGS_EXISTS=false
+if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
+  $AWS s3api head-object --bucket "${BUCKET_NAME}" --key "${SETTINGS_KEY}" &>/dev/null \
+    && SETTINGS_EXISTS=true || true
+fi
+
 # SES sender verification
 SES_VERIFIED=false
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
@@ -335,6 +343,11 @@ if [[ "${REGISTRY_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "CREATE"
 else
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "exists  (no changes)"
+fi
+if [[ "${SETTINGS_EXISTS}" == false ]]; then
+  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "CREATE"
+else
+  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "exists  (will be refreshed)"
 fi
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
   if [[ "${SES_VERIFIED}" == true ]]; then
@@ -509,6 +522,17 @@ if [[ "${REGISTRY_EXISTS}" == false ]]; then
 else
   echo "  User registry already exists, skipping."
 fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# Canonical settings — always overwrite so second admins get current values
+# ---------------------------------------------------------------------------
+echo "Canonical settings..."
+printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s"\n}\n' \
+  "${AWS_REGION}" "${NETWORK_MODE:-public}" "${USE_SPOT:-false}" \
+  "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" \
+  | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
+echo "  Written to s3://${BUCKET_NAME}/${SETTINGS_KEY}"
 echo ""
 
 # ---------------------------------------------------------------------------
