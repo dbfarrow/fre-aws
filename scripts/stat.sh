@@ -227,8 +227,9 @@ CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" 2>/dev/null | sort || true)
 USER_COUNT=$(echo "${CONFIGURED_USERS}" | grep -c . 2>/dev/null || echo 0)
 
 # Fetch Identity Center users not in the S3 registry (e.g. removed with --keep-sso)
+# Skipped in external mode: org IC may have thousands of users unrelated to this project.
 ORPHANED_SSO=""
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
   IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
     sso-admin list-instances \
     --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")

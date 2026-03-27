@@ -79,6 +79,13 @@ USERS_KEY="${PROJECT_NAME}/users.json"
 PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE}" ]] && PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 
+# SSO_PROFILE_ARGS — used for all IC API calls (sso-admin, identitystore).
+# In cross-account setups, IC lives in a different account and needs a separate profile.
+# Defaults to AWS_PROFILE when SSO_PROFILE is not set.
+_SSO_PROFILE="${SSO_PROFILE:-${AWS_PROFILE}}"
+SSO_PROFILE_ARGS=()
+[[ -n "${_SSO_PROFILE}" ]] && SSO_PROFILE_ARGS=(--profile "${_SSO_PROFILE}")
+
 if [[ -n "${AWS_PROFILE}" ]]; then
   AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
 else
@@ -213,7 +220,7 @@ _find_ps_arn() {
   while IFS= read -r arn; do
     [[ -z "${arn}" ]] && continue
     local name
-    name=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    name=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin describe-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${arn}" \
@@ -222,7 +229,7 @@ _find_ps_arn() {
       found="${arn}"
       break
     fi
-  done < <(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+  done < <(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-permission-sets \
     --instance-arn "${SSO_INSTANCE_ARN}" \
     --max-results 100 \
@@ -286,11 +293,11 @@ IDENTITY_STORE_ID=""
 DEV_PS_ARN=""
 ADMIN_PS_ARN=""
 if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
-  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
   [[ "${SSO_INSTANCE_ARN}" == "None" ]] && SSO_INSTANCE_ARN=""
-  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
   [[ "${IDENTITY_STORE_ID}" == "None" ]] && IDENTITY_STORE_ID=""
@@ -344,7 +351,11 @@ echo ""
 if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
   echo "  IAM Identity Center  (external mode — org-managed, no changes)"
 elif [[ -n "${SSO_REGION:-}" ]]; then
-  echo "  IAM Identity Center  (region: ${SSO_REGION})"
+  if [[ "${_SSO_PROFILE:-}" != "${AWS_PROFILE:-}" && -n "${_SSO_PROFILE:-}" ]]; then
+    echo "  IAM Identity Center  (region: ${SSO_REGION}, SSO profile: ${_SSO_PROFILE})"
+  else
+    echo "  IAM Identity Center  (region: ${SSO_REGION})"
+  fi
 else
   echo "  IAM Identity Center  (SSO_REGION not set in admin.env — permission sets will be skipped)"
 fi
@@ -542,7 +553,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
 
     # ---- ${PROJECT_NAME}-developer-access ----------------------------------------
     if [[ -z "${DEV_PS_ARN}" ]]; then
-      DEV_PS_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      DEV_PS_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin create-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --name "${PROJECT_NAME}-developer-access" \
@@ -556,7 +567,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
 
     POLICY_FILE=$(mktemp)
     echo "${DEV_POLICY}" > "${POLICY_FILE}"
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${DEV_PS_ARN}" \
@@ -566,7 +577,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
 
     # ---- ${PROJECT_NAME}-admin-access --------------------------------------------
     if [[ -z "${ADMIN_PS_ARN}" ]]; then
-      ADMIN_PS_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      ADMIN_PS_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin create-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --name "${PROJECT_NAME}-admin-access" \
@@ -578,7 +589,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
       echo "  '${PROJECT_NAME}-admin-access': already exists."
     fi
 
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin attach-managed-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -588,7 +599,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
 
     POLICY_FILE=$(mktemp)
     echo "${ADMIN_POLICY}" > "${POLICY_FILE}"
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -604,7 +615,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
       echo "  Provisioning '${ps_name}' to account ${ACCOUNT_ID}..."
 
       local provision_out
-      provision_out=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      provision_out=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin provision-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --permission-set-arn "${ps_arn}" \
@@ -622,7 +633,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
 
       local status result_json reason=""
       for _ in $(seq 1 20); do
-        result_json=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        result_json=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin describe-permission-set-provisioning-status \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --provision-permission-set-request-id "${request_id}" \
@@ -646,14 +657,14 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
     # ---- Assign permission sets to OWNER_EMAIL if provided ----------------------
     echo ""
     if [[ -n "${OWNER_EMAIL:-}" && -n "${IDENTITY_STORE_ID}" ]]; then
-      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         identitystore list-users \
         --identity-store-id "${IDENTITY_STORE_ID}" \
         --filters "AttributePath=Emails.Value,AttributeValue=${OWNER_EMAIL}" \
         --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
 
       if [[ -n "${ADMIN_USER_ID}" && "${ADMIN_USER_ID}" != "None" ]]; then
-        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \
@@ -663,7 +674,7 @@ elif [[ -n "${SSO_REGION:-}" ]]; then
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
           && echo "  Assigned ${PROJECT_NAME}-admin-access to ${OWNER_EMAIL}." \
           || echo "  ${PROJECT_NAME}-admin-access already assigned to ${OWNER_EMAIL}."
-        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \
