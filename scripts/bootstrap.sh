@@ -278,11 +278,12 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
 fi
 
 # IAM Identity Center permission sets
+# In external mode, IC is managed entirely by the org — bootstrap skips all IC operations.
 SSO_INSTANCE_ARN=""
 IDENTITY_STORE_ID=""
 DEV_PS_ARN=""
 ADMIN_PS_ARN=""
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
   SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
@@ -338,14 +339,19 @@ else
 fi
 
 echo ""
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "  IAM Identity Center  (external mode — org-managed, no changes)"
+elif [[ -n "${SSO_REGION:-}" ]]; then
   echo "  IAM Identity Center  (region: ${SSO_REGION})"
 else
   echo "  IAM Identity Center  (SSO_REGION not set in admin.env — permission sets will be skipped)"
 fi
 echo "  ──────────────────────────────────────────────────────────────────"
 
-if [[ -n "${SSO_REGION:-}" && -z "${SSO_INSTANCE_ARN}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  printf "  %-55s %s\n" "Permission sets" "SKIP  (IDENTITY_MODE=external)"
+  echo "    Users authenticate via their existing org IC roles — no fre-aws permission sets needed."
+elif [[ -n "${SSO_REGION:-}" && -z "${SSO_INSTANCE_ARN}" ]]; then
   echo "  WARNING: No Identity Center instance found in region ${SSO_REGION} — permission sets will be skipped."
 else
   if [[ -z "${SSO_REGION:-}" ]]; then
@@ -515,11 +521,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# IAM Identity Center permission sets (only if SSO_REGION is configured)
-# Creates ${PROJECT_NAME}-developer-access and ${PROJECT_NAME}-admin-access
-# permission sets idempotently, using ARNs cached in the pre-flight phase.
+# IAM Identity Center permission sets (managed mode only, only if SSO_REGION is configured)
+# External mode: org manages IC entirely; bootstrap makes no IC API calls.
 # ---------------------------------------------------------------------------
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "IDENTITY_MODE=external — skipping IAM Identity Center (using org-managed roles)."
+  echo ""
+elif [[ -n "${SSO_REGION:-}" ]]; then
   echo "IAM Identity Center permission sets (region: ${SSO_REGION})..."
 
   if [[ -z "${SSO_INSTANCE_ARN}" ]]; then
@@ -697,11 +705,10 @@ echo "Backend config written to config/backend.env"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Write admin AWS profile config (if SSO is configured)
-# Lets a first-time admin transition from their existing high-privilege profile
-# to the ${PROJECT_NAME}-admin-access / ${PROJECT_NAME}-developer-access profiles.
+# Write admin AWS profile config (managed mode + SSO configured only)
+# In external mode, admins use their existing org IC profiles — no generated config needed.
 # ---------------------------------------------------------------------------
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
   AWS_CONFIG_FILE="${SCRIPT_DIR}/../config/aws-config-admin.example"
   SSO_URL="${SSO_START_URL:-<your-sso-start-url — find it in IAM Identity Center → Dashboard>}"
   cat > "${AWS_CONFIG_FILE}" <<EOF
@@ -739,7 +746,16 @@ fi
 echo "=== Bootstrap complete ==="
 echo ""
 
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "Next steps:"
+  echo ""
+  echo "  1. Ensure AWS_PROFILE in config/admin.env points to your existing org IC profile."
+  echo "  2. Run './admin.sh add-user <username>' to register users."
+  echo "  3. Run './admin.sh up <username>' to provision EC2 instances."
+  echo ""
+  echo "  Note: users connect using their existing org IC credentials."
+  echo "  If SSM access fails, ask IT to verify ssm:StartSession is in the developer permission set."
+elif [[ -n "${SSO_REGION:-}" ]]; then
   echo "Next steps:"
   echo ""
   echo "  1. Append config/aws-config-admin.example to ~/.aws/config"
