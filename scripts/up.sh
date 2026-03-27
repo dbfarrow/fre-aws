@@ -281,7 +281,9 @@ for username in "${APPLY_USERS[@]}"; do
   # reliable than looking up EC2 tags, which can be absent on spot instances if
   # tag propagation failed silently on a previous apply. Empty for new instances.
   EXISTING_AMI=$(terraform -chdir="${TF_USER_DIR}" output -raw instance_ami 2>/dev/null || echo "")
-  [[ "${EXISTING_AMI}" == "null" ]] && EXISTING_AMI=""
+  # Terraform may write "No outputs found" warnings to stdout; discard anything
+  # that isn't a valid AMI ID so we fall through to the data source for new instances.
+  [[ "${EXISTING_AMI}" =~ ^ami-[0-9a-f]+$ ]] || EXISTING_AMI=""
 
   EXTRA_USER_ARGS=()
   [[ -n "${ADMIN_KEYS_TFVARS}" ]] && EXTRA_USER_ARGS+=("-var-file=${ADMIN_KEYS_TFVARS}")
