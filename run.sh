@@ -218,6 +218,20 @@ if [[ "${MODE}" == "admin" ]]; then
     "--volume" "$(pwd)/scripts:/workspace/scripts"
   )
 
+  # Corporate CA cert — mount into container for SSL inspection environments.
+  # entrypoint.sh installs it into the OS trust store on every container start.
+  if [[ -n "${CORP_CA_CERT_FILE:-}" ]]; then
+    _CA_PATH="${CORP_CA_CERT_FILE}"
+    [[ "${_CA_PATH}" != /* ]] && _CA_PATH="$(pwd)/${_CA_PATH}"
+    if [[ -f "${_CA_PATH}" ]]; then
+      DOCKER_ARGS+=("--volume" "${_CA_PATH}:/certs/corp-ca.crt:ro")
+      DOCKER_ARGS_QUIET+=("--volume" "${_CA_PATH}:/certs/corp-ca.crt:ro")
+    else
+      echo "WARNING: CORP_CA_CERT_FILE='${CORP_CA_CERT_FILE}' not found — skipping cert install" >&2
+    fi
+    unset _CA_PATH
+  fi
+
   require_username() {
     if [[ -z "${USERNAME}" ]]; then
       echo "Usage: admin.sh ${COMMAND} <username>" >&2
@@ -310,6 +324,18 @@ if [[ "${MODE}" == "user" ]]; then
     "--volume" "${DEV_CONFIG}:/workspace/config/user.env:ro"
     "--volume" "${USER_SCRIPT_DIR}/scripts:/workspace/scripts"
   )
+
+  # Corporate CA cert — mount into container for SSL inspection environments.
+  if [[ -n "${CORP_CA_CERT_FILE:-}" ]]; then
+    _CA_PATH="${CORP_CA_CERT_FILE}"
+    [[ "${_CA_PATH}" != /* ]] && _CA_PATH="${USER_SCRIPT_DIR}/${_CA_PATH}"
+    if [[ -f "${_CA_PATH}" ]]; then
+      DOCKER_ARGS+=("--volume" "${_CA_PATH}:/certs/corp-ca.crt:ro")
+    else
+      echo "WARNING: CORP_CA_CERT_FILE='${CORP_CA_CERT_FILE}' not found — skipping cert install" >&2
+    fi
+    unset _CA_PATH
+  fi
 
   # Append SSH auth options to CONNECT_ARGS (caller must initialise it first).
   # Prefers a running ssh-agent; falls back to key files in priority order.
