@@ -99,11 +99,13 @@ fi
 echo "--- exporting AWS credentials ---"
 _PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
-eval "$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
+_CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
   echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
+eval "$(echo "${_CREDS}" | sed 's/^/export /')"
+unset _CREDS _PROFILE_ARGS
 echo ""
 
 # ---------------------------------------------------------------------------

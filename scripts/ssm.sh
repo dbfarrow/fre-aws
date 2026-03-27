@@ -26,11 +26,15 @@ if [[ -z "${DEV_USERNAME}" ]]; then
   exit 1
 fi
 
-eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+_CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
+eval "$(echo "${_CREDS}" | sed 's/^/export /')"
+unset _CREDS _PROFILE_ARGS
 
 # Resolve instance ID by Username tag
 INSTANCE_ID=$(aws ec2 describe-instances \
