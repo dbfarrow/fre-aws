@@ -61,7 +61,15 @@ _CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-
   echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
-eval "$(echo "${_CREDS}" | sed 's/^/export /')"
+if [[ -z "${_CREDS}" ]]; then
+  echo "ERROR: No credentials returned${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
+  exit 1
+fi
+eval "$(echo "${_CREDS}" | sed 's/^/export /')" || {
+  echo "ERROR: Failed to export credentials into environment." >&2
+  exit 1
+}
 unset _CREDS _PROFILE_ARGS
 echo ""
 
