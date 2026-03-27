@@ -140,7 +140,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   │   └── versions.tf          # AWS provider only
 │   └── tests/                   # terraform test files (*.tftest.hcl)
 ├── scripts/
-│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, KMS key
+│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, KMS key, canonical settings.json
+│   ├── configure.sh             # Second-admin onboarding: validate admin.env + regenerate backend.env
 │   ├── up.sh                    # Two-phase: base apply, then per-user apply loop
 │   ├── down.sh                  # Per-user destroy; optionally tears down base
 │   ├── start.sh                 # Start a stopped EC2 instance
@@ -148,8 +149,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── connect.sh               # SSH over SSM tunnel → session_start.sh menu
 │   ├── refresh.sh               # Push config to running instance without rebuild
 │   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
-│   ├── stat.sh                  # Full environment status: identity, billing, instances
-│   ├── list.sh                  # Users + EC2 instance state summary
+│   ├── stat.sh                  # Full environment status: identity, billing, instances (skips IC enumeration in external mode)
+│   ├── list.sh                  # Users + EC2 instance state summary (skips IC enumeration in external mode)
 │   ├── add-user.sh              # Add user to S3 registry; creates Identity Center user in managed mode
 │   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
@@ -170,6 +171,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 Each user gets their own EC2 instance and S3 registry entry. In managed mode (`IDENTITY_MODE=managed`), an IAM Identity Center user is also created. Users are managed via:
 
 ```
+./admin.sh bootstrap               # One-time setup: S3, DynamoDB, permission sets, canonical settings.json
+./admin.sh configure               # Second-admin onboarding: validate admin.env + regenerate backend.env
 ./admin.sh add-user <username>     # S3 registry entry + Identity Center user (managed mode only)
 ./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
 ./admin.sh list                    # Show all users + instance state + timestamps
@@ -259,10 +262,17 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 ### State Management
 - Remote state in **S3 with versioning, KMS encryption, public access block**
 - State locking via **DynamoDB table**
+- Bucket and table names include the AWS account ID for global uniqueness: `${PROJECT_NAME}-${ACCOUNT_ID}-tfstate` / `${PROJECT_NAME}-${ACCOUNT_ID}-tflock`
 - Terraform state bucket is in us-east-1 (bootstrap ran there); EC2 resources are in us-west-2 — intentional
 - State is split: base state at `<project>/base/terraform.tfstate`; per-user state at `<project>/users/<username>/terraform.tfstate`
 - `up.sh` runs two phases: base apply (shared infra, fast no-op if converged), then per-user loop
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
+
+### Canonical Configuration (Multi-Admin Synchronization)
+- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`.
+- `up.sh` fetches `settings.json` and compares it against local `admin.env`. If drift is found, it prints each mismatch and prompts `Continue anyway? [y/N]` before proceeding. Silently skipped when `settings.json` is absent (projects bootstrapped before this feature).
+- Second admins use `./admin.sh configure` to validate their local `admin.env`, check for drift, and regenerate `config/backend.env` — without running `bootstrap` themselves.
+- `SSO_PROFILE` in `admin.env` allows IC API calls (`sso-admin`, `identitystore`) to use a different AWS profile than `AWS_PROFILE` for cross-account Identity Center setups.
 
 ### Scheduled Stop (Lambda)
 - Midnight Lambda stops all running instances to prevent overnight charges

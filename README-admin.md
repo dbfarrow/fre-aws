@@ -49,7 +49,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket, DynamoDB lock table, SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`).
+> **What bootstrap creates automatically**: S3 state bucket (`{project}-{account_id}-tfstate`), DynamoDB lock table (`{project}-{account_id}-tflock`), SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`), and a canonical `settings.json` in S3 that records config values for multi-admin drift detection.
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -245,6 +245,19 @@ To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_START_URL` a
 
 > **`SSO_REGION` is still required.** Bootstrap creates the `{project}-developer-access` and `{project}-admin-access` permission sets in Identity Center regardless of identity mode — users still need them to reach their EC2 instances via SSM. Set `SSO_REGION` to the region where your Identity Center instance lives.
 
+> **`list` and `stat` skip IC user enumeration in external mode.** In managed mode, these commands query `identitystore list-users` to surface orphaned SSO accounts. In external mode this is skipped — the org IC directory may contain thousands of users unrelated to this project.
+
+### Cross-account Identity Center (`SSO_PROFILE`)
+
+In most setups, bootstrap manages Identity Center using the same AWS profile (`AWS_PROFILE`) as all other operations. If your Identity Center instance lives in a **different AWS account** from your deployment target, set `SSO_PROFILE` in `config/admin.env`:
+
+```bash
+# AWS CLI profile with access to the account where IC lives
+SSO_PROFILE=my-org-sso-admin-profile
+```
+
+When set, bootstrap uses `SSO_PROFILE` for all `sso-admin` and `identitystore` API calls, while continuing to use `AWS_PROFILE` for everything else (S3, DynamoDB, EC2, etc.). Leave unset when IC and your deployment account are the same.
+
 ---
 
 ## Email Setup (AWS SES)
@@ -337,6 +350,8 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ## First-Time Setup
 
+### Super-admin: bootstrapping the project (run once)
+
 ```
 1.  AWS account with AdministratorAccess                    ← any account; free tier works
     Enable root MFA while you're there                      ← AWS Console → Security credentials → MFA
@@ -352,7 +367,8 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 9.  ./admin.sh verify                                       ← confirm credentials work
 10. ./admin.sh bootstrap --plan                             ← preview exactly what will be created
     ./admin.sh bootstrap                                    ← creates S3, DynamoDB, permission sets,
-                                                               SES verification; prompts before applying
+                                                               SES verification, canonical settings;
+                                                               prompts before applying
                                                                (runs as AdministratorAccess)
 11. Switch to {project}-admin-access                        ← bootstrap just created this set;
     (Option A) IAM Identity Center → AWS accounts              assign yourself to it, update
@@ -367,6 +383,29 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 13. ./admin.sh up                                           ← provisions all AWS infrastructure
 14. ./admin.sh connect <username>                           ← verify it works
 ```
+
+### Second admin: joining an existing project
+
+If the project is already bootstrapped by another admin, you don't need to run `bootstrap` yourself. Use `configure` instead — it fetches the canonical settings from S3, checks your local `admin.env` for drift, and generates `config/backend.env` so you're ready to run `up`, `down`, and all other commands.
+
+```
+1.  Set up credentials (Option A or B above)                ← same AWS account as the project
+2.  Install Docker                                          ← one time
+3.  Confirm SSH key in ssh-agent                            ← ssh-add ~/.ssh/id_ed25519
+4.  Clone this repo                                         ← git clone ...
+5.  cp config/admin.env.example config/admin.env            ← create your local admin config
+6.  Edit config/admin.env                                   ← set PROJECT_NAME, AWS_REGION,
+                                                               AWS_PROFILE, and any other values
+                                                               the super-admin shared with you
+7.  ./admin.sh sso-login                                    ← authenticate (Option A only)
+8.  ./admin.sh configure                                    ← validates your admin.env against
+                                                               canonical S3 settings and writes
+                                                               config/backend.env automatically
+9.  ./admin.sh verify                                       ← confirm credentials work
+10. ./admin.sh up <username>                                ← you're ready to provision instances
+```
+
+`configure` warns if any of your `admin.env` values differ from the canonical settings (region, network mode, spot preference, EBS size, identity mode). Fix any mismatches before running `up` to avoid conflicting infrastructure.
 
 ---
 
@@ -579,6 +618,8 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh bootstrap                    # one-time: create S3, DynamoDB, permission sets, SES verification (prompts before applying)
 ./admin.sh bootstrap --plan             # show what bootstrap will create without making any changes
 ./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
+./admin.sh configure                    # second-admin onboarding: validate admin.env against canonical
+                                        # S3 settings and regenerate config/backend.env
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
 ./admin.sh down --all                   # destroy all user instances, then base (full teardown)
@@ -586,6 +627,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ```
 
 **`up` pre-flight checks:**
+- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ (region, network mode, spot preference, EBS size, identity mode), it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature.
 - **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
 - **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
 
