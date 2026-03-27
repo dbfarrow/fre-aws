@@ -84,7 +84,7 @@ This project applies Zero Trust principles where free-tier AWS constraints allow
 | No long-lived credentials | ✅ | IAM Identity Center (SSO) with short-lived session tokens |
 | Least-privilege IAM | ✅ | `{project}-developer-access` and `{project}-admin-access` permission sets scoped per project |
 | IMDSv2 enforced | ✅ | `http_tokens = "required"` on all instances |
-| Encryption at rest | ✅ | KMS-backed EBS and S3 |
+| Encryption at rest | ✅ | AWS-managed key EBS encryption; S3 state bucket uses SSE |
 | Security groups deny by default | ✅ | No ingress rules on EC2 |
 | Audit logging | ❌ Deferred | CloudTrail and VPC Flow Logs not enabled (cost); add before production |
 
@@ -111,7 +111,6 @@ Key modules in use:
 | Security Group | `terraform-aws-modules/security-group/aws` |
 | IAM Role | `terraform-aws-modules/iam/aws//modules/iam-assumable-role` |
 | S3 (state bucket) | `terraform-aws-modules/s3-bucket/aws` |
-| KMS | `terraform-aws-modules/kms/aws` |
 
 Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `latest` or an unversioned ref.
 
@@ -125,9 +124,9 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
 ├── terraform/
-│   ├── main.tf                  # Base module: VPC, KMS, security groups, billing, web app
+│   ├── main.tf                  # Base module: VPC, security groups, billing, web app
 │   ├── variables.tf
-│   ├── outputs.tf               # Exports: subnet_id, security_group_id, kms_key_arn, etc.
+│   ├── outputs.tf               # Exports: subnet_id, security_group_id, etc.
 │   ├── backend.tf               # S3 + DynamoDB remote state (encrypted, KMS)
 │   ├── versions.tf              # Terraform and provider version pins
 │   ├── user_data_main.sh        # EC2 bootstrap: installs Claude, tmux, autoshutdown timer
@@ -140,7 +139,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   │   └── versions.tf          # AWS provider only
 │   └── tests/                   # terraform test files (*.tftest.hcl)
 ├── scripts/
-│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, KMS key, canonical settings.json
+│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, canonical settings.json
 │   ├── configure.sh             # Second-admin onboarding: validate admin.env + regenerate backend.env
 │   ├── up.sh                    # Two-phase: base apply, then per-user apply loop
 │   ├── down.sh                  # Per-user destroy; optionally tears down base
@@ -256,7 +255,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `user_data_replace_on_change = false` — prevents accidental instance replacement on user_data edits
 - **No security group ingress rules** — only egress allowed
 - **IMDSv2 required** (`http_tokens = "required"`)
-- EBS volumes encrypted with a project-managed KMS key
+- EBS volumes encrypted with the AWS-managed key (`aws/ebs`)
 - `developer` user has `NOPASSWD:ALL` sudo (required for autoshutdown `shutdown -h now`)
 
 ### State Management
@@ -317,7 +316,7 @@ terraform plan
 - [ ] No SSH key pairs referenced anywhere (SSH is only via SSM tunnel)
 - [ ] No security group ingress rules on EC2
 - [ ] All S3 buckets have `block_public_acls = true` and `block_public_policy = true`
-- [ ] All EBS volumes use `encrypted = true` with a KMS key
+- [ ] All EBS volumes use `encrypted = true`
 - [ ] All EC2 instances have `http_tokens = "required"` (IMDSv2)
 - [ ] All IAM policies use least-privilege (no `*` actions or resources unless justified)
 - [ ] Terraform module versions are pinned to specific tags

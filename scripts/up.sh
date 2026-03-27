@@ -218,7 +218,6 @@ BASE_OUTPUTS=$(terraform -chdir="${TF_BASE_DIR}" output -json)
 SUBNET_ID=$(echo "${BASE_OUTPUTS}"         | jq -r '.subnet_id.value')
 ASSOC_PUBLIC_IP=$(echo "${BASE_OUTPUTS}"   | jq -r '.associate_public_ip.value')
 SECURITY_GROUP_ID=$(echo "${BASE_OUTPUTS}" | jq -r '.security_group_id.value')
-KMS_KEY_ARN=$(echo "${BASE_OUTPUTS}"       | jq -r '.kms_key_arn.value')
 
 # CloudFront cache invalidation (web app only)
 CF_DIST_ID=$(echo "${BASE_OUTPUTS}" | jq -r '.app_cloudfront_distribution_id.value // empty')
@@ -286,7 +285,6 @@ for username in "${APPLY_USERS[@]}"; do
     -var="subnet_id=${SUBNET_ID}" \
     -var="associate_public_ip=${ASSOC_PUBLIC_IP}" \
     -var="security_group_id=${SECURITY_GROUP_ID}" \
-    -var="kms_key_arn=${KMS_KEY_ARN}" \
     "${EXTRA_USER_ARGS[@]}" \
     -out="${TF_USER_DIR}/.tfplan_${username}"
   echo ""

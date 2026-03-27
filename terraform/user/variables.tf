@@ -27,11 +27,6 @@ variable "security_group_id" {
   type        = string
 }
 
-variable "kms_key_arn" {
-  description = "KMS key ARN for EBS encryption. Created by the base module."
-  type        = string
-}
-
 # ---------------------------------------------------------------------------
 # Per-user identity
 # ---------------------------------------------------------------------------

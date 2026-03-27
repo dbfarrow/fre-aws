@@ -115,7 +115,6 @@ BASE_OUTPUTS=$(terraform -chdir="${TF_BASE_DIR}" output -json 2>/dev/null || ech
 SUBNET_ID=$(echo "${BASE_OUTPUTS}"         | jq -r '.subnet_id.value         // "placeholder"')
 ASSOC_PUBLIC_IP=$(echo "${BASE_OUTPUTS}"   | jq -r '.associate_public_ip.value // true')
 SECURITY_GROUP_ID=$(echo "${BASE_OUTPUTS}" | jq -r '.security_group_id.value  // "placeholder"')
-KMS_KEY_ARN=$(echo "${BASE_OUTPUTS}"       | jq -r '.kms_key_arn.value        // "arn:aws:kms:us-east-1:000000000000:key/placeholder"')
 
 # ---------------------------------------------------------------------------
 # Per-user destroy
@@ -154,7 +153,6 @@ if [[ ${#DESTROY_USERS[@]} -gt 0 ]]; then
       -var="subnet_id=${SUBNET_ID}" \
       -var="associate_public_ip=${ASSOC_PUBLIC_IP}" \
       -var="security_group_id=${SECURITY_GROUP_ID}" \
-      -var="kms_key_arn=${KMS_KEY_ARN}" \
       -auto-approve
     echo ""
   done
@@ -197,9 +195,9 @@ fi
 
 echo "=== Infrastructure destroyed ==="
 if [[ "${DESTROY_BASE}" == true ]]; then
-  echo "Note: The S3 state bucket, DynamoDB table, and KMS key created by"
-  echo "bootstrap.sh were NOT deleted. Remove them manually if no longer needed."
+  echo "Note: The S3 state bucket and DynamoDB table created by bootstrap.sh"
+  echo "      were NOT deleted. Remove them manually if no longer needed."
 else
-  echo "Note: Base infrastructure (VPC, KMS, security groups) is preserved."
+  echo "Note: Base infrastructure (VPC, security groups) is preserved."
   echo "      Run './admin.sh up ${TARGET_USER}' to reprovision the instance."
 fi
