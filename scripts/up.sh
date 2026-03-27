@@ -94,6 +94,8 @@ if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
   _chk "use_spot"           "${USE_SPOT:-false}"
   _chk "identity_mode"      "${IDENTITY_MODE:-managed}"
   _chk "ebs_volume_size_gb" "${EBS_VOLUME_SIZE_GB:-30}"
+  _LOCAL_CORP_CA="false"; [[ -n "${CORP_CA_CERT_FILE:-}" ]] && _LOCAL_CORP_CA="true"
+  _chk "corp_ca_cert_required" "${_LOCAL_CORP_CA}"; unset _LOCAL_CORP_CA
   if [[ "${_drift}" == "true" ]]; then
     echo ""
     echo "  Your admin.env differs from the canonical settings stored in S3."
