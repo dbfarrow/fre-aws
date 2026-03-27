@@ -369,6 +369,11 @@ if [[ "${MODE}" == "admin" ]]; then
         echo "Clearing credential cache..."
         rm -f "${HOME}/.aws/cli/cache/"* 2>/dev/null || true
       fi
+      if [[ -n "${AWS_PROFILE:-}" ]]; then
+        echo "Logging in with profile '${AWS_PROFILE}'..."
+      else
+        echo "Logging in with default credentials..."
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
@@ -649,6 +654,11 @@ if [[ "${MODE}" == "user" ]]; then
       if [[ "${FRESH_CREDS:-false}" == "true" ]]; then
         echo "Clearing credential cache..."
         rm -f "${USER_AWS_DIR}/cli/cache/"* 2>/dev/null || true
+      fi
+      if [[ -n "${AWS_PROFILE:-}" ]]; then
+        echo "Logging in with profile '${AWS_PROFILE}'..."
+      else
+        echo "Logging in with default credentials..."
       fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
