@@ -7,7 +7,7 @@ set -euo pipefail
 
 if [[ -f /certs/corp-ca.crt ]]; then
   cp /certs/corp-ca.crt /usr/local/share/ca-certificates/corp-ca.crt
-  update-ca-certificates > /dev/null
+  update-ca-certificates > /dev/null 2>&1
 fi
 
 exec "$@"
