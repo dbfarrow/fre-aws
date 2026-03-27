@@ -17,20 +17,25 @@ elif [[ -f "${SCRIPT_DIR}/../config/user.env" ]]; then
   source "${SCRIPT_DIR}/../config/user.env"
 fi
 
-: "${AWS_PROFILE:?AWS_PROFILE not set}"
-
 # ---------------------------------------------------------------------------
 # check_profile <profile> <label>
 # Prints identity info for the profile. Returns 1 if auth fails, 2 if the
-# profile is not configured.
+# profile is not configured. Pass empty string to use default credentials.
 # ---------------------------------------------------------------------------
 check_profile() {
   local profile="${1}" label="${2}"
 
-  echo "=== ${label} (${profile}) ==="
+  if [[ -n "${profile}" ]]; then
+    echo "=== ${label} (${profile}) ==="
+  else
+    echo "=== ${label} (default credentials) ==="
+  fi
+
+  local profile_args=()
+  [[ -n "${profile}" ]] && profile_args=(--profile "${profile}")
 
   local out
-  out=$(aws sts get-caller-identity --profile "${profile}" --output json 2>&1) || {
+  out=$(aws sts get-caller-identity "${profile_args[@]}" --output json 2>&1) || {
     if echo "${out}" | grep -qi "could not be found\|does not exist\|No profile"; then
       echo "  Not configured."
       echo ""
