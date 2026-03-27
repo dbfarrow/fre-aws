@@ -528,10 +528,13 @@ echo ""
 # Canonical settings — always overwrite so second admins get current values
 # ---------------------------------------------------------------------------
 echo "Canonical settings..."
-printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s"\n}\n' \
+_CORP_CA_REQUIRED="false"
+[[ -n "${CORP_CA_CERT_FILE:-}" ]] && _CORP_CA_REQUIRED="true"
+printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s",\n  "corp_ca_cert_required": "%s"\n}\n' \
   "${AWS_REGION}" "${NETWORK_MODE:-public}" "${USE_SPOT:-false}" \
-  "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" \
+  "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" "${_CORP_CA_REQUIRED}" \
   | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
+unset _CORP_CA_REQUIRED
 echo "  Written to s3://${BUCKET_NAME}/${SETTINGS_KEY}"
 echo ""
 

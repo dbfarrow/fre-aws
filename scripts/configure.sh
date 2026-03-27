@@ -101,6 +101,9 @@ _chk "network_mode"       "$(echo "${CANONICAL_JSON}" | jq -r '.network_mode // 
 _chk "use_spot"           "$(echo "${CANONICAL_JSON}" | jq -r '.use_spot // empty')"           "${USE_SPOT:-false}"
 _chk "identity_mode"      "$(echo "${CANONICAL_JSON}" | jq -r '.identity_mode // empty')"      "${IDENTITY_MODE:-managed}"
 _chk "ebs_volume_size_gb" "$(echo "${CANONICAL_JSON}" | jq -r '.ebs_volume_size_gb // empty')" "${EBS_VOLUME_SIZE_GB:-30}"
+_LOCAL_CORP_CA="false"; [[ -n "${CORP_CA_CERT_FILE:-}" ]] && _LOCAL_CORP_CA="true"
+_chk "corp_ca_cert_required" "$(echo "${CANONICAL_JSON}" | jq -r '.corp_ca_cert_required // empty')" "${_LOCAL_CORP_CA}"
+unset _LOCAL_CORP_CA
 echo ""
 
 # ---------------------------------------------------------------------------

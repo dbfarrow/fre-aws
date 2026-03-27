@@ -8,6 +8,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 
 - [What You Need](#what-you-need)
 - [SSH Key](#ssh-key)
+- [Corporate CA Certificate (SSL inspection environments)](#corporate-ca-certificate-ssl-inspection-environments)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -86,6 +87,32 @@ ssh-add ~/.ssh/id_ed25519   # load your key once per session
 ### Fallback: key file
 
 If no agent is running, the tooling falls back to mounting `~/.ssh` into the container and prompting for the key passphrase. The key is looked up in this order: `SSH_KEY_FILE` in `config/admin.env` → `~/.ssh/id_ed25519` → `~/.ssh/id_rsa`.
+
+---
+
+## Corporate CA Certificate (SSL inspection environments)
+
+If your organisation routes outbound HTTPS through a proxy that performs SSL inspection, tools inside the Docker container (`aws`, `terraform`, `git`, `curl`) will fail with certificate errors unless the corporate CA is trusted.
+
+**Setup:**
+
+1. Obtain your organisation's CA certificate in PEM format (`.crt` extension)
+2. Drop it in `config/` — it's gitignored, so it won't be committed:
+   ```
+   cp ~/Downloads/my-corp-ca.crt config/corp-ca.crt
+   ```
+3. Add to `config/admin.env`:
+   ```
+   CORP_CA_CERT_FILE=config/corp-ca.crt
+   ```
+4. Rebuild the image:
+   ```
+   ./admin.sh build
+   ```
+
+The cert is installed into the container's OS trust store on every container start. Relative paths in `CORP_CA_CERT_FILE` are resolved from the project root directory. If the path doesn't exist, a warning is printed to stderr and the container starts without it.
+
+In multi-admin environments, `bootstrap` records whether a corp cert is required in the canonical S3 settings. A second admin running `./admin.sh configure` or `./admin.sh up` will be warned if they haven't set `CORP_CA_CERT_FILE` in their `admin.env`.
 
 ---
 

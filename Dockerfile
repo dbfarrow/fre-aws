@@ -80,6 +80,8 @@ RUN chmod +x /workspace/scripts/*.sh
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
-# Default: drop into bash so the container is useful interactively.
-# run.sh overrides this with the specific script to execute.
+# entrypoint.sh installs any corporate CA cert mounted at /certs/corp-ca.crt
+# into the OS trust store before exec'ing the command. Transparent when no
+# cert is mounted. run.sh overrides CMD with the specific script to execute.
+ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 CMD ["/bin/bash"]
