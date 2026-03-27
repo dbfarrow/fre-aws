@@ -499,6 +499,10 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     connect)
       require_username
+      # In managed mode, connect uses the fre-aws dev profile ({project}-developer-access).
+      # In external mode, the org profile already has the required SSM access — use it directly.
+      _CONNECT_PROFILE="claude-code-dev"
+      [[ "${IDENTITY_MODE:-managed}" == "external" ]] && _CONNECT_PROFILE="${AWS_PROFILE}"
       AGENT_SOCK=$(_detect_ssh_agent_sock)
       if [[ -n "${AGENT_SOCK}" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
@@ -507,7 +511,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
-          --env "AWS_PROFILE=claude-code-dev" \
+          --env "AWS_PROFILE=${_CONNECT_PROFILE}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       else
         # Key file fallback: start fresh agent inside container, prompt for passphrase.
@@ -523,7 +527,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
-          --env "AWS_PROFILE=claude-code-dev" \
+          --env "AWS_PROFILE=${_CONNECT_PROFILE}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       fi

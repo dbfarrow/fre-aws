@@ -85,9 +85,14 @@ if [[ "${IS_ADMIN}" == true ]]; then
   check_profile "${AWS_PROFILE}" "admin" || {
     [[ $? -eq 1 ]] && ADMIN_OK=false
   }
-  check_profile "${DEV_PROFILE}" "connect" || {
-    [[ $? -eq 1 ]] && DEV_OK=false
-  }
+
+  # In managed mode, also verify the derived dev profile used by 'connect'.
+  # In external mode, connect uses AWS_PROFILE directly — no fre-aws dev profile exists.
+  if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
+    check_profile "${DEV_PROFILE}" "connect" || {
+      [[ $? -eq 1 ]] && DEV_OK=false
+    }
+  fi
 
   if [[ "${ADMIN_OK}" == false || "${DEV_OK}" == false ]]; then
     echo "Run './admin.sh sso-login' to re-authenticate." >&2
