@@ -121,6 +121,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 ```
 .
 ├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, scripts
+├── scripts/entrypoint.sh        # Docker ENTRYPOINT: installs corporate CA cert (if mounted), then exec's command
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
 ├── terraform/
@@ -238,6 +239,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
+- `ENTRYPOINT` is `scripts/entrypoint.sh`: installs a corporate CA cert mounted at `/certs/corp-ca.crt` into the OS trust store before exec'ing the actual command. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).
 
 ---
 
