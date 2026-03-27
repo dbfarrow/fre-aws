@@ -53,7 +53,7 @@ trap 'rm -f "${USERS_JSON}" "${ADMIN_KEYS_TFVARS}" "${TF_BASE_DIR}/.tfplan_base"
 # Terraform's Go SDK cannot consume the AWS CLI SSO token cache directly.
 # Exporting as standard env vars bridges the gap for both SSO and key-based profiles.
 # ---------------------------------------------------------------------------
-echo "--- exporting AWS credentials ---"
+echo "--- exporting AWS credentials (profile=${AWS_PROFILE:-<none>}) ---"
 _PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 _CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
@@ -84,7 +84,10 @@ if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
   _chk() {
     local k="$1" v="$2"
     local c; c=$(echo "${_CANONICAL}" | jq -r --arg k "$k" '.[$k] // empty')
-    [[ -n "${c}" && "${c}" != "${v}" ]] && { echo "  WARNING: ${k}: canonical='${c}', local='${v}'"; _drift=true; }
+    if [[ -n "${c}" && "${c}" != "${v}" ]]; then
+      echo "  WARNING: ${k}: canonical='${c}', local='${v}'"
+      _drift=true
+    fi
   }
   _chk "aws_region"         "${AWS_REGION}"
   _chk "network_mode"       "${NETWORK_MODE:-public}"
