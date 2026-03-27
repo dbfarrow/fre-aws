@@ -62,6 +62,31 @@ eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env
 echo ""
 
 # ---------------------------------------------------------------------------
+# Canonical settings drift check (warning only — does not block up)
+# Silently skipped if settings.json absent (pre-existing projects)
+# ---------------------------------------------------------------------------
+_SETTINGS_KEY="${PROJECT_NAME}/settings.json"
+if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
+    s3 cp "s3://${TF_BACKEND_BUCKET}/${_SETTINGS_KEY}" - 2>/dev/null); then
+  _drift=false
+  _chk() {
+    local k="$1" v="$2"
+    local c; c=$(echo "${_CANONICAL}" | jq -r --arg k "$k" '.[$k] // empty')
+    [[ -n "${c}" && "${c}" != "${v}" ]] && { echo "  WARNING: ${k}: canonical='${c}', local='${v}'"; _drift=true; }
+  }
+  _chk "aws_region"         "${AWS_REGION}"
+  _chk "network_mode"       "${NETWORK_MODE:-public}"
+  _chk "use_spot"           "${USE_SPOT:-false}"
+  _chk "identity_mode"      "${IDENTITY_MODE:-managed}"
+  _chk "ebs_volume_size_gb" "${EBS_VOLUME_SIZE_GB:-30}"
+  if [[ "${_drift}" == "true" ]]; then
+    echo "  Run './admin.sh configure' to see canonical values and regenerate backend.env."
+    echo ""
+  fi
+  unset _chk _drift _CANONICAL _SETTINGS_KEY
+fi
+
+# ---------------------------------------------------------------------------
 # Download user registry from S3
 # ---------------------------------------------------------------------------
 users_s3_download "${USERS_JSON}"
