@@ -26,11 +26,13 @@ source "${SCRIPT_DIR}/../config/backend.env"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 : "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
-CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       Run './admin.sh sso-login' first." >&2
   exit 1
 }

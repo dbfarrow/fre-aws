@@ -27,12 +27,15 @@ users_s3_download() {
   local key
   key=$(_users_s3_key)
 
+  local _profile_args=()
+  [[ -n "${AWS_PROFILE:-}" ]] && _profile_args=(--profile "${AWS_PROFILE}")
+
   local err
   err=$(aws s3 cp \
     "s3://${TF_BACKEND_BUCKET}/${key}" \
     "${dest}" \
     --region "${TF_BACKEND_REGION}" \
-    --profile "${AWS_PROFILE}" 2>&1)
+    "${_profile_args[@]}" 2>&1)
   local exit_code=$?
 
   if [[ ${exit_code} -eq 0 ]]; then
@@ -59,11 +62,14 @@ users_s3_upload() {
   local key
   key=$(_users_s3_key)
 
+  local _profile_args=()
+  [[ -n "${AWS_PROFILE:-}" ]] && _profile_args=(--profile "${AWS_PROFILE}")
+
   aws s3 cp \
     "${src}" \
     "s3://${TF_BACKEND_BUCKET}/${key}" \
     --region "${TF_BACKEND_REGION}" \
-    --profile "${AWS_PROFILE}" >/dev/null
+    "${_profile_args[@]}" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
