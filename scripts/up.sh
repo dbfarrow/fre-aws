@@ -62,8 +62,8 @@ eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env
 echo ""
 
 # ---------------------------------------------------------------------------
-# Canonical settings drift check (warning only — does not block up)
-# Silently skipped if settings.json absent (pre-existing projects)
+# Canonical settings drift check — prompts for confirmation if drift found.
+# Silently skipped if settings.json absent (pre-existing projects).
 # ---------------------------------------------------------------------------
 _SETTINGS_KEY="${PROJECT_NAME}/settings.json"
 if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
@@ -80,10 +80,18 @@ if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
   _chk "identity_mode"      "${IDENTITY_MODE:-managed}"
   _chk "ebs_volume_size_gb" "${EBS_VOLUME_SIZE_GB:-30}"
   if [[ "${_drift}" == "true" ]]; then
-    echo "  Run './admin.sh configure' to see canonical values and regenerate backend.env."
+    echo ""
+    echo "  Your admin.env differs from the canonical settings stored in S3."
+    echo "  Run './admin.sh configure' to review and align your local config."
+    echo ""
+    read -r -p "  Continue anyway? [y/N] " _DRIFT_CONFIRM
+    if [[ ! "${_DRIFT_CONFIRM}" =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 0
+    fi
     echo ""
   fi
-  unset _chk _drift _CANONICAL _SETTINGS_KEY
+  unset _chk _drift _CANONICAL _SETTINGS_KEY _DRIFT_CONFIRM
 fi
 
 # ---------------------------------------------------------------------------
