@@ -20,9 +20,10 @@ PLAN_ONLY=false
 AUTO_APPROVE=false
 for arg in "$@"; do
   case "${arg}" in
-    --plan|--dry-run) PLAN_ONLY=true ;;
-    --yes|-y)         AUTO_APPROVE=true ;;
-    --profile|--profile=*) ;; # handled below via BOOTSTRAP_PROFILE_OVERRIDE
+    --plan|--dry-run)      PLAN_ONLY=true ;;
+    --yes|-y)              AUTO_APPROVE=true ;;
+    --profile|--profile=*) ;; # handled via BOOTSTRAP_PROFILE_OVERRIDE env var
+    --region|--region=*)   ;; # handled via BOOTSTRAP_REGION_OVERRIDE env var
     *) echo "ERROR: Unknown option: ${arg}" >&2; exit 1 ;;
   esac
 done
@@ -39,19 +40,51 @@ source "$CONFIG_FILE"
 
 : "${PROJECT_NAME:?PROJECT_NAME must be set in config/admin.env}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
-# AWS_PROFILE is optional — falls back to the AWS CLI default profile when not set.
-# Override at runtime with: ./admin.sh bootstrap --profile <name>
+
+# Apply CLI overrides (set via env vars by run.sh)
 AWS_PROFILE="${AWS_PROFILE:-}"
-if [[ -n "${BOOTSTRAP_PROFILE_OVERRIDE:-}" ]]; then
-  AWS_PROFILE="${BOOTSTRAP_PROFILE_OVERRIDE}"
+[[ -n "${BOOTSTRAP_PROFILE_OVERRIDE:-}" ]] && AWS_PROFILE="${BOOTSTRAP_PROFILE_OVERRIDE}"
+[[ -n "${BOOTSTRAP_REGION_OVERRIDE:-}" ]]  && AWS_REGION="${BOOTSTRAP_REGION_OVERRIDE}"
+
+# ---------------------------------------------------------------------------
+# Profile existence check — if the configured profile doesn't exist yet (e.g.
+# before first bootstrap), fall back to default credentials and prompt the
+# admin to confirm the deploy region, since their default creds may target a
+# different region.
+# ---------------------------------------------------------------------------
+if [[ -n "${AWS_PROFILE}" ]]; then
+  if ! aws configure list-profiles 2>/dev/null | grep -qx "${AWS_PROFILE}"; then
+    echo "NOTE: Profile '${AWS_PROFILE}' not found in ~/.aws/config."
+    echo "      Falling back to default AWS credentials for bootstrap."
+    echo "      After bootstrap completes, append config/aws-config-admin.example"
+    echo "      to ~/.aws/config, then re-run './admin.sh sso-login'."
+    echo ""
+    AWS_PROFILE=""
+
+    # Prompt to confirm deploy region — default creds may target a different region
+    _default_region=$(aws configure get region 2>/dev/null || echo "")
+    if [[ "${_default_region}" != "${AWS_REGION}" ]]; then
+      echo "  Default credentials region : ${_default_region:-<not set>}"
+      echo "  admin.env deploy region    : ${AWS_REGION}"
+      echo ""
+      read -r -p "  Region to use for bootstrap [${AWS_REGION}]: " _region_input
+      [[ -n "${_region_input}" ]] && AWS_REGION="${_region_input}"
+      echo ""
+    fi
+  fi
 fi
 
-BUCKET_NAME="${PROJECT_NAME}-tfstate"
-DYNAMODB_TABLE="${PROJECT_NAME}-tflock"
 USERS_KEY="${PROJECT_NAME}/users.json"
 
 PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE}" ]] && PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+
+# SSO_PROFILE_ARGS — used for all IC API calls (sso-admin, identitystore).
+# In cross-account setups, IC lives in a different account and needs a separate profile.
+# Defaults to AWS_PROFILE when SSO_PROFILE is not set.
+_SSO_PROFILE="${SSO_PROFILE:-${AWS_PROFILE}}"
+SSO_PROFILE_ARGS=()
+[[ -n "${_SSO_PROFILE}" ]] && SSO_PROFILE_ARGS=(--profile "${_SSO_PROFILE}")
 
 if [[ -n "${AWS_PROFILE}" ]]; then
   AWS="aws --region ${AWS_REGION} --profile ${AWS_PROFILE}"
@@ -64,8 +97,6 @@ echo "=== fre-aws bootstrap ==="
 echo "  Project:  ${PROJECT_NAME}"
 echo "  Region:   ${AWS_REGION}"
 echo "  Profile:  ${AWS_PROFILE:-<default>}"
-echo "  Bucket:   ${BUCKET_NAME}"
-echo "  DynamoDB: ${DYNAMODB_TABLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -85,6 +116,12 @@ CALLER_IDENTITY=$($AWS sts get-caller-identity --output json 2>&1) || {
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
 echo "  Authenticated as: $(echo "$CALLER_IDENTITY" | jq -r '.Arn')"
 echo "  Account ID: ${ACCOUNT_ID}"
+echo ""
+
+BUCKET_NAME="${PROJECT_NAME}-${ACCOUNT_ID}-tfstate"
+DYNAMODB_TABLE="${PROJECT_NAME}-${ACCOUNT_ID}-tflock"
+echo "  Bucket:   ${BUCKET_NAME}"
+echo "  DynamoDB: ${DYNAMODB_TABLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -183,7 +220,7 @@ _find_ps_arn() {
   while IFS= read -r arn; do
     [[ -z "${arn}" ]] && continue
     local name
-    name=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    name=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin describe-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${arn}" \
@@ -192,7 +229,7 @@ _find_ps_arn() {
       found="${arn}"
       break
     fi
-  done < <(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+  done < <(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-permission-sets \
     --instance-arn "${SSO_INSTANCE_ARN}" \
     --max-results 100 \
@@ -238,6 +275,14 @@ if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
     && REGISTRY_EXISTS=true || true
 fi
 
+# Canonical settings (always overwritten to pick up admin.env changes)
+SETTINGS_KEY="${PROJECT_NAME}/settings.json"
+SETTINGS_EXISTS=false
+if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
+  $AWS s3api head-object --bucket "${BUCKET_NAME}" --key "${SETTINGS_KEY}" &>/dev/null \
+    && SETTINGS_EXISTS=true || true
+fi
+
 # SES sender verification
 SES_VERIFIED=false
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
@@ -250,16 +295,17 @@ if [[ -n "${SENDER_EMAIL:-}" ]]; then
 fi
 
 # IAM Identity Center permission sets
+# In external mode, IC is managed entirely by the org — bootstrap skips all IC operations.
 SSO_INSTANCE_ARN=""
 IDENTITY_STORE_ID=""
 DEV_PS_ARN=""
 ADMIN_PS_ARN=""
-if [[ -n "${SSO_REGION:-}" ]]; then
-  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
   [[ "${SSO_INSTANCE_ARN}" == "None" ]] && SSO_INSTANCE_ARN=""
-  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
   [[ "${IDENTITY_STORE_ID}" == "None" ]] && IDENTITY_STORE_ID=""
@@ -298,6 +344,11 @@ if [[ "${REGISTRY_EXISTS}" == false ]]; then
 else
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "exists  (no changes)"
 fi
+if [[ "${SETTINGS_EXISTS}" == false ]]; then
+  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "CREATE"
+else
+  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "exists  (will be refreshed)"
+fi
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
   if [[ "${SES_VERIFIED}" == true ]]; then
     printf "  %-24s %-36s %s\n" "SES sender"        "${SENDER_EMAIL}"               "exists  (already verified)"
@@ -310,14 +361,23 @@ else
 fi
 
 echo ""
-if [[ -n "${SSO_REGION:-}" ]]; then
-  echo "  IAM Identity Center  (region: ${SSO_REGION})"
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "  IAM Identity Center  (external mode — org-managed, no changes)"
+elif [[ -n "${SSO_REGION:-}" ]]; then
+  if [[ "${_SSO_PROFILE:-}" != "${AWS_PROFILE:-}" && -n "${_SSO_PROFILE:-}" ]]; then
+    echo "  IAM Identity Center  (region: ${SSO_REGION}, SSO profile: ${_SSO_PROFILE})"
+  else
+    echo "  IAM Identity Center  (region: ${SSO_REGION})"
+  fi
 else
   echo "  IAM Identity Center  (SSO_REGION not set in admin.env — permission sets will be skipped)"
 fi
 echo "  ──────────────────────────────────────────────────────────────────"
 
-if [[ -n "${SSO_REGION:-}" && -z "${SSO_INSTANCE_ARN}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  printf "  %-55s %s\n" "Permission sets" "SKIP  (IDENTITY_MODE=external)"
+  echo "    Users authenticate via their existing org IC roles — no fre-aws permission sets needed."
+elif [[ -n "${SSO_REGION:-}" && -z "${SSO_INSTANCE_ARN}" ]]; then
   echo "  WARNING: No Identity Center instance found in region ${SSO_REGION} — permission sets will be skipped."
 else
   if [[ -z "${SSO_REGION:-}" ]]; then
@@ -465,6 +525,17 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Canonical settings — always overwrite so second admins get current values
+# ---------------------------------------------------------------------------
+echo "Canonical settings..."
+printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s"\n}\n' \
+  "${AWS_REGION}" "${NETWORK_MODE:-public}" "${USE_SPOT:-false}" \
+  "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" \
+  | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
+echo "  Written to s3://${BUCKET_NAME}/${SETTINGS_KEY}"
+echo ""
+
+# ---------------------------------------------------------------------------
 # SES sender verification (only if SENDER_EMAIL is configured)
 # ---------------------------------------------------------------------------
 if [[ -n "${SENDER_EMAIL:-}" ]]; then
@@ -487,11 +558,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# IAM Identity Center permission sets (only if SSO_REGION is configured)
-# Creates ${PROJECT_NAME}-developer-access and ${PROJECT_NAME}-admin-access
-# permission sets idempotently, using ARNs cached in the pre-flight phase.
+# IAM Identity Center permission sets (managed mode only, only if SSO_REGION is configured)
+# External mode: org manages IC entirely; bootstrap makes no IC API calls.
 # ---------------------------------------------------------------------------
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "IDENTITY_MODE=external — skipping IAM Identity Center (using org-managed roles)."
+  echo ""
+elif [[ -n "${SSO_REGION:-}" ]]; then
   echo "IAM Identity Center permission sets (region: ${SSO_REGION})..."
 
   if [[ -z "${SSO_INSTANCE_ARN}" ]]; then
@@ -504,7 +577,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
     # ---- ${PROJECT_NAME}-developer-access ----------------------------------------
     if [[ -z "${DEV_PS_ARN}" ]]; then
-      DEV_PS_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      DEV_PS_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin create-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --name "${PROJECT_NAME}-developer-access" \
@@ -518,7 +591,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
     POLICY_FILE=$(mktemp)
     echo "${DEV_POLICY}" > "${POLICY_FILE}"
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${DEV_PS_ARN}" \
@@ -528,7 +601,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
     # ---- ${PROJECT_NAME}-admin-access --------------------------------------------
     if [[ -z "${ADMIN_PS_ARN}" ]]; then
-      ADMIN_PS_ARN=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      ADMIN_PS_ARN=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin create-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --name "${PROJECT_NAME}-admin-access" \
@@ -540,7 +613,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       echo "  '${PROJECT_NAME}-admin-access': already exists."
     fi
 
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin attach-managed-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -550,7 +623,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
     POLICY_FILE=$(mktemp)
     echo "${ADMIN_POLICY}" > "${POLICY_FILE}"
-    aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+    aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
       sso-admin put-inline-policy-to-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${ADMIN_PS_ARN}" \
@@ -566,7 +639,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
       echo "  Provisioning '${ps_name}' to account ${ACCOUNT_ID}..."
 
       local provision_out
-      provision_out=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      provision_out=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         sso-admin provision-permission-set \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --permission-set-arn "${ps_arn}" \
@@ -584,7 +657,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
 
       local status result_json reason=""
       for _ in $(seq 1 20); do
-        result_json=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        result_json=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin describe-permission-set-provisioning-status \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --provision-permission-set-request-id "${request_id}" \
@@ -608,14 +681,14 @@ if [[ -n "${SSO_REGION:-}" ]]; then
     # ---- Assign permission sets to OWNER_EMAIL if provided ----------------------
     echo ""
     if [[ -n "${OWNER_EMAIL:-}" && -n "${IDENTITY_STORE_ID}" ]]; then
-      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+      ADMIN_USER_ID=$(aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
         identitystore list-users \
         --identity-store-id "${IDENTITY_STORE_ID}" \
         --filters "AttributePath=Emails.Value,AttributeValue=${OWNER_EMAIL}" \
         --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
 
       if [[ -n "${ADMIN_USER_ID}" && "${ADMIN_USER_ID}" != "None" ]]; then
-        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \
@@ -625,7 +698,7 @@ if [[ -n "${SSO_REGION:-}" ]]; then
           --principal-id "${ADMIN_USER_ID}" >/dev/null 2>/dev/null \
           && echo "  Assigned ${PROJECT_NAME}-admin-access to ${OWNER_EMAIL}." \
           || echo "  ${PROJECT_NAME}-admin-access already assigned to ${OWNER_EMAIL}."
-        aws --region "${SSO_REGION}" "${PROFILE_ARGS[@]}" \
+        aws --region "${SSO_REGION}" "${SSO_PROFILE_ARGS[@]}" \
           sso-admin create-account-assignment \
           --instance-arn "${SSO_INSTANCE_ARN}" \
           --target-id "${ACCOUNT_ID}" \
@@ -669,11 +742,10 @@ echo "Backend config written to config/backend.env"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Write admin AWS profile config (if SSO is configured)
-# Lets a first-time admin transition from their existing high-privilege profile
-# to the ${PROJECT_NAME}-admin-access / ${PROJECT_NAME}-developer-access profiles.
+# Write admin AWS profile config (managed mode + SSO configured only)
+# In external mode, admins use their existing org IC profiles — no generated config needed.
 # ---------------------------------------------------------------------------
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
   AWS_CONFIG_FILE="${SCRIPT_DIR}/../config/aws-config-admin.example"
   SSO_URL="${SSO_START_URL:-<your-sso-start-url — find it in IAM Identity Center → Dashboard>}"
   cat > "${AWS_CONFIG_FILE}" <<EOF
@@ -711,7 +783,16 @@ fi
 echo "=== Bootstrap complete ==="
 echo ""
 
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+  echo "Next steps:"
+  echo ""
+  echo "  1. Ensure AWS_PROFILE in config/admin.env points to your existing org IC profile."
+  echo "  2. Run './admin.sh add-user <username>' to register users."
+  echo "  3. Run './admin.sh up <username>' to provision EC2 instances."
+  echo ""
+  echo "  Note: users connect using their existing org IC credentials."
+  echo "  If SSM access fails, ask IT to verify ssm:StartSession is in the developer permission set."
+elif [[ -n "${SSO_REGION:-}" ]]; then
   echo "Next steps:"
   echo ""
   echo "  1. Append config/aws-config-admin.example to ~/.aws/config"

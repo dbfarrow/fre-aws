@@ -149,7 +149,6 @@ module "user_ec2" {
       volume_size           = var.ebs_volume_size_gb
       volume_type           = "gp3"
       encrypted             = true
-      kms_key_id            = var.kms_key_arn
       delete_on_termination = true
     }
   ]

@@ -17,24 +17,36 @@ elif [[ -f "${SCRIPT_DIR}/../config/user.env" ]]; then
   source "${SCRIPT_DIR}/../config/user.env"
 fi
 
-: "${AWS_PROFILE:?AWS_PROFILE not set}"
-
 # ---------------------------------------------------------------------------
 # check_profile <profile> <label>
 # Prints identity info for the profile. Returns 1 if auth fails, 2 if the
-# profile is not configured.
+# profile is not configured. Pass empty string to use default credentials.
 # ---------------------------------------------------------------------------
 check_profile() {
   local profile="${1}" label="${2}"
 
-  echo "=== ${label} (${profile}) ==="
+  if [[ -n "${profile}" ]]; then
+    echo "=== ${label} (${profile}) ==="
+  else
+    echo "=== ${label} (default credentials) ==="
+  fi
+
+  local profile_args=()
+  [[ -n "${profile}" ]] && profile_args=(--profile "${profile}")
 
   local out
-  out=$(aws sts get-caller-identity --profile "${profile}" --output json 2>&1) || {
+  out=$(aws sts get-caller-identity "${profile_args[@]}" --output json 2>&1) || {
     if echo "${out}" | grep -qi "could not be found\|does not exist\|No profile"; then
       echo "  Not configured."
       echo ""
       return 2
+    fi
+    if echo "${out}" | grep -qi "ForbiddenException\|No access\|not authorized"; then
+      echo "  ERROR: SSO session valid but role is not accessible." >&2
+      echo "         The permission set may not be assigned to your user in Identity Center." >&2
+      echo "         If you just tore down and are rebuilding: run './admin.sh bootstrap' first." >&2
+      echo ""
+      return 1
     fi
     echo "  ERROR: credentials not valid or expired." >&2
     echo "         ${out}" >&2
@@ -78,16 +90,28 @@ check_profile() {
 # Admin context: check both admin and dev profiles
 # ---------------------------------------------------------------------------
 if [[ "${IS_ADMIN}" == true ]]; then
-  DEV_PROFILE="${AWS_PROFILE}-dev"
+  if [[ -n "${CONNECT_PROFILE:-}" ]]; then
+    DEV_PROFILE="${CONNECT_PROFILE}"
+  elif [[ -n "${AWS_PROFILE:-}" ]]; then
+    DEV_PROFILE="${AWS_PROFILE}-dev"
+  else
+    DEV_PROFILE=""
+  fi
   ADMIN_OK=true
   DEV_OK=true
 
   check_profile "${AWS_PROFILE}" "admin" || {
     [[ $? -eq 1 ]] && ADMIN_OK=false
   }
-  check_profile "${DEV_PROFILE}" "connect" || {
-    [[ $? -eq 1 ]] && DEV_OK=false
-  }
+
+  # In managed mode, also verify the connect profile used by 'connect'.
+  # In external mode, connect uses AWS_PROFILE directly — no fre-aws dev profile exists.
+  # Skip if no dev profile could be derived (AWS_PROFILE unset, no CONNECT_PROFILE).
+  if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${DEV_PROFILE}" ]]; then
+    check_profile "${DEV_PROFILE}" "connect" || {
+      [[ $? -eq 1 ]] && DEV_OK=false
+    }
+  fi
 
   if [[ "${ADMIN_OK}" == false || "${DEV_OK}" == false ]]; then
     echo "Run './admin.sh sso-login' to re-authenticate." >&2

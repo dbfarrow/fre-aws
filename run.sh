@@ -61,12 +61,16 @@ user management:
                         -v shows all registry attributes (email, role, git, ssh key)
 
 infrastructure:
-  bootstrap [--plan] [--yes] [--profile <name>]
+  bootstrap [--plan] [--yes] [--profile <name>] [--region <region>]
                         One-time setup (S3, DynamoDB, SES verification,
                         IAM Identity Center permission sets).
-                        --plan   Show what will be created without making changes.
-                        --yes    Skip the confirmation prompt.
+                        --plan    Show what will be created without making changes.
+                        --yes     Skip the confirmation prompt.
                         --profile Use a named AWS profile instead of admin.env.
+                        --region  Override the deploy region from admin.env.
+  configure             Second-admin onboarding: validate local admin.env against
+                        canonical S3 settings and regenerate config/backend.env.
+                        Run this after the super-admin has bootstrapped the project.
   up [user]             Create / update base infrastructure + all users (or just one user)
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
@@ -365,6 +369,11 @@ if [[ "${MODE}" == "admin" ]]; then
         echo "Clearing credential cache..."
         rm -f "${HOME}/.aws/cli/cache/"* 2>/dev/null || true
       fi
+      if [[ -n "${AWS_PROFILE:-}" ]]; then
+        echo "Logging in with profile '${AWS_PROFILE}'..."
+      else
+        echo "Logging in with default credentials..."
+      fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"
       ;;
@@ -388,23 +397,33 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     bootstrap)
       BOOTSTRAP_PROFILE=""
+      BOOTSTRAP_REGION=""
       BOOTSTRAP_ARGS=()
-      _skip_next=false
+      _skip_next=""
       for _arg in "${@:2}"; do
-        if [[ "${_skip_next}" == true ]]; then
-          BOOTSTRAP_PROFILE="${_arg}"
-          _skip_next=false
+        if [[ -n "${_skip_next}" ]]; then
+          case "${_skip_next}" in
+            profile) BOOTSTRAP_PROFILE="${_arg}" ;;
+            region)  BOOTSTRAP_REGION="${_arg}" ;;
+          esac
+          _skip_next=""
           continue
         fi
         case "${_arg}" in
-          --profile)    _skip_next=true ;;
+          --profile)    _skip_next=profile ;;
           --profile=*)  BOOTSTRAP_PROFILE="${_arg#--profile=}" ;;
+          --region)     _skip_next=region ;;
+          --region=*)   BOOTSTRAP_REGION="${_arg#--region=}" ;;
           --plan|--dry-run|--yes|-y) BOOTSTRAP_ARGS+=("${_arg}") ;;
         esac
       done
       docker run "${DOCKER_ARGS[@]}" \
         --env "BOOTSTRAP_PROFILE_OVERRIDE=${BOOTSTRAP_PROFILE}" \
+        --env "BOOTSTRAP_REGION_OVERRIDE=${BOOTSTRAP_REGION}" \
         "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
+      ;;
+    configure)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh
       ;;
     up)
       ADMIN_SSH_PUB_KEY=""
@@ -485,6 +504,23 @@ if [[ "${MODE}" == "admin" ]]; then
       ;;
     connect)
       require_username
+      # Determine the profile for connect (developer-access, not admin-access).
+      # Priority: explicit CONNECT_PROFILE > derived from AWS_PROFILE > default creds.
+      # External mode: use AWS_PROFILE directly (org profile already has SSM access).
+      # Managed mode: append -dev to AWS_PROFILE, but only if AWS_PROFILE is set.
+      if [[ -n "${CONNECT_PROFILE:-}" ]]; then
+        _CONNECT_PROFILE="${CONNECT_PROFILE}"
+      elif [[ "${IDENTITY_MODE:-managed}" == "external" ]]; then
+        _CONNECT_PROFILE="${AWS_PROFILE:-}"
+      elif [[ -n "${AWS_PROFILE:-}" ]]; then
+        _CONNECT_PROFILE="${AWS_PROFILE}-dev"
+      else
+        _CONNECT_PROFILE=""
+      fi
+      # Only inject AWS_PROFILE into the container if we resolved a profile.
+      # Empty means: use default credential chain inside the container.
+      _CONNECT_PROFILE_ARG=()
+      [[ -n "${_CONNECT_PROFILE}" ]] && _CONNECT_PROFILE_ARG=("--env" "AWS_PROFILE=${_CONNECT_PROFILE}")
       AGENT_SOCK=$(_detect_ssh_agent_sock)
       if [[ -n "${AGENT_SOCK}" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
@@ -493,7 +529,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
-          --env "AWS_PROFILE=claude-code-dev" \
+          "${_CONNECT_PROFILE_ARG[@]}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       else
         # Key file fallback: start fresh agent inside container, prompt for passphrase.
@@ -509,7 +545,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
-          --env "AWS_PROFILE=claude-code-dev" \
+          "${_CONNECT_PROFILE_ARG[@]}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       fi
@@ -618,6 +654,11 @@ if [[ "${MODE}" == "user" ]]; then
       if [[ "${FRESH_CREDS:-false}" == "true" ]]; then
         echo "Clearing credential cache..."
         rm -f "${USER_AWS_DIR}/cli/cache/"* 2>/dev/null || true
+      fi
+      if [[ -n "${AWS_PROFILE:-}" ]]; then
+        echo "Logging in with profile '${AWS_PROFILE}'..."
+      else
+        echo "Logging in with default credentials..."
       fi
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" \
         aws sso login --use-device-code --profile "${AWS_PROFILE}"

@@ -53,13 +53,61 @@ trap 'rm -f "${USERS_JSON}" "${ADMIN_KEYS_TFVARS}" "${TF_BASE_DIR}/.tfplan_base"
 # Terraform's Go SDK cannot consume the AWS CLI SSO token cache directly.
 # Exporting as standard env vars bridges the gap for both SSO and key-based profiles.
 # ---------------------------------------------------------------------------
-echo "--- exporting AWS credentials ---"
-eval "$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null | sed 's/^/export /')" || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+echo "--- exporting AWS credentials (profile=${AWS_PROFILE:-<none>}) ---"
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+_CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
+if [[ -z "${_CREDS}" ]]; then
+  echo "ERROR: No credentials returned${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
+  exit 1
+fi
+eval "$(echo "${_CREDS}" | sed 's/^/export /')" || {
+  echo "ERROR: Failed to export credentials into environment." >&2
+  exit 1
+}
+unset _CREDS _PROFILE_ARGS
 echo ""
+
+# ---------------------------------------------------------------------------
+# Canonical settings drift check — prompts for confirmation if drift found.
+# Silently skipped if settings.json absent (pre-existing projects).
+# ---------------------------------------------------------------------------
+_SETTINGS_KEY="${PROJECT_NAME}/settings.json"
+if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
+    s3 cp "s3://${TF_BACKEND_BUCKET}/${_SETTINGS_KEY}" - 2>/dev/null); then
+  _drift=false
+  _chk() {
+    local k="$1" v="$2"
+    local c; c=$(echo "${_CANONICAL}" | jq -r --arg k "$k" '.[$k] // empty')
+    if [[ -n "${c}" && "${c}" != "${v}" ]]; then
+      echo "  WARNING: ${k}: canonical='${c}', local='${v}'"
+      _drift=true
+    fi
+  }
+  _chk "aws_region"         "${AWS_REGION}"
+  _chk "network_mode"       "${NETWORK_MODE:-public}"
+  _chk "use_spot"           "${USE_SPOT:-false}"
+  _chk "identity_mode"      "${IDENTITY_MODE:-managed}"
+  _chk "ebs_volume_size_gb" "${EBS_VOLUME_SIZE_GB:-30}"
+  if [[ "${_drift}" == "true" ]]; then
+    echo ""
+    echo "  Your admin.env differs from the canonical settings stored in S3."
+    echo "  Run './admin.sh configure' to review and align your local config."
+    echo ""
+    read -r -p "  Continue anyway? [y/N] " _DRIFT_CONFIRM
+    if [[ ! "${_DRIFT_CONFIRM}" =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 0
+    fi
+    echo ""
+  fi
+  unset _chk _drift _CANONICAL _SETTINGS_KEY _DRIFT_CONFIRM
+fi
 
 # ---------------------------------------------------------------------------
 # Download user registry from S3
@@ -185,7 +233,6 @@ BASE_OUTPUTS=$(terraform -chdir="${TF_BASE_DIR}" output -json)
 SUBNET_ID=$(echo "${BASE_OUTPUTS}"         | jq -r '.subnet_id.value')
 ASSOC_PUBLIC_IP=$(echo "${BASE_OUTPUTS}"   | jq -r '.associate_public_ip.value')
 SECURITY_GROUP_ID=$(echo "${BASE_OUTPUTS}" | jq -r '.security_group_id.value')
-KMS_KEY_ARN=$(echo "${BASE_OUTPUTS}"       | jq -r '.kms_key_arn.value')
 
 # CloudFront cache invalidation (web app only)
 CF_DIST_ID=$(echo "${BASE_OUTPUTS}" | jq -r '.app_cloudfront_distribution_id.value // empty')
@@ -253,7 +300,6 @@ for username in "${APPLY_USERS[@]}"; do
     -var="subnet_id=${SUBNET_ID}" \
     -var="associate_public_ip=${ASSOC_PUBLIC_IP}" \
     -var="security_group_id=${SECURITY_GROUP_ID}" \
-    -var="kms_key_arn=${KMS_KEY_ARN}" \
     "${EXTRA_USER_ARGS[@]}" \
     -out="${TF_USER_DIR}/.tfplan_${username}"
   echo ""

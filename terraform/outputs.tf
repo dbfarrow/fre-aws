@@ -23,11 +23,6 @@ output "security_group_id" {
   value       = module.ec2_sg.security_group_id
 }
 
-output "kms_key_arn" {
-  description = "KMS key ARN used for EBS encryption on all user instances."
-  value       = module.kms.key_arn
-}
-
 output "app_url" {
   description = "Browser app URL (custom domain if set, otherwise CloudFront domain). Null if enable_web_app=false."
   value = try(

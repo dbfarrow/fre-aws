@@ -23,13 +23,15 @@ source "${SCRIPT_DIR}/../config/backend.env"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
 # ---------------------------------------------------------------------------
 # Credentials
 # ---------------------------------------------------------------------------
-CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       Run './admin.sh sso-login' first." >&2
   exit 1
 }
@@ -227,8 +229,9 @@ CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" 2>/dev/null | sort || true)
 USER_COUNT=$(echo "${CONFIGURED_USERS}" | grep -c . 2>/dev/null || echo 0)
 
 # Fetch Identity Center users not in the S3 registry (e.g. removed with --keep-sso)
+# Skipped in external mode: org IC may have thousands of users unrelated to this project.
 ORPHANED_SSO=""
-if [[ -n "${SSO_REGION:-}" ]]; then
+if [[ "${IDENTITY_MODE:-managed}" != "external" && -n "${SSO_REGION:-}" ]]; then
   IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
     sso-admin list-instances \
     --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
