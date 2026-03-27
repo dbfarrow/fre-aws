@@ -218,7 +218,7 @@ No changes to Terraform or scripts needed — only the credential source changes
 | Mode | `IDENTITY_MODE` | When to use |
 |------|----------------|-------------|
 | **Managed** | `managed` *(default)* | fre-aws creates and manages Identity Center users, assigns permission sets, generates credentials, and sends onboarding emails. Best for fresh AWS accounts where fre-aws is the SSO admin. |
-| **External** | `external` | An external IdP (Okta, Azure AD, etc.) manages Identity Center. Users already have their own AWS credentials and SSH keys. fre-aws only manages EC2 instances and the S3 user registry. |
+| **External** | `external` | An external IdP (Okta, Azure AD, etc.) manages Identity Center. Bootstrap makes **no IC API calls at all** — no permission sets created, no profiles generated. fre-aws only manages EC2 instances and the S3 user registry. Users connect using their existing org IC roles. |
 
 ### Managed mode (default)
 
@@ -228,26 +228,26 @@ No changes to Terraform or scripts needed — only the credential source changes
 - Builds an `~/.aws/config` and installer bundle for the user
 - Sends an onboarding email with a one-liner installer URL
 
-Required config: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` (or pass `--no-email`).
+Required config: `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` (or pass `--no-email`). None of these are needed in external mode.
 
 ### External mode
 
-The account's IdP manages all Identity Center users and permission assignments — fre-aws does not touch them. `add-user` only records the user in the S3 registry.
+The org's IdP manages all Identity Center users and permission assignments. **Bootstrap makes zero IC API calls in external mode** — no permission sets are created, no `aws-config-admin.example` is generated. fre-aws treats IC as completely off-limits and only manages EC2 instances and the S3 user registry.
+
+`add-user` only records the user in the S3 registry and prompts for their SSH public key. `remove-user` destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact — the IdP owns it.
 
 What users are expected to bring:
 - **AWS credentials** — via the org's IdP (they already have these)
 - **SSH public key** — their own key; no auto-generation
 - **Docker and Git** — users in this mode are assumed to be technical
 
-`remove-user` in external mode destroys the EC2 instance and removes the S3 registry entry, but leaves the Identity Center account intact (the IdP owns it).
+If a user can't connect via SSM, the fix is a one-line addition to the org's existing developer permission set (`ssm:StartSession`), not a new IC structure.
 
-To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_START_URL` and `SENDER_EMAIL` are not required.
-
-> **`SSO_REGION` is still required.** Bootstrap creates the `{project}-developer-access` and `{project}-admin-access` permission sets in Identity Center regardless of identity mode — users still need them to reach their EC2 instances via SSM. Set `SSO_REGION` to the region where your Identity Center instance lives.
+To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required.
 
 > **`list` and `stat` skip IC user enumeration in external mode.** In managed mode, these commands query `identitystore list-users` to surface orphaned SSO accounts. In external mode this is skipped — the org IC directory may contain thousands of users unrelated to this project.
 
-### Cross-account Identity Center (`SSO_PROFILE`)
+### Cross-account Identity Center (`SSO_PROFILE`) — managed mode only
 
 In most setups, bootstrap manages Identity Center using the same AWS profile (`AWS_PROFILE`) as all other operations. If your Identity Center instance lives in a **different AWS account** from your deployment target, set `SSO_PROFILE` in `config/admin.env`:
 
