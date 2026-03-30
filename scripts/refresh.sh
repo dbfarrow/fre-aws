@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # refresh.sh — Push config updates to a running instance without a rebuild.
-# Pushes: session_start.sh, .tmux.conf, autoshutdown timer, .bash_profile guards.
+# Pushes: session_start.sh, autoshutdown timer, profile guards (bash or zsh).
+# Does NOT touch user-owned dotfiles (.tmux.conf, .bashrc, etc.) — use push-config for those.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,12 +78,6 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /home/developer/session_start.sh > /dev/null && sudo chmod +x /home/developer/session_start.sh && sudo chown developer:developer /home/developer/session_start.sh" \
   < "${SESSION_START}"
 
-TMUX_CONF="${SCRIPT_DIR}/../config/tmux.conf"
-echo "--- pushing .tmux.conf to ${INSTANCE_ID} (${DEV_USERNAME}) ---"
-ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "tee /home/developer/.tmux.conf > /dev/null" \
-  < "${TMUX_CONF}"
-
 echo "--- installing autoshutdown on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /usr/local/bin/autoshutdown.sh > /dev/null && sudo chmod +x /usr/local/bin/autoshutdown.sh" \
@@ -135,19 +130,36 @@ SERVICE
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo systemctl daemon-reload && sudo systemctl enable --now autoshutdown.timer && echo '  autoshutdown timer active'"
 
-# Ensure .bash_profile uses the correct session launcher guard:
+# Detect the login shell so we patch the right profile file.
+# Uses getent to read the developer user's shell from /etc/passwd.
+echo "--- detecting login shell on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+INSTANCE_SHELL=$(ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "getent passwd developer | cut -d: -f7 | xargs basename" 2>/dev/null || echo "bash")
+if [[ "${INSTANCE_SHELL}" == "zsh" ]]; then
+  PROFILE_FILE=".zprofile"
+else
+  PROFILE_FILE=".bash_profile"
+fi
+echo "  Login shell: ${INSTANCE_SHELL} → patching ~/${PROFILE_FILE}"
+
+# Ensure the profile uses the correct session launcher guard:
 #   [[ -t 0 && -z "${TMUX:-}" ]]  (SSH and SSM browser terminal both have a TTY)
 # Remove the SSH_TTY restriction if present — SSM browser sessions don't set SSH_TTY.
-echo "--- patching .bash_profile on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
-ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" '
-  if grep -q "SSH_TTY" ~/.bash_profile; then
-    sed -i "s/\[\[ -n \"\${SSH_TTY:-}\" && -t 0 && -z \"\${TMUX:-}\" \]\]/[[ -t 0 \&\& -z \"\${TMUX:-}\" ]]/" ~/.bash_profile
-    sed -i "s/# Launch Claude Code session selector on interactive SSH login/# Launch Claude Code session selector on interactive login (SSH or SSM browser terminal)/" ~/.bash_profile
-    echo "  .bash_profile: removed SSH_TTY restriction (now fires for SSH and SSM sessions)"
+echo "--- patching ~/${PROFILE_FILE} on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" "
+  PROFILE_FILE=${PROFILE_FILE}
+  [[ ! -f ~/\${PROFILE_FILE} ]] && touch ~/\${PROFILE_FILE}
+  if grep -q 'SSH_TTY' ~/\${PROFILE_FILE}; then
+    sed -i 's/\[\[ -n \"\${SSH_TTY:-}\" && -t 0 && -z \"\${TMUX:-}\" \]\]/[[ -t 0 \&\& -z \"\${TMUX:-}\" ]]/' ~/\${PROFILE_FILE}
+    sed -i 's/# Launch Claude Code session selector on interactive SSH login/# Launch Claude Code session selector on interactive login (SSH or SSM browser terminal)/' ~/\${PROFILE_FILE}
+    echo '  removed SSH_TTY restriction'
+  elif ! grep -q 'session_start.sh' ~/\${PROFILE_FILE}; then
+    printf '\n# Launch Claude Code session selector on interactive login (SSH or SSM browser terminal)\nif [[ -t 0 && -z \"\${TMUX:-}\" ]]; then\n  exec /home/developer/session_start.sh\nfi\n' >> ~/\${PROFILE_FILE}
+    echo '  session launcher guard added'
   else
-    echo "  .bash_profile already up to date."
+    echo '  already up to date'
   fi
-'
+"
 
 echo "--- ensuring rsync is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
@@ -201,7 +213,7 @@ CLAUDE_MD
 
 echo ""
 echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
-echo "    session_start.sh + .tmux.conf: take effect on next connect"
-echo "    autoshutdown timer:            active immediately"
-echo "    web-preview service:           active immediately (http://localhost:8080)"
-echo "    ~/.claude/CLAUDE.md:           updated"
+echo "    session_start.sh:     take effect on next connect"
+echo "    autoshutdown timer:   active immediately"
+echo "    web-preview service:  active immediately (http://localhost:8080)"
+echo "    ~/.claude/CLAUDE.md:  updated"
