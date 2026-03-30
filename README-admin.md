@@ -272,6 +272,16 @@ If a user can't connect via SSM, the fix is a one-line addition to the org's exi
 
 To enable: set `IDENTITY_MODE=external` in `config/admin.env`. `SSO_REGION`, `SSO_START_URL`, and `SENDER_EMAIL` are not required.
 
+#### Terraform state backend access in external mode
+
+Bootstrap creates the S3 state bucket and DynamoDB lock table, then adds a DynamoDB resource policy granting lock operations to the role that ran bootstrap. If the role running `up`/`down` is **different** from the one that ran bootstrap — common in corporate environments where bootstrap needs elevated access but daily operations use a scoped org SSO role — add the Terraform operator ARN to `config/admin.env` and re-run bootstrap (idempotent):
+
+```
+TERRAFORM_OPERATOR_ARNS=arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_MyOrgRole_abc123/*
+```
+
+Use the `/*` wildcard at the end of SSO assumed-role ARNs to cover all sessions of that role. Multiple ARNs are comma-separated. Bootstrap shows which ARNs will be granted in its plan output. This setting applies in both managed and external mode — any environment where the bootstrap role and Terraform operator role differ.
+
 > **`list` and `stat` skip IC user enumeration in external mode.** In managed mode, these commands query `identitystore list-users` to surface orphaned SSO accounts. In external mode this is skipped — the org IC directory may contain thousands of users unrelated to this project.
 
 ### Cross-account Identity Center (`SSO_PROFILE`) — managed mode only

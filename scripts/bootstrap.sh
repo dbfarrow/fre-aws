@@ -114,9 +114,32 @@ CALLER_IDENTITY=$($AWS sts get-caller-identity --output json 2>&1) || {
   exit 1
 }
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
-echo "  Authenticated as: $(echo "$CALLER_IDENTITY" | jq -r '.Arn')"
+CALLER_ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn')
+echo "  Authenticated as: ${CALLER_ARN}"
 echo "  Account ID: ${ACCOUNT_ID}"
 echo ""
+
+# Derive a stable ARN for the resource policy — session-specific ARNs (sts assumed-role)
+# are replaced with a wildcard so the grant covers all sessions of the same role.
+# IAM user ARNs are used as-is.
+if [[ "${CALLER_ARN}" =~ ^arn:aws:sts:: ]]; then
+  CALLER_STABLE_ARN=$(echo "${CALLER_ARN}" | sed 's|/[^/]*$|/*|')
+else
+  CALLER_STABLE_ARN="${CALLER_ARN}"
+fi
+
+# Build the full list of operator ARNs: caller + any extras from TERRAFORM_OPERATOR_ARNS.
+# These ARNs are granted Terraform state backend access in the DynamoDB resource policy.
+_OPERATOR_ARNS=("${CALLER_STABLE_ARN}")
+if [[ -n "${TERRAFORM_OPERATOR_ARNS:-}" ]]; then
+  IFS=',' read -ra _EXTRA_ARNS <<< "${TERRAFORM_OPERATOR_ARNS}"
+  for _arn in "${_EXTRA_ARNS[@]}"; do
+    _arn=$(echo "${_arn}" | xargs)  # trim whitespace
+    [[ -n "${_arn}" ]] && _OPERATOR_ARNS+=("${_arn}")
+  done
+fi
+# Build a compact JSON array for use in policy documents
+OPERATOR_ARNS_JSON=$(printf '%s\n' "${_OPERATOR_ARNS[@]}" | jq -R . | jq -sc .)
 
 BUCKET_NAME="${PROJECT_NAME}-${ACCOUNT_ID}-tfstate"
 DYNAMODB_TABLE="${PROJECT_NAME}-${ACCOUNT_ID}-tflock"
@@ -337,8 +360,14 @@ fi
 if [[ "${DDB_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "DynamoDB lock table" "${DYNAMODB_TABLE}"             "CREATE"
 else
-  printf "  %-24s %-36s %s\n" "DynamoDB lock table" "${DYNAMODB_TABLE}"             "exists  (tags will be refreshed)"
+  printf "  %-24s %-36s %s\n" "DynamoDB lock table" "${DYNAMODB_TABLE}"             "exists  (tags + resource policy will be refreshed)"
 fi
+echo "    Resource policy will grant Terraform state locking to:"
+for _arn in "${_OPERATOR_ARNS[@]}"; do
+  echo "      ${_arn}"
+done
+[[ "${#_OPERATOR_ARNS[@]}" -eq 1 ]] && echo "    (add more via TERRAFORM_OPERATOR_ARNS in admin.env if up/down runs as a different role)"
+echo ""
 if [[ "${REGISTRY_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "CREATE"
 else
@@ -509,6 +538,37 @@ TABLE_ARN=$($AWS dynamodb describe-table --table-name "${DYNAMODB_TABLE}" --quer
 if [[ -n "${TABLE_ARN}" ]]; then
   $AWS dynamodb tag-resource --resource-arn "${TABLE_ARN}" --tags "Key=ProjectName,Value=${PROJECT_NAME}" "Key=ManagedBy,Value=fre-aws"
   echo "  Tags applied."
+
+  # Resource policy: grant Terraform state locking to operator ARNs.
+  # This is essential in external-identity-mode environments where the role running
+  # terraform (up/down) may not have DynamoDB in its IAM identity policy.
+  # DynamoDB resource-based policies grant same-account access without requiring
+  # a matching identity-based policy on the principal.
+  _DDB_POLICY=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "TerraformStateLock",
+    "Effect": "Allow",
+    "Principal": {"AWS": ${OPERATOR_ARNS_JSON}},
+    "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"],
+    "Resource": "${TABLE_ARN}"
+  }]
+}
+EOF
+)
+  if $AWS dynamodb put-resource-policy \
+      --resource-arn "${TABLE_ARN}" \
+      --policy "${_DDB_POLICY}" \
+      --output json > /dev/null 2>&1; then
+    echo "  Resource policy applied (Terraform state locking granted to ${#_OPERATOR_ARNS[@]} ARN(s))."
+  else
+    echo "  WARNING: Could not apply DynamoDB resource policy." >&2
+    echo "           If the role running 'up' lacks dynamodb:GetItem/PutItem/DeleteItem," >&2
+    echo "           add TERRAFORM_OPERATOR_ARNS to admin.env and re-run bootstrap with" >&2
+    echo "           a role that has dynamodb:PutResourcePolicy on this table." >&2
+  fi
+  unset _DDB_POLICY
 fi
 echo ""
 
