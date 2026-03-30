@@ -153,6 +153,23 @@ echo "  Role: ${ROLE}"
 echo ""
 
 # ---------------------------------------------------------------------------
+# Preferred shell
+# ---------------------------------------------------------------------------
+if [[ -z "${PREFERRED_SHELL:-}" ]]; then
+  echo "Preferred shell:"
+  echo "  1) bash  [default]"
+  echo "  2) zsh"
+  read -r -p "Select shell [1]: " _SHELL_CHOICE
+  case "${_SHELL_CHOICE:-1}" in
+    2|zsh)  PREFERRED_SHELL="zsh"  ;;
+    *)      PREFERRED_SHELL="bash" ;;
+  esac
+  unset _SHELL_CHOICE
+fi
+echo "  Shell: ${PREFERRED_SHELL}"
+echo ""
+
+# ---------------------------------------------------------------------------
 # SSH key
 # ---------------------------------------------------------------------------
 SSH_PRIVATE_KEY_FILE=""
@@ -555,12 +572,14 @@ jq \
   --arg email  "${GIT_USER_EMAIL}" \
   --arg role   "${ROLE}" \
   --arg uemail "${USER_EMAIL}" \
+  --arg shell  "${PREFERRED_SHELL:-bash}" \
   '.[$user] = {
-    ssh_public_key: $key,
-    git_user_name:  $name,
-    git_user_email: $email,
-    role:           $role,
-    user_email:     $uemail
+    ssh_public_key:   $key,
+    git_user_name:    $name,
+    git_user_email:   $email,
+    role:             $role,
+    user_email:       $uemail,
+    preferred_shell:  $shell
   }' \
   "${USERS_JSON}" > "${USERS_JSON}.tmp"
 mv "${USERS_JSON}.tmp" "${USERS_JSON}"

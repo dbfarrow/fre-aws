@@ -99,3 +99,9 @@ variable "ami_id" {
   type        = string
   default     = ""
 }
+
+variable "preferred_shell" {
+  description = "Login shell for the developer user (bash or zsh)"
+  type        = string
+  default     = "bash"
+}

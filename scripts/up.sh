@@ -267,6 +267,7 @@ for username in "${APPLY_USERS[@]}"; do
   SSH_PUBLIC_KEY=$(jq -r --arg u "${username}" '.[$u].ssh_public_key' "${USERS_JSON}")
   GIT_USER_NAME=$(jq -r --arg u "${username}" '.[$u].git_user_name'   "${USERS_JSON}")
   GIT_USER_EMAIL=$(jq -r --arg u "${username}" '.[$u].git_user_email' "${USERS_JSON}")
+  PREFERRED_SHELL=$(jq -r --arg u "${username}" '.[$u].preferred_shell // "bash"' "${USERS_JSON}")
 
   echo "--- ${username}: terraform init ---"
   terraform -chdir="${TF_USER_DIR}" init \
@@ -295,6 +296,7 @@ for username in "${APPLY_USERS[@]}"; do
     -var="ssh_public_key=${SSH_PUBLIC_KEY}" \
     -var="git_user_name=${GIT_USER_NAME}" \
     -var="git_user_email=${GIT_USER_EMAIL}" \
+    -var="preferred_shell=${PREFERRED_SHELL}" \
     -var="project_name=${PROJECT_NAME}" \
     -var="aws_region=${AWS_REGION}" \
     -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \

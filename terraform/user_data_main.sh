@@ -31,7 +31,17 @@ claude --version || true
 # Developer user
 # ---------------------------------------------------------------------------
 if ! id "developer" &>/dev/null; then
-  useradd -m -s /bin/bash developer
+  if [[ "${PREFERRED_SHELL:-bash}" == "zsh" ]]; then
+    dnf install -y zsh
+    useradd -m -s "$(which zsh)" developer
+    # Suppress the zsh new-user wizard on first login
+    touch /home/developer/.zshrc
+    chown developer:developer /home/developer/.zshrc
+    echo "Preferred shell: zsh"
+  else
+    useradd -m -s /bin/bash developer
+    echo "Preferred shell: bash"
+  fi
   echo "developer ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/developer
   chmod 440 /etc/sudoers.d/developer
 fi
