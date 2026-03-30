@@ -84,7 +84,12 @@ instance lifecycle:
 
 connection:
   connect <user>        Open a shell on a user's EC2 instance (SSH over SSM)
-  refresh <user>        Push updated session_start.sh to a running instance
+  refresh <user>        Push system config (session_start.sh, autoshutdown, profile guard)
+                        to a running instance. Does not touch user dotfiles.
+  push-config <user>    Push personal dotfiles from the host to a user's instance.
+                        Looks for: ~/.tmux.conf  ~/.bashrc  ~/.zshrc  ~/.vimrc
+                        Missing files are skipped. Does not touch ~/.bash_profile
+                        or ~/.zprofile.
   ssm <user>            Direct SSM shell (fallback when SSH isn't working)
   push-admin-keys [user]
                         Append admin SSH key to authorized_keys on one or all
@@ -601,6 +606,28 @@ if [[ "${MODE}" == "admin" ]]; then
           --env "AWS_PROFILE=${AWS_PROFILE}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/refresh.sh
+      fi
+      ;;
+    push-config)
+      require_username
+      AGENT_SOCK=$(_detect_ssh_agent_sock)
+      _PUSH_CFG_ARGS=()
+      [[ -f "${HOME}/.tmux.conf" ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.tmux.conf:/host-configs/tmux.conf:ro")
+      [[ -f "${HOME}/.bashrc"   ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.bashrc:/host-configs/bashrc:ro")
+      [[ -f "${HOME}/.zshrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.zshrc:/host-configs/zshrc:ro")
+      [[ -f "${HOME}/.vimrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.vimrc:/host-configs/vimrc:ro")
+      if [[ -n "${AGENT_SOCK}" ]]; then
+        docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
+          --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
+          --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=${AWS_PROFILE}" \
+          "${IMAGE_NAME}" /workspace/scripts/push-config.sh
+      else
+        docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
+          --env "DEV_USERNAME=${USERNAME}" \
+          --env "AWS_PROFILE=${AWS_PROFILE}" \
+          "${IMAGE_NAME}" /workspace/scripts/push-config.sh
       fi
       ;;
     ssm)

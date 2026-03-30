@@ -2,7 +2,13 @@
 # ---------------------------------------------------------------------------
 # Invoke session launcher on interactive SSH login
 # ---------------------------------------------------------------------------
-cat >> /home/developer/.bash_profile << 'PROFILE'
+if [[ "${PREFERRED_SHELL:-bash}" == "zsh" ]]; then
+  _PROFILE=/home/developer/.zprofile
+else
+  _PROFILE=/home/developer/.bash_profile
+fi
+
+cat >> "${_PROFILE}" << 'PROFILE'
 
 # Launch Claude Code session selector on interactive login (SSH or SSM browser terminal)
 if [[ -t 0 && -z "${TMUX:-}" ]]; then
@@ -10,5 +16,5 @@ if [[ -t 0 && -z "${TMUX:-}" ]]; then
 fi
 PROFILE
 
-chown developer:developer /home/developer/.bash_profile
+chown developer:developer "${_PROFILE}"
 echo "=== Bootstrap complete ==="

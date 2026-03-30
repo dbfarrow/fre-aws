@@ -446,7 +446,7 @@ User configuration is stored in S3 and shared across all admins. The CLI keeps i
 ./admin.sh add-user
 ```
 
-The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key, git name, and git email.
+The interactive wizard prompts for: username, full name, email, role (`user` or `admin`), SSH key, git name, git email, and preferred shell (`bash` or `zsh`). The preferred shell is stored in the S3 user registry and used at provision time to set the login shell on the EC2 instance.
 
 What happens next depends on `IDENTITY_MODE` — see [Identity Management Mode](#identity-management-mode) for the full breakdown.
 
@@ -544,7 +544,7 @@ This uses SSM `send-command` — no existing SSH access required. Safe to run mu
 
 ### Pushing instance configuration updates
 
-After editing `scripts/session_start.sh`, `config/tmux.conf`, or any instance-side config:
+After editing `scripts/session_start.sh` or any system-managed instance config:
 
 ```bash
 ./admin.sh refresh <username>
@@ -555,11 +555,33 @@ No down/up needed. `refresh` pushes the following in one shot:
 | What | When it takes effect |
 |------|---------------------|
 | `session_start.sh` — session launcher | Next connect |
-| `.tmux.conf` — tmux key bindings and status bar | Next new tmux session |
 | Autoshutdown timer (systemd) | Immediately — active on the running instance |
-| `.bash_profile` TMUX guard | Next connect |
+| `~/.bash_profile` or `~/.zprofile` TMUX guard | Next connect (shell detected automatically) |
 | `web-preview.service` — static file server on port 8080 | Immediately — restarted on the running instance |
 | `~/.claude/CLAUDE.md` — file sharing instructions for Claude | Next Claude session |
+
+> `refresh` only manages system-owned files. It does not touch user dotfiles (`.tmux.conf`, `.bashrc`, `.zshrc`, `.vimrc`). Use `push-config` for those.
+
+### Pushing personal dotfiles
+
+Power users can push their own dotfiles from their local machine to their EC2 instance:
+
+```bash
+./admin.sh push-config <username>
+```
+
+`push-config` looks for these files on the **host** machine and pushes any that exist:
+
+| Host file | EC2 destination |
+|-----------|----------------|
+| `~/.tmux.conf` | `~/.tmux.conf` |
+| `~/.bashrc` | `~/.bashrc` |
+| `~/.zshrc` | `~/.zshrc` |
+| `~/.vimrc` | `~/.vimrc` |
+
+Files not found on the host are skipped silently. `push-config` never touches `~/.bash_profile` or `~/.zprofile` — those are system-managed (session launcher hook).
+
+A reference tmux config is available at `config/tmux.conf.example`. Copy it to `~/.tmux.conf` and push it with `push-config` if you want the project's default key bindings.
 
 ### Pushing script updates to users
 
@@ -666,9 +688,10 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Connecting
 ```bash
-./admin.sh connect <username>           # SSH into an instance (uses {project}-developer-access)
-./admin.sh refresh <username>           # push session_start.sh + tmux.conf + autoshutdown timer
-./admin.sh ssm     <username>           # direct SSM shell (fallback when SSH isn't working)
+./admin.sh connect     <username>       # SSH into an instance (uses {project}-developer-access)
+./admin.sh refresh     <username>       # push system config (session_start.sh, autoshutdown, profile guard)
+./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc)
+./admin.sh ssm         <username>       # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
                                         # running instances (idempotent, uses SSM — no SSH needed)
 ```

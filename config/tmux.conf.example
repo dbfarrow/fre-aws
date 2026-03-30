@@ -1,3 +1,14 @@
+# tmux.conf.example — reference configuration for power users.
+#
+# This file is NOT deployed to EC2 instances automatically. Instances boot with
+# tmux's built-in defaults so every user gets a clean slate.
+#
+# To use this config on your EC2 instance:
+#   1. Copy it to ~/.tmux.conf on your local machine
+#   2. Run ./admin.sh push-config <username> to push it to your instance
+#
+# You can also push ~/.bashrc, ~/.zshrc, and ~/.vimrc the same way.
+#
 #set default term 256-colors
 set -g default-terminal "screen-256color"
 
