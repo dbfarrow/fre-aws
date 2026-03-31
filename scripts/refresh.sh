@@ -211,9 +211,19 @@ Files written to the web root are immediately visible at `http://localhost:8080/
 The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention as the web root). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
 CLAUDE_MD
 
+echo "--- refreshing .fre-config on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "printf 'FRE_PROJECT_NAME=%s\nFRE_USERNAME=%s\nFRE_REGION=%s\n' '${PROJECT_NAME}' '${DEV_USERNAME}' '${AWS_REGION}' > ~/.fre-config && chmod 600 ~/.fre-config && echo '  .fre-config updated'"
+
+echo "--- setting hasCompletedOnboarding in ~/.claude/settings.json ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "mkdir -p ~/.claude && (jq '.hasCompletedOnboarding = true' ~/.claude/settings.json 2>/dev/null || echo '{\"hasCompletedOnboarding\": true}') | tee ~/.claude/settings.json > /dev/null && echo '  done'"
+
 echo ""
 echo "=== refresh complete on ${INSTANCE_ID} (${DEV_USERNAME}) ==="
 echo "    session_start.sh:     take effect on next connect"
 echo "    autoshutdown timer:   active immediately"
 echo "    web-preview service:  active immediately (http://localhost:8080)"
 echo "    ~/.claude/CLAUDE.md:  updated"
+echo "    ~/.fre-config:        updated"
+echo "    hasCompletedOnboarding: set"

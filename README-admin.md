@@ -9,6 +9,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 - [What You Need](#what-you-need)
 - [SSH Key](#ssh-key)
 - [Corporate CA Certificate (SSL inspection environments)](#corporate-ca-certificate-ssl-inspection-environments)
+- [LiteLLM Gateway (Corporate Environments)](#litellm-gateway-corporate-environments)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -113,6 +114,56 @@ If your organisation routes outbound HTTPS through a proxy that performs SSL ins
 The cert is installed into the container's OS trust store on every container start. Relative paths in `CORP_CA_CERT_FILE` are resolved from the project root directory. If the path doesn't exist, a warning is printed to stderr and the container starts without it.
 
 In multi-admin environments, `bootstrap` records whether a corp cert is required in the canonical S3 settings. A second admin running `./admin.sh configure` or `./admin.sh up` will be warned if they haven't set `CORP_CA_CERT_FILE` in their `admin.env`.
+
+---
+
+## LiteLLM Gateway (Corporate Environments)
+
+In organisations that route Claude Code API calls through a [LiteLLM](https://docs.litellm.ai/) proxy instead of calling Anthropic directly, configure the gateway once as the admin. Each user supplies their own API key the first time they connect — the admin never sees it.
+
+### Admin setup
+
+1. Add to `config/admin.env`:
+   ```
+   LITELLM_BASE_URL=https://litellm.your-corp.internal
+   ```
+
+2. Run `./admin.sh bootstrap` — this writes the URL to SSM Parameter Store at `/{project}/litellm/base-url`. All EC2 instances read it at session time (no rebuild needed).
+
+3. For existing instances, push the updated config:
+   ```bash
+   ./admin.sh refresh <username>
+   ```
+   `refresh` writes `~/.fre-config` (the instance config file that lets the session launcher find the SSM parameter) and sets `hasCompletedOnboarding: true` in `~/.claude/settings.json` so the first-run wizard is skipped when the API key is already injected.
+
+4. For new instances, apply the new IAM policy:
+   ```bash
+   ./admin.sh up <username>
+   ```
+   This adds a `litellm-secret-access` inline policy to the EC2 role, allowing the instance to read and write the user's key in Secrets Manager. Non-destructive — no instance replacement.
+
+### User experience
+
+When a user connects to an instance configured with LiteLLM:
+
+- **Key already set**: `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` are silently exported before Claude launches. The session starts connected with no prompts.
+- **No key set yet**: The menu shows a `k) Set LiteLLM API key` option (and a notice that no key was found). The user selects `k`, enters their key once, and it is stored in Secrets Manager at `{project}/{username}/litellm-key`. On all subsequent connects, the key is fetched silently.
+
+The admin never touches the user's key — it lives entirely in Secrets Manager under the user's own IAM role.
+
+### Verification
+
+```bash
+# Confirm SSM parameter was written
+aws ssm get-parameter --name /fre-aws/litellm/base-url --query 'Parameter.Value' --output text
+
+# Confirm a user's key was saved (after they set it via the menu)
+aws secretsmanager get-secret-value --secret-id fre-aws/<username>/litellm-key --query 'SecretString' --output text
+```
+
+### Environments without LiteLLM
+
+Leave `LITELLM_BASE_URL` unset (or commented out) in `admin.env`. The session launcher makes no SSM or Secrets Manager calls and behaves exactly as before — users set up Claude Code with their own Anthropic credentials through the standard first-run flow.
 
 ---
 
@@ -559,6 +610,8 @@ No down/up needed. `refresh` pushes the following in one shot:
 | `~/.bash_profile` or `~/.zprofile` TMUX guard | Next connect (shell detected automatically) |
 | `web-preview.service` — static file server on port 8080 | Immediately — restarted on the running instance |
 | `~/.claude/CLAUDE.md` — file sharing instructions for Claude | Next Claude session |
+| `~/.fre-config` — instance runtime config (project, username, region) | Next connect |
+| `~/.claude/settings.json` `hasCompletedOnboarding` — skips first-run wizard when LiteLLM is configured | Next Claude session |
 
 > `refresh` only manages system-owned files. It does not touch user dotfiles (`.tmux.conf`, `.bashrc`, `.zshrc`, `.vimrc`). Use `push-config` for those.
 

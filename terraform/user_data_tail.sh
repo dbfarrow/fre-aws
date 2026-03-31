@@ -17,4 +17,15 @@ fi
 PROFILE
 
 chown developer:developer "${_PROFILE}"
+
+# Write runtime config so session_start.sh can look up SSM and Secrets Manager
+# without hardcoding project/user/region values.
+cat > /home/developer/.fre-config << EOF
+FRE_PROJECT_NAME=${PROJECT_NAME}
+FRE_USERNAME=${DEV_USERNAME}
+FRE_REGION=${REGION}
+EOF
+chown developer:developer /home/developer/.fre-config
+chmod 600 /home/developer/.fre-config
+
 echo "=== Bootstrap complete ==="
