@@ -36,7 +36,7 @@ source "$BACKEND_CONFIG_FILE"
 source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
-: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 TARGET_USER="${1:-}"
 BASE_KEY="${PROJECT_NAME}/base/terraform.tfstate"
@@ -194,7 +194,6 @@ terraform -chdir="${TF_BASE_DIR}" init \
   -backend-config="bucket=${TF_BACKEND_BUCKET}" \
   -backend-config="key=${BASE_KEY}" \
   -backend-config="region=${TF_BACKEND_REGION}" \
-  -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
   -reconfigure
 echo ""
 
@@ -274,7 +273,6 @@ for username in "${APPLY_USERS[@]}"; do
     -backend-config="bucket=${TF_BACKEND_BUCKET}" \
     -backend-config="key=${USER_KEY}" \
     -backend-config="region=${TF_BACKEND_REGION}" \
-    -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
     -reconfigure
   echo ""
 

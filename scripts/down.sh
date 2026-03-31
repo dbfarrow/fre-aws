@@ -32,7 +32,7 @@ source "$BACKEND_CONFIG_FILE"
 source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}"
-: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 TARGET_USER="${1:-}"
 BASE_KEY="${PROJECT_NAME}/base/terraform.tfstate"
@@ -136,7 +136,6 @@ if [[ ${#DESTROY_USERS[@]} -gt 0 ]]; then
       -backend-config="bucket=${TF_BACKEND_BUCKET}" \
       -backend-config="key=${USER_KEY}" \
       -backend-config="region=${TF_BACKEND_REGION}" \
-      -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
       -reconfigure
     echo ""
 
@@ -172,7 +171,6 @@ if [[ "${DESTROY_BASE}" == true ]]; then
     -backend-config="bucket=${TF_BACKEND_BUCKET}" \
     -backend-config="key=${BASE_KEY}" \
     -backend-config="region=${TF_BACKEND_REGION}" \
-    -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
     -reconfigure
   echo ""
 

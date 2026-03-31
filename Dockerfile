@@ -9,7 +9,7 @@ FROM debian:bookworm-slim
 # ---------------------------------------------------------------------------
 # Versions (update these to pick up new releases)
 # ---------------------------------------------------------------------------
-ARG TERRAFORM_VERSION=1.9.8
+ARG TERRAFORM_VERSION=1.14.0
 ARG AWSCLI_VERSION=2.22.0
 
 # TARGETARCH is set automatically by Docker BuildKit:
