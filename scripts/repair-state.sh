@@ -74,7 +74,7 @@ source "${BACKEND_CONFIG_FILE}"
 source "${SCRIPT_DIR}/users-s3.sh"
 
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
-: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_DYNAMODB_TABLE:?}" "${TF_BACKEND_REGION:?}"
+: "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
 # Export AWS credentials
@@ -117,7 +117,6 @@ terraform -chdir="${TF_DIR}" init \
   -backend-config="bucket=${TF_BACKEND_BUCKET}" \
   -backend-config="key=${TF_BACKEND_KEY}" \
   -backend-config="region=${TF_BACKEND_REGION}" \
-  -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" \
   -reconfigure -input=false 2>&1 | tail -3
 echo ""
 
