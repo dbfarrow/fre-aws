@@ -6,11 +6,7 @@
 set -euo pipefail
 
 if [[ -f /certs/corp-ca.crt ]]; then
-  DEST=/usr/local/share/ca-certificates/corp-ca.crt
-  if ! cmp -s /certs/corp-ca.crt "${DEST}"; then
-    cp /certs/corp-ca.crt "${DEST}"
-    update-ca-certificates > /dev/null 2>&1
-  fi
+  cat /certs/corp-ca.crt >> /etc/ssl/certs/ca-certificates.crt
 fi
 
 exec "$@"
