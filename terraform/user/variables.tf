@@ -105,3 +105,9 @@ variable "preferred_shell" {
   type        = string
   default     = "bash"
 }
+
+variable "autoshutdown_idle_minutes" {
+  description = "Minutes of inactivity (no tmux sessions) before the instance stops itself."
+  type        = number
+  default     = 30
+}

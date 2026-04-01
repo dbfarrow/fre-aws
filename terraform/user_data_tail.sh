@@ -24,6 +24,7 @@ cat > /home/developer/.fre-config << EOF
 FRE_PROJECT_NAME=${PROJECT_NAME}
 FRE_USERNAME=${DEV_USERNAME}
 FRE_REGION=${REGION}
+FRE_AUTOSHUTDOWN_IDLE_MINUTES=${AUTOSHUTDOWN_IDLE_MINUTES}
 EOF
 chown developer:developer /home/developer/.fre-config
 chmod 600 /home/developer/.fre-config

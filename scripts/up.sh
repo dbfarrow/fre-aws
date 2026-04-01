@@ -326,6 +326,7 @@ for username in "${APPLY_USERS[@]}"; do
     -var="git_user_name=${GIT_USER_NAME}" \
     -var="git_user_email=${GIT_USER_EMAIL}" \
     -var="preferred_shell=${PREFERRED_SHELL}" \
+    -var="autoshutdown_idle_minutes=${AUTOSHUTDOWN_IDLE_MINUTES:-30}" \
     -var="project_name=${PROJECT_NAME}" \
     -var="aws_region=${AWS_REGION}" \
     -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \
