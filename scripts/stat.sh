@@ -223,10 +223,18 @@ if [[ -n "${TOMORROW}" && -n "${NEXT_MONTH}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Canonical settings (from S3)
+# ---------------------------------------------------------------------------
+SETTINGS_JSON_FILE=$(mktemp)
+aws s3 cp "s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/settings.json" \
+  "${SETTINGS_JSON_FILE}" --region "${TF_BACKEND_REGION}" >/dev/null 2>&1 \
+  || true
+
+# ---------------------------------------------------------------------------
 # Users + instances
 # ---------------------------------------------------------------------------
 USERS_JSON=$(mktemp)
-trap 'rm -f "${USERS_JSON}"' EXIT
+trap 'rm -f "${USERS_JSON}" "${SETTINGS_JSON_FILE}"' EXIT
 
 users_s3_download "${USERS_JSON}"
 CONFIGURED_USERS=$(jq -r 'keys[]' "${USERS_JSON}" 2>/dev/null | sort || true)
@@ -313,6 +321,17 @@ if [[ "${ENABLE_WEB_APP:-false}" == "true" ]]; then
   else
     printf "  %-12s %s\n" "Web app:" "not deployed  (run './admin.sh up')"
   fi
+fi
+echo ""
+
+echo "--- Canonical Settings ---"
+echo ""
+if [[ -s "${SETTINGS_JSON_FILE}" ]]; then
+  while IFS='|' read -r key val; do
+    printf "  %-38s %s\n" "${key}" "${val:--}"
+  done < <(jq -r 'to_entries[] | "\(.key)|\(.value // "")"' "${SETTINGS_JSON_FILE}")
+else
+  echo "  (not found — run './admin.sh bootstrap' to initialize)"
 fi
 echo ""
 
