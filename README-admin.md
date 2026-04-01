@@ -470,7 +470,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ### Keeping costs low
 
-- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after ~10 minutes of inactivity. A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use.
+- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
 - **Stop instances manually when needed** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
 - **Spot instances are on by default** — saves 60–90% once free tier expires.
 - For heavy workloads (browser automation, large builds), use `INSTANCE_TYPE=t3.small` (2 GB RAM) or larger.
