@@ -193,6 +193,7 @@ module "user_ec2" {
     "GIT_USER_NAME='${var.git_user_name}'",
     "GIT_USER_EMAIL='${var.git_user_email}'",
     "PREFERRED_SHELL='${var.preferred_shell}'",
+    "AUTOSHUTDOWN_IDLE_MINUTES='${var.autoshutdown_idle_minutes}'",
     "",
     file("${path.module}/../user_data_main.sh"),
     local.admin_keys_block,

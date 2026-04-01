@@ -30,6 +30,18 @@ variable "network_mode" {
   }
 }
 
+variable "existing_vpc_id" {
+  description = "Existing VPC ID to deploy into instead of creating a new VPC. When set, existing_subnet_id must also be set. If the VPC does not exist in the configured region, up will fail."
+  type        = string
+  default     = ""
+}
+
+variable "existing_subnet_id" {
+  description = "Existing subnet ID for EC2 instances. Required when existing_vpc_id is set. Must belong to existing_vpc_id."
+  type        = string
+  default     = ""
+}
+
 variable "owner_email" {
   description = "Email of the instance owner; used as a resource tag."
   type        = string

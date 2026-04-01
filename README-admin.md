@@ -10,6 +10,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 - [SSH Key](#ssh-key)
 - [Corporate CA Certificate (SSL inspection environments)](#corporate-ca-certificate-ssl-inspection-environments)
 - [LiteLLM Gateway (Corporate Environments)](#litellm-gateway-corporate-environments)
+- [Deploying into an Existing VPC](#deploying-into-an-existing-vpc)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -51,7 +52,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket (`{project}-{account_id}-tfstate`), DynamoDB lock table (`{project}-{account_id}-tflock`), SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`), and a canonical `settings.json` in S3 that records config values for multi-admin drift detection.
+> **What bootstrap creates automatically**: S3 state bucket (`{project}-{account_id}-tfstate`) with S3-native state locking, SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`), and a canonical `settings.json` in S3 that records config values for multi-admin drift detection.
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -160,6 +161,61 @@ aws secretsmanager get-secret-value --secret-id fre-aws/<username>/litellm-key -
 ### Environments without LiteLLM
 
 Leave `LITELLM_BASE_URL` unset (or commented out) in `admin.env`. The session launcher makes no SSM or Secrets Manager calls and behaves exactly as before — users set up Claude Code with their own Anthropic credentials through the standard first-run flow.
+
+---
+
+## Deploying into an Existing VPC
+
+In corporate environments where a networking team controls the VPC — including routes to internal resources like a LiteLLM proxy — you can deploy EC2 instances into an existing VPC instead of letting fre-aws create one.
+
+### When to use this
+
+- Your organisation has a central VPC with pre-configured routes to internal proxies or services
+- You need EC2 instances in a private subnet that already has SSM connectivity and internet access via NAT
+- A networking team manages VPC routing and you cannot create a new one
+
+### Setup
+
+Add to `config/admin.env`:
+
+```bash
+EXISTING_VPC_ID=vpc-0123456789abcdef0
+EXISTING_SUBNET_ID=subnet-0123456789abcdef0
+```
+
+Set `NETWORK_MODE` to match the subnet type:
+
+- `NETWORK_MODE=public` — public subnet, EC2 gets a public IP
+- `NETWORK_MODE=private_nat` — private subnet with outbound internet via NAT (most common for LiteLLM)
+- `NETWORK_MODE=private_endpoints` — private subnet using VPC endpoints (not needed when using existing VPC; the existing VPC must already provide SSM connectivity)
+
+### What fre-aws does (and does not do)
+
+When `EXISTING_VPC_ID` is set:
+
+- **Skipped**: VPC creation, NAT Gateway, VPC endpoints (the existing VPC must already provide all required routing, including SSM)
+- **Still created**: EC2 security group (`{project}-ec2-sg`) in the existing VPC — this is the only new resource placed in it
+
+### Pre-flight validation
+
+`./admin.sh up` validates the IDs before any Terraform runs:
+
+- Both `EXISTING_VPC_ID` and `EXISTING_SUBNET_ID` must be set together. Setting one without the other is an error.
+- The VPC must exist in `AWS_REGION`.
+- The subnet must belong to the specified VPC.
+
+If any check fails, `up` exits with a clear error message before touching anything.
+
+### Requirements for the existing VPC
+
+The existing VPC must provide:
+
+- **SSM connectivity** — EC2 instances communicate with SSM over HTTPS (port 443). Ensure either a NAT Gateway, internet gateway (with public subnet), or SSM VPC endpoints are present.
+- **Outbound internet access** — required for package installs, Claude API calls, and GitHub access during bootstrap
+
+### Drift detection
+
+`EXISTING_VPC_ID` and `EXISTING_SUBNET_ID` are included in the canonical `settings.json` written by `bootstrap`. If a second admin runs `./admin.sh configure` without these settings set, they will see a WARNING on those two fields.
 
 ---
 
@@ -376,7 +432,6 @@ User configuration is stored in S3 (`<project>-tfstate/<project>/users.json`) an
 - **EC2 t3.micro**: 750 hours/month for the first 12 months
 - **EBS storage**: 30 GB/month free
 - **S3**: 5 GB storage + limited requests free
-- **DynamoDB**: 25 GB + 25 WCU/RCU free
 
 ### What is NOT free (costs money from day one)
 
@@ -415,7 +470,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ### Keeping costs low
 
-- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after ~10 minutes of inactivity. A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use.
+- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
 - **Stop instances manually when needed** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
 - **Spot instances are on by default** — saves 60–90% once free tier expires.
 - For heavy workloads (browser automation, large builds), use `INSTANCE_TYPE=t3.small` (2 GB RAM) or larger.
@@ -440,7 +495,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 8.  ./admin.sh sso-login                                    ← authenticate (Option A only)
 9.  ./admin.sh verify                                       ← confirm credentials work
 10. ./admin.sh bootstrap --plan                             ← preview exactly what will be created
-    ./admin.sh bootstrap                                    ← creates S3, DynamoDB, permission sets,
+    ./admin.sh bootstrap                                    ← creates S3 bucket, permission sets,
                                                                SES verification, canonical settings;
                                                                prompts before applying
                                                                (runs as AdministratorAccess)
@@ -713,7 +768,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Infrastructure
 ```bash
-./admin.sh bootstrap                    # one-time: create S3, DynamoDB, permission sets, SES verification (prompts before applying)
+./admin.sh bootstrap                    # one-time: create S3 bucket, permission sets, SES verification (prompts before applying)
 ./admin.sh bootstrap --plan             # show what bootstrap will create without making any changes
 ./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh configure                    # second-admin onboarding: validate admin.env against canonical
@@ -812,7 +867,7 @@ terraform -chdir=terraform state list
 **To inspect a user's state:**
 ```bash
 ./admin.sh shell
-terraform -chdir=terraform/user init -backend-config="bucket=<bucket>" -backend-config="key=<project>/users/<username>/terraform.tfstate" -backend-config="region=<region>" -backend-config="dynamodb_table=<table>" -reconfigure
+terraform -chdir=terraform/user init -backend-config="bucket=<bucket>" -backend-config="key=<project>/users/<username>/terraform.tfstate" -backend-config="region=<region>" -reconfigure
 terraform -chdir=terraform/user state list
 ```
 

@@ -114,16 +114,20 @@ fi
 # ---------------------------------------------------------------------------
 # VPC / infrastructure status
 # ---------------------------------------------------------------------------
-VPC_ID=$(aws ec2 describe-vpcs \
-  --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
-  --query 'Vpcs[0].VpcId' \
-  --region "${AWS_REGION}" \
-  --output text 2>/dev/null || echo "")
-
-if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
-  INFRA_STATUS="not deployed  (run './admin.sh up')"
+if [[ -n "${EXISTING_VPC_ID:-}" ]]; then
+  INFRA_STATUS="${EXISTING_VPC_ID}  (existing, subnet ${EXISTING_SUBNET_ID:-<not set>})"
 else
-  INFRA_STATUS="${VPC_ID}"
+  VPC_ID=$(aws ec2 describe-vpcs \
+    --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+    --query 'Vpcs[0].VpcId' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null || echo "")
+
+  if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
+    INFRA_STATUS="not deployed  (run './admin.sh up')"
+  else
+    INFRA_STATUS="${VPC_ID}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -280,6 +284,13 @@ printf "  %-12s %s  (%s)\n"       "Network:"  "${NETWORK}" "${NET_COST}"
 [[ -n "${NET_NOTE}" ]] && printf "  %-12s %s\n" "" "${NET_NOTE}"
 echo ""
 printf "  %-12s %s  •  %s  •  %s GB EBS\n" "Instances:" "${ITYPE}" "${SPOT_NOTE}" "${EBS}"
+echo ""
+
+if [[ -n "${LITELLM_BASE_URL:-}" ]]; then
+  printf "  %-12s %s\n" "LiteLLM:" "${LITELLM_BASE_URL}"
+else
+  printf "  %-12s not configured  (direct Anthropic API)\n" "LiteLLM:"
+fi
 echo ""
 
 if [[ -n "${BILLING_ALERT_EMAIL:-}" ]]; then

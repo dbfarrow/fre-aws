@@ -86,13 +86,15 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
 # Shut down when no tmux sessions exist (user exited deliberately).
 # Detached sessions (SSM drop) are kept alive — midnight Lambda handles those.
 IDLE_FILE="${HOME}/.autoshutdown-idle-since"
+source "${HOME}/.fre-config" 2>/dev/null || true
+IDLE_THRESHOLD="${FRE_AUTOSHUTDOWN_IDLE_MINUTES:-30}"
 SESSION_COUNT=$(tmux list-sessions 2>/dev/null | wc -l || echo 0)
 if [[ "${SESSION_COUNT}" -gt 0 ]]; then
   rm -f "${IDLE_FILE}"; exit 0
 fi
 [[ ! -f "${IDLE_FILE}" ]] && { date +%s > "${IDLE_FILE}"; exit 0; }
 IDLE_MINUTES=$(( ($(date +%s) - $(cat "${IDLE_FILE}")) / 60 ))
-if [[ "${IDLE_MINUTES}" -ge 10 ]]; then
+if [[ "${IDLE_MINUTES}" -ge "${IDLE_THRESHOLD}" ]]; then
   TOKEN=$(curl -s -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" http://169.254.169.254/latest/api/token)
   INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
   REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
@@ -213,7 +215,7 @@ CLAUDE_MD
 
 echo "--- refreshing .fre-config on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "printf 'FRE_PROJECT_NAME=%s\nFRE_USERNAME=%s\nFRE_REGION=%s\n' '${PROJECT_NAME}' '${DEV_USERNAME}' '${AWS_REGION}' > ~/.fre-config && chmod 600 ~/.fre-config && echo '  .fre-config updated'"
+  "printf 'FRE_PROJECT_NAME=%s\nFRE_USERNAME=%s\nFRE_REGION=%s\nFRE_AUTOSHUTDOWN_IDLE_MINUTES=%s\n' '${PROJECT_NAME}' '${DEV_USERNAME}' '${AWS_REGION}' '${AUTOSHUTDOWN_IDLE_MINUTES:-30}' > ~/.fre-config && chmod 600 ~/.fre-config && echo '  .fre-config updated'"
 
 echo "--- setting hasCompletedOnboarding in ~/.claude/settings.json ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
