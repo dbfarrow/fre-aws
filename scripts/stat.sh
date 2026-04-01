@@ -114,16 +114,20 @@ fi
 # ---------------------------------------------------------------------------
 # VPC / infrastructure status
 # ---------------------------------------------------------------------------
-VPC_ID=$(aws ec2 describe-vpcs \
-  --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
-  --query 'Vpcs[0].VpcId' \
-  --region "${AWS_REGION}" \
-  --output text 2>/dev/null || echo "")
-
-if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
-  INFRA_STATUS="not deployed  (run './admin.sh up')"
+if [[ -n "${EXISTING_VPC_ID:-}" ]]; then
+  INFRA_STATUS="${EXISTING_VPC_ID}  (existing, subnet ${EXISTING_SUBNET_ID:-<not set>})"
 else
-  INFRA_STATUS="${VPC_ID}"
+  VPC_ID=$(aws ec2 describe-vpcs \
+    --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+    --query 'Vpcs[0].VpcId' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null || echo "")
+
+  if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
+    INFRA_STATUS="not deployed  (run './admin.sh up')"
+  else
+    INFRA_STATUS="${VPC_ID}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
