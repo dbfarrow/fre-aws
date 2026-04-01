@@ -87,7 +87,11 @@ if [[ -n "${_LITELLM_URL}" ]]; then
     echo ""
     echo "  No LiteLLM API key found."
   fi
-  echo "   k) ${_LITELLM_KEY:+Update }${_LITELLM_KEY:-Set }LiteLLM API key"
+  if [[ -n "${_LITELLM_KEY}" ]]; then
+    echo "   k) Update LiteLLM API key"
+  else
+    echo "   k) Set LiteLLM API key"
+  fi
 fi
 echo ""
 
