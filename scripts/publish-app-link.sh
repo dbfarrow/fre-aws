@@ -33,7 +33,7 @@ source "${SCRIPT_DIR}/users-s3.sh"
 # shellcheck source=scripts/app-link.sh
 source "${SCRIPT_DIR}/app-link.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${AWS_REGION:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
 # Validate username
@@ -93,7 +93,7 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
     --role "user" \
     --aws-profile "" \
     --aws-region "${AWS_REGION}" \
-    --aws-cli-profile "${AWS_PROFILE}" \
+    --aws-cli-profile "${AWS_PROFILE:-}" \
     --ses-region "${AWS_REGION}" \
     --sso-start-url "" \
     --app-url "${APP_LINK_URL}" \

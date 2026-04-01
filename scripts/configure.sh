@@ -21,18 +21,20 @@ source "$CONFIG_FILE"
 
 : "${PROJECT_NAME:?PROJECT_NAME must be set in config/admin.env}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
-: "${AWS_PROFILE:?AWS_PROFILE must be set in config/admin.env}"
+
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 
 # ---------------------------------------------------------------------------
 # Verify credentials
 # ---------------------------------------------------------------------------
 echo "=== fre-aws configure ==="
-echo "  Project: ${PROJECT_NAME}   Profile: ${AWS_PROFILE}"
+echo "  Project: ${PROJECT_NAME}   Profile: ${AWS_PROFILE:-<default>}"
 echo ""
 
 echo "Verifying credentials..."
-CALLER_IDENTITY=$(aws --profile "${AWS_PROFILE}" sts get-caller-identity --output json 2>&1) || {
-  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
+CALLER_IDENTITY=$(aws "${_PROFILE_ARGS[@]}" sts get-caller-identity --output json 2>&1) || {
+  echo "ERROR: AWS credentials not valid${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       Run './admin.sh sso-login' first." >&2
   exit 1
 }
@@ -50,14 +52,14 @@ BUCKET_NAME="${PROJECT_NAME}-${ACCOUNT_ID}-tfstate"
 # Check bucket exists
 # ---------------------------------------------------------------------------
 echo "Checking S3 bucket ${BUCKET_NAME}..."
-if ! aws --profile "${AWS_PROFILE}" s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
+if ! aws "${_PROFILE_ARGS[@]}" s3api head-bucket --bucket "${BUCKET_NAME}" &>/dev/null; then
   echo "ERROR: Bucket '${BUCKET_NAME}' not found." >&2
   echo "       This project has not been bootstrapped yet, or you are using a different AWS account." >&2
   echo "       Ask the super-admin to run './admin.sh bootstrap' first." >&2
   exit 1
 fi
 
-BUCKET_REGION=$(aws --profile "${AWS_PROFILE}" s3api get-bucket-location \
+BUCKET_REGION=$(aws "${_PROFILE_ARGS[@]}" s3api get-bucket-location \
   --bucket "${BUCKET_NAME}" \
   --query 'LocationConstraint' \
   --output text 2>/dev/null)
@@ -70,7 +72,7 @@ echo ""
 # ---------------------------------------------------------------------------
 SETTINGS_KEY="${PROJECT_NAME}/settings.json"
 echo "Downloading canonical settings..."
-CANONICAL_JSON=$(aws --profile "${AWS_PROFILE}" --region "${BUCKET_REGION}" \
+CANONICAL_JSON=$(aws "${_PROFILE_ARGS[@]}" --region "${BUCKET_REGION}" \
   s3 cp "s3://${BUCKET_NAME}/${SETTINGS_KEY}" - 2>/dev/null) || {
   echo "ERROR: Could not download s3://${BUCKET_NAME}/${SETTINGS_KEY}" >&2
   echo "       The project may have been bootstrapped with an older version of fre-aws." >&2
@@ -105,6 +107,23 @@ _chk "corp_ca_cert_required" "$(echo "${CANONICAL_JSON}" | jq -r '.corp_ca_cert_
 unset _LOCAL_CORP_CA
 _chk "existing_vpc_id"    "$(echo "${CANONICAL_JSON}" | jq -r '.existing_vpc_id // empty')"    "${EXISTING_VPC_ID:-}"
 _chk "existing_subnet_id" "$(echo "${CANONICAL_JSON}" | jq -r '.existing_subnet_id // empty')" "${EXISTING_SUBNET_ID:-}"
+_chk "litellm_base_url"   "$(echo "${CANONICAL_JSON}" | jq -r '.litellm_base_url // empty')"   "${LITELLM_BASE_URL:-}"
+_chk "instance_type"      "$(echo "${CANONICAL_JSON}" | jq -r '.instance_type // empty')"      "${INSTANCE_TYPE:-t3.micro}"
+_chk "autoshutdown_idle_minutes" "$(echo "${CANONICAL_JSON}" | jq -r '.autoshutdown_idle_minutes // empty')" "${AUTOSHUTDOWN_IDLE_MINUTES:-30}"
+_chk "sso_region"         "$(echo "${CANONICAL_JSON}" | jq -r '.sso_region // empty')"         "${SSO_REGION:-}"
+_chk "sso_start_url"      "$(echo "${CANONICAL_JSON}" | jq -r '.sso_start_url // empty')"      "${SSO_START_URL:-}"
+_chk "sender_email"       "$(echo "${CANONICAL_JSON}" | jq -r '.sender_email // empty')"       "${SENDER_EMAIL:-}"
+_chk "logo_url"           "$(echo "${CANONICAL_JSON}" | jq -r '.logo_url // empty')"           "${LOGO_URL:-}"
+_chk "billing_alert_email" "$(echo "${CANONICAL_JSON}" | jq -r '.billing_alert_email // empty')" "${BILLING_ALERT_EMAIL:-}"
+_chk "monthly_budget_usd" "$(echo "${CANONICAL_JSON}" | jq -r '.monthly_budget_usd // empty')" "${MONTHLY_BUDGET_USD:-10}"
+_chk "budget_alert_threshold_percent" "$(echo "${CANONICAL_JSON}" | jq -r '.budget_alert_threshold_percent // empty')" "${BUDGET_ALERT_THRESHOLD_PERCENT:-80}"
+_chk "anomaly_threshold_usd" "$(echo "${CANONICAL_JSON}" | jq -r '.anomaly_threshold_usd // empty')" "${ANOMALY_THRESHOLD_USD:-5}"
+_chk "enable_anomaly_detection" "$(echo "${CANONICAL_JSON}" | jq -r '.enable_anomaly_detection // empty')" "${ENABLE_ANOMALY_DETECTION:-true}"
+_chk "enable_scheduled_stop" "$(echo "${CANONICAL_JSON}" | jq -r '.enable_scheduled_stop // empty')" "${ENABLE_SCHEDULED_STOP:-true}"
+_chk "enable_web_app"     "$(echo "${CANONICAL_JSON}" | jq -r '.enable_web_app // empty')"     "${ENABLE_WEB_APP:-false}"
+_chk "web_app_url"        "$(echo "${CANONICAL_JSON}" | jq -r '.web_app_url // empty')"        "${WEB_APP_URL:-}"
+_chk "app_domain"         "$(echo "${CANONICAL_JSON}" | jq -r '.app_domain // empty')"         "${APP_DOMAIN:-}"
+_chk "route53_zone_id"    "$(echo "${CANONICAL_JSON}" | jq -r '.route53_zone_id // empty')"    "${ROUTE53_ZONE_ID:-}"
 echo ""
 
 # ---------------------------------------------------------------------------

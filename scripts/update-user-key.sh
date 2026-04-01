@@ -30,8 +30,11 @@ source "${SCRIPT_DIR}/users-s3.sh"
 # shellcheck source=scripts/installer-bundle.sh
 source "${SCRIPT_DIR}/installer-bundle.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${AWS_REGION:?}"
+: "${PROJECT_NAME:?}" "${AWS_REGION:?}"
 : "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 : "${DEV_USERNAME:?DEV_USERNAME must be set (pass via admin.sh update-user-key <username>)}"
 
 echo "=== Update SSH Key: ${DEV_USERNAME} ==="
@@ -110,15 +113,15 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" && -n "${SSH_KEY_PASSPHRASE}" ]]; then
   echo ""
   echo "Updating SSH key passphrase in Secrets Manager..."
   SECRET_ID="${PROJECT_NAME}/${DEV_USERNAME}/ssh-key-passphrase"
-  if aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+  if aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager describe-secret --secret-id "${SECRET_ID}" >/dev/null 2>&1; then
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager put-secret-value \
       --secret-id "${SECRET_ID}" \
       --secret-string "${SSH_KEY_PASSPHRASE}" >/dev/null
     echo "  Updated secret: ${SECRET_ID}"
   else
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager create-secret \
       --name "${SECRET_ID}" \
       --description "SSH key passphrase for ${DEV_USERNAME} (${PROJECT_NAME})" \
@@ -209,7 +212,7 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" ]]; then
     # No local bundle — upload just the new private key directly to S3
     aws s3 cp "${SSH_PRIVATE_KEY_FILE}" \
       "s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${DEV_USERNAME}/fre-claude" \
-      --region "${TF_BACKEND_REGION}" --profile "${AWS_PROFILE}" >/dev/null
+      --region "${TF_BACKEND_REGION}" "${_PROFILE_ARGS[@]}" >/dev/null
   fi
 
   INSTALLER_URL=$(_create_installer_bundle "${DEV_USERNAME}" "${BUNDLE_DIR}")

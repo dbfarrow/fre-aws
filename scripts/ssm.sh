@@ -17,7 +17,7 @@ else
 fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
 # DEV_USERNAME: set by admin.sh (command arg)
 DEV_USERNAME="${DEV_USERNAME:-}"

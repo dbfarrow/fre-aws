@@ -595,6 +595,22 @@ Two modes:
 - **Auto-generate (default)** — creates a fresh ed25519 key pair, stores the passphrase in Secrets Manager, pushes the new public key directly to the running instance via SSM, and generates a new installer bundle. A new pre-signed URL is printed — send it to the user so they can re-run the installer. **No `./admin.sh up` required.**
 - **Provide a public key** — accepts a key the user supplies (e.g. they manage their own key). Updates the registry and pushes to the running instance via SSM.
 
+### Editing a user's registry entry
+
+To inspect or update a user's attributes (email, role, git config, preferred shell) without re-running the full `add-user` wizard:
+
+```bash
+./admin.sh pull-user <username>       # download registry entry to config/users/<username>.env
+# edit config/users/<username>.env
+./admin.sh update-user config/users/<username>.env   # merge changes back to S3
+```
+
+`pull-user` writes a local `.env` file with all stored fields. `update-user` merges the edited fields back — only non-empty values overwrite; fields left blank are preserved unchanged in the registry.
+
+Neither command touches IAM Identity Center, installer bundles, or running instances. To apply changes (e.g. updated shell preference) to a running instance: `./admin.sh refresh <username>`.
+
+For SSH key updates specifically, use `./admin.sh update-user-key <username>` — it handles the instance push and installer bundle regeneration that `update-user` doesn't do.
+
 ### Removing a user
 
 ```bash
@@ -759,10 +775,12 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh add-user                     # interactive wizard: add a user
 ./admin.sh remove-user <username>       # destroy EC2 instance + remove from registry
 ./admin.sh update-user-key <username>   # replace a user's SSH public key
+./admin.sh pull-user <username>         # download registry entry to config/users/<username>.env
+./admin.sh update-user <file>           # merge edited .env file back into S3 registry
 ./admin.sh publish-installer <username> # regenerate installer zip and print new pre-signed URL
 ./admin.sh publish-app-link <username>  # generate a 72h browser app access link (requires ENABLE_WEB_APP=true + WEB_APP_URL)
 ./admin.sh list                         # list all users, instance state, and last seen timestamp
-./admin.sh list -v                      # verbose: show email, role, SSH key, git config, last seen
+./admin.sh list -v                      # verbose: show email, role, shell, SSH key, git config, last seen
 ./admin.sh stat                         # full environment status: identity, billing, infra, users
 ```
 
@@ -780,7 +798,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ```
 
 **`up` pre-flight checks:**
-- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ (region, network mode, spot preference, EBS size, identity mode), it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature.
+- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ, it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature. The canonical fields include: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, SSO settings, billing settings, and web app settings (25 fields total).
 - **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
 - **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
 

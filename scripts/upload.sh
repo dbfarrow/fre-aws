@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
 [[ -n "${_CALLER_PROFILE}" ]] && AWS_PROFILE="${_CALLER_PROFILE}"
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
 DEV_USERNAME="${DEV_USERNAME:-${MY_USERNAME:-}}"
 if [[ -z "${DEV_USERNAME}" ]]; then
@@ -35,8 +35,10 @@ if [[ -z "${LOCAL_FILE}" || ! -e "${LOCAL_FILE}" ]]; then
   exit 1
 fi
 
-CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       If using SSO, run './user.sh sso-login' first." >&2
   exit 1
 }
@@ -77,7 +79,7 @@ else
     PASSPHRASE=$(aws secretsmanager get-secret-value \
       --secret-id "${SSH_KEY_PASSPHRASE_SECRET}" \
       --query 'SecretString' --output text \
-      --profile "${AWS_PROFILE}" --region "${AWS_REGION}" 2>/dev/null) || {
+      --region "${AWS_REGION}" 2>/dev/null) || {
       echo "ERROR: Could not retrieve SSH key passphrase from Secrets Manager." >&2
       echo "       Secret: ${SSH_KEY_PASSPHRASE_SECRET}" >&2
       exit 1

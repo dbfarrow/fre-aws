@@ -362,15 +362,31 @@ _settings_row() {
     fi
   fi
 }
-_settings_row "aws_region"            "${AWS_REGION}"
-_settings_row "network_mode"          "${NETWORK_MODE:-public}"
-_settings_row "use_spot"              "${USE_SPOT:-false}"
-_settings_row "ebs_volume_size_gb"    "${EBS_VOLUME_SIZE_GB:-30}"
-_settings_row "identity_mode"         "${IDENTITY_MODE:-managed}"
-_settings_row "corp_ca_cert_required" "${_CORP_CA_REQUIRED}"
-_settings_row "litellm_base_url"      "${LITELLM_BASE_URL:-}"
-_settings_row "existing_vpc_id"       "${EXISTING_VPC_ID:-}"
-_settings_row "existing_subnet_id"    "${EXISTING_SUBNET_ID:-}"
+_settings_row "aws_region"                    "${AWS_REGION}"
+_settings_row "network_mode"                  "${NETWORK_MODE:-public}"
+_settings_row "use_spot"                      "${USE_SPOT:-false}"
+_settings_row "ebs_volume_size_gb"            "${EBS_VOLUME_SIZE_GB:-30}"
+_settings_row "identity_mode"                 "${IDENTITY_MODE:-managed}"
+_settings_row "corp_ca_cert_required"         "${_CORP_CA_REQUIRED}"
+_settings_row "litellm_base_url"              "${LITELLM_BASE_URL:-}"
+_settings_row "existing_vpc_id"               "${EXISTING_VPC_ID:-}"
+_settings_row "existing_subnet_id"            "${EXISTING_SUBNET_ID:-}"
+_settings_row "instance_type"                 "${INSTANCE_TYPE:-t3.micro}"
+_settings_row "autoshutdown_idle_minutes"     "${AUTOSHUTDOWN_IDLE_MINUTES:-30}"
+_settings_row "sso_region"                    "${SSO_REGION:-}"
+_settings_row "sso_start_url"                 "${SSO_START_URL:-}"
+_settings_row "sender_email"                  "${SENDER_EMAIL:-}"
+_settings_row "logo_url"                      "${LOGO_URL:-}"
+_settings_row "billing_alert_email"           "${BILLING_ALERT_EMAIL:-}"
+_settings_row "monthly_budget_usd"            "${MONTHLY_BUDGET_USD:-10}"
+_settings_row "budget_alert_threshold_percent" "${BUDGET_ALERT_THRESHOLD_PERCENT:-80}"
+_settings_row "anomaly_threshold_usd"         "${ANOMALY_THRESHOLD_USD:-5}"
+_settings_row "enable_anomaly_detection"      "${ENABLE_ANOMALY_DETECTION:-true}"
+_settings_row "enable_scheduled_stop"         "${ENABLE_SCHEDULED_STOP:-true}"
+_settings_row "enable_web_app"                "${ENABLE_WEB_APP:-false}"
+_settings_row "web_app_url"                   "${WEB_APP_URL:-}"
+_settings_row "app_domain"                    "${APP_DOMAIN:-}"
+_settings_row "route53_zone_id"               "${ROUTE53_ZONE_ID:-}"
 unset -f _settings_row
 printf "  %-24s %-36s %s\n" "LiteLLM gateway" \
   "${LITELLM_BASE_URL:-(not configured)}" \
@@ -545,10 +561,33 @@ fi
 # Canonical settings — always overwrite so second admins get current values
 # ---------------------------------------------------------------------------
 echo "Canonical settings..."
-printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s",\n  "corp_ca_cert_required": "%s",\n  "litellm_base_url": "%s",\n  "existing_vpc_id": "%s",\n  "existing_subnet_id": "%s"\n}\n' \
-  "${AWS_REGION}" "${NETWORK_MODE:-public}" "${USE_SPOT:-false}" \
-  "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" "${_CORP_CA_REQUIRED}" \
-  "${LITELLM_BASE_URL:-}" "${EXISTING_VPC_ID:-}" "${EXISTING_SUBNET_ID:-}" \
+jq -n \
+  --arg aws_region                     "${AWS_REGION}" \
+  --arg network_mode                   "${NETWORK_MODE:-public}" \
+  --arg use_spot                       "${USE_SPOT:-false}" \
+  --arg ebs_volume_size_gb             "${EBS_VOLUME_SIZE_GB:-30}" \
+  --arg identity_mode                  "${IDENTITY_MODE:-managed}" \
+  --arg corp_ca_cert_required          "${_CORP_CA_REQUIRED}" \
+  --arg litellm_base_url               "${LITELLM_BASE_URL:-}" \
+  --arg existing_vpc_id                "${EXISTING_VPC_ID:-}" \
+  --arg existing_subnet_id             "${EXISTING_SUBNET_ID:-}" \
+  --arg instance_type                  "${INSTANCE_TYPE:-t3.micro}" \
+  --arg autoshutdown_idle_minutes      "${AUTOSHUTDOWN_IDLE_MINUTES:-30}" \
+  --arg sso_region                     "${SSO_REGION:-}" \
+  --arg sso_start_url                  "${SSO_START_URL:-}" \
+  --arg sender_email                   "${SENDER_EMAIL:-}" \
+  --arg logo_url                       "${LOGO_URL:-}" \
+  --arg billing_alert_email            "${BILLING_ALERT_EMAIL:-}" \
+  --arg monthly_budget_usd             "${MONTHLY_BUDGET_USD:-10}" \
+  --arg budget_alert_threshold_percent "${BUDGET_ALERT_THRESHOLD_PERCENT:-80}" \
+  --arg anomaly_threshold_usd          "${ANOMALY_THRESHOLD_USD:-5}" \
+  --arg enable_anomaly_detection       "${ENABLE_ANOMALY_DETECTION:-true}" \
+  --arg enable_scheduled_stop          "${ENABLE_SCHEDULED_STOP:-true}" \
+  --arg enable_web_app                 "${ENABLE_WEB_APP:-false}" \
+  --arg web_app_url                    "${WEB_APP_URL:-}" \
+  --arg app_domain                     "${APP_DOMAIN:-}" \
+  --arg route53_zone_id                "${ROUTE53_ZONE_ID:-}" \
+  '$ARGS.named' \
   | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
 unset _CORP_CA_REQUIRED
 echo "  Written to s3://${BUCKET_NAME}/${SETTINGS_KEY}"

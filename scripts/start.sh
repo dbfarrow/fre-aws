@@ -15,7 +15,7 @@ else
 fi
 source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
 # DEV_USERNAME: set by admin.sh (command arg) or user.env (MY_USERNAME)
 DEV_USERNAME="${DEV_USERNAME:-${MY_USERNAME:-}}"
@@ -24,8 +24,10 @@ if [[ -z "${DEV_USERNAME}" ]]; then
   exit 1
 fi
 
-CREDS=$(aws configure export-credentials --profile "${AWS_PROFILE}" --format env-no-export 2>/dev/null) || {
-  echo "ERROR: Could not export credentials for profile '${AWS_PROFILE}'." >&2
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
+CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
   echo "       If using SSO, run './user.sh sso-login' first." >&2
   exit 1
 }

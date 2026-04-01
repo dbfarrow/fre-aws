@@ -23,7 +23,7 @@ source "${SCRIPT_DIR}/../config/backend.env"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${PROJECT_NAME:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------
 # Download registry and emit usernames

@@ -29,8 +29,11 @@ source "${SCRIPT_DIR}/installer-bundle.sh"
 # shellcheck source=scripts/app-link.sh
 source "${SCRIPT_DIR}/app-link.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${PROJECT_NAME:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 : "${AWS_REGION:?AWS_REGION must be set in config/admin.env}"
+
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 
 # ---------------------------------------------------------------------------
 # Prerequisite checks — fail fast with clear messages
@@ -46,9 +49,9 @@ fi
 # ---------------------------------------------------------------------------
 # Verify AWS credentials before doing anything
 # ---------------------------------------------------------------------------
-aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
-  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
-  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+aws sts get-caller-identity "${_PROFILE_ARGS[@]}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
 
@@ -288,7 +291,7 @@ if [[ "${IDENTITY_MODE:-managed}" != "external" ]]; then
 echo ""
 echo "Creating IAM Identity Center user..."
 
-SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
   sso-admin list-instances \
   --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
 
@@ -298,7 +301,7 @@ if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
   exit 1
 fi
 
-IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
   sso-admin list-instances \
   --query 'Instances[0].IdentityStoreId' --output text)
 
@@ -310,14 +313,14 @@ if [[ "${FAMILY_NAME}" == "${FULL_NAME}" ]]; then
 fi
 
 # Check if user already exists in identity store (by username)
-EXISTING_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+EXISTING_USER_ID=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
   identitystore list-users \
   --identity-store-id "${IDENTITY_STORE_ID}" \
   --filters "AttributePath=UserName,AttributeValue=${NEW_USERNAME}" \
   --query 'Users[0].UserId' --output text 2>/dev/null || echo "")
 
 # Also check if the email is already in use by any user
-EXISTING_EMAIL_USER=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+EXISTING_EMAIL_USER=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
   identitystore list-users \
   --identity-store-id "${IDENTITY_STORE_ID}" \
   --filters "AttributePath=Emails.Value,AttributeValue=${USER_EMAIL}" \
@@ -336,7 +339,7 @@ else
   EMAILS_JSON="[{\"Value\": \"${USER_EMAIL}\", \"Type\": \"work\", \"Primary\": true}]"
   NAME_JSON="{\"GivenName\": \"${GIVEN_NAME}\", \"FamilyName\": \"${FAMILY_NAME}\", \"Formatted\": \"${FULL_NAME}\"}"
 
-  SSO_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  SSO_USER_ID=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     identitystore create-user \
     --identity-store-id "${IDENTITY_STORE_ID}" \
     --user-name "${NEW_USERNAME}" \
@@ -354,7 +357,7 @@ _find_ps_arn() {
   while IFS= read -r arn; do
     [[ -z "${arn}" ]] && continue
     local name
-    name=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    name=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
       sso-admin describe-permission-set \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --permission-set-arn "${arn}" \
@@ -363,7 +366,7 @@ _find_ps_arn() {
       found="${arn}"
       break
     fi
-  done < <(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  done < <(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     sso-admin list-permission-sets \
     --instance-arn "${SSO_INSTANCE_ARN}" \
     --max-results 100 \
@@ -375,7 +378,7 @@ _find_ps_arn() {
 _assign_ps() {
   local ps_name="$1" ps_arn="$2"
   local assign_out request_id initial_status
-  assign_out=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  assign_out=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     sso-admin create-account-assignment \
     --instance-arn "${SSO_INSTANCE_ARN}" \
     --target-id "${TF_BACKEND_ACCOUNT_ID}" \
@@ -398,7 +401,7 @@ _assign_ps() {
     local status=""
     for _ in $(seq 1 20); do
       local result_json
-      result_json=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      result_json=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
         sso-admin describe-account-assignment-creation-status \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --account-assignment-creation-request-id "${request_id}" \
@@ -440,7 +443,7 @@ for OTHER_PS_NAME in "${PROJECT_NAME}-developer-access" "${PROJECT_NAME}-admin-a
   OTHER_PS_ARN=$(_find_ps_arn "${OTHER_PS_NAME}")
   [[ -z "${OTHER_PS_ARN}" ]] && continue
 
-  ALREADY_ASSIGNED=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  ALREADY_ASSIGNED=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     sso-admin list-account-assignments \
     --instance-arn "${SSO_INSTANCE_ARN}" \
     --account-id "${TF_BACKEND_ACCOUNT_ID}" \
@@ -451,7 +454,7 @@ for OTHER_PS_NAME in "${PROJECT_NAME}-developer-access" "${PROJECT_NAME}-admin-a
 
   if [[ "${ALREADY_ASSIGNED}" -gt 0 ]]; then
     echo "  Removing existing '${OTHER_PS_NAME}' assignment..."
-    aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
       sso-admin delete-account-assignment \
       --instance-arn "${SSO_INSTANCE_ARN}" \
       --target-id "${TF_BACKEND_ACCOUNT_ID}" \
@@ -611,15 +614,15 @@ if [[ -n "${SSH_PRIVATE_KEY_FILE}" && -n "${SSH_KEY_PASSPHRASE}" ]]; then
   echo ""
   echo "Storing SSH key passphrase in Secrets Manager..."
   SECRET_ID="${PROJECT_NAME}/${NEW_USERNAME}/ssh-key-passphrase"
-  if aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+  if aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager describe-secret --secret-id "${SECRET_ID}" >/dev/null 2>&1; then
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager put-secret-value \
       --secret-id "${SECRET_ID}" \
       --secret-string "${SSH_KEY_PASSPHRASE}" >/dev/null
     echo "  Updated existing secret: ${SECRET_ID}"
   else
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager create-secret \
       --name "${SECRET_ID}" \
       --description "SSH key passphrase for ${NEW_USERNAME} (${PROJECT_NAME})" \
@@ -674,7 +677,7 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
       --role "${ROLE}" \
       --aws-profile "${AWS_PROFILE_FOR_DEV}" \
       --aws-region "${AWS_REGION}" \
-      --aws-cli-profile "${AWS_PROFILE}" \
+      --aws-cli-profile "${AWS_PROFILE:-}" \
       --ses-region "${AWS_REGION}" \
       --sso-start-url "${SSO_START_URL}" \
       --sso-region "${SSO_REGION}" \
@@ -692,7 +695,7 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
       --role "${ROLE}" \
       --aws-profile "${AWS_PROFILE_FOR_DEV}" \
       --aws-region "${AWS_REGION}" \
-      --aws-cli-profile "${AWS_PROFILE}" \
+      --aws-cli-profile "${AWS_PROFILE:-}" \
       --ses-region "${AWS_REGION}" \
       --sso-start-url "${SSO_START_URL}" \
       --installer-url "${INSTALLER_URL}" \
