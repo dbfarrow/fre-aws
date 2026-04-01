@@ -271,10 +271,18 @@ fi
 # Canonical settings (always overwritten to pick up admin.env changes)
 SETTINGS_KEY="${PROJECT_NAME}/settings.json"
 SETTINGS_EXISTS=false
+CURRENT_SETTINGS_JSON=""
 if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
   $AWS s3api head-object --bucket "${BUCKET_NAME}" --key "${SETTINGS_KEY}" &>/dev/null \
     && SETTINGS_EXISTS=true || true
+  if [[ "${SETTINGS_EXISTS}" == true ]]; then
+    CURRENT_SETTINGS_JSON=$($AWS s3 cp "s3://${BUCKET_NAME}/${SETTINGS_KEY}" - 2>/dev/null || echo "")
+  fi
 fi
+
+# Compute canonical setting values now — used in both plan display and execution
+_CORP_CA_REQUIRED="false"
+[[ -n "${CORP_CA_CERT_FILE:-}" ]] && _CORP_CA_REQUIRED="true"
 
 # SES sender verification
 SES_VERIFIED=false
@@ -336,8 +344,34 @@ fi
 if [[ "${SETTINGS_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "CREATE"
 else
-  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "exists  (will be refreshed)"
+  printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "UPDATE"
 fi
+# Helper: print one settings row, highlighting changes vs current stored value
+_settings_row() {
+  local key="$1" new_val="$2"
+  local display_new="${new_val:-(not set)}"
+  if [[ -z "${CURRENT_SETTINGS_JSON}" ]]; then
+    printf "    %-26s %s\n" "${key}" "${display_new}"
+  else
+    local old_val
+    old_val=$(echo "${CURRENT_SETTINGS_JSON}" | jq -r --arg k "$key" '.[$k] // empty')
+    if [[ "${old_val}" == "${new_val}" ]]; then
+      printf "    %-26s %s\n" "${key}" "${display_new}"
+    else
+      printf "    %-26s %s → %s\n" "${key}" "${old_val:-(not set)}" "${display_new}"
+    fi
+  fi
+}
+_settings_row "aws_region"            "${AWS_REGION}"
+_settings_row "network_mode"          "${NETWORK_MODE:-public}"
+_settings_row "use_spot"              "${USE_SPOT:-false}"
+_settings_row "ebs_volume_size_gb"    "${EBS_VOLUME_SIZE_GB:-30}"
+_settings_row "identity_mode"         "${IDENTITY_MODE:-managed}"
+_settings_row "corp_ca_cert_required" "${_CORP_CA_REQUIRED}"
+_settings_row "litellm_base_url"      "${LITELLM_BASE_URL:-}"
+_settings_row "existing_vpc_id"       "${EXISTING_VPC_ID:-}"
+_settings_row "existing_subnet_id"    "${EXISTING_SUBNET_ID:-}"
+unset -f _settings_row
 printf "  %-24s %-36s %s\n" "LiteLLM gateway" \
   "${LITELLM_BASE_URL:-(not configured)}" \
   "${LITELLM_BASE_URL:+SSM write}"
@@ -509,8 +543,6 @@ fi
 # Canonical settings — always overwrite so second admins get current values
 # ---------------------------------------------------------------------------
 echo "Canonical settings..."
-_CORP_CA_REQUIRED="false"
-[[ -n "${CORP_CA_CERT_FILE:-}" ]] && _CORP_CA_REQUIRED="true"
 printf '{\n  "aws_region": "%s",\n  "network_mode": "%s",\n  "use_spot": "%s",\n  "ebs_volume_size_gb": "%s",\n  "identity_mode": "%s",\n  "corp_ca_cert_required": "%s",\n  "litellm_base_url": "%s",\n  "existing_vpc_id": "%s",\n  "existing_subnet_id": "%s"\n}\n' \
   "${AWS_REGION}" "${NETWORK_MODE:-public}" "${USE_SPOT:-false}" \
   "${EBS_VOLUME_SIZE_GB:-30}" "${IDENTITY_MODE:-managed}" "${_CORP_CA_REQUIRED}" \
