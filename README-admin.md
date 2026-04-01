@@ -106,12 +106,8 @@ If your organisation routes outbound HTTPS through a proxy that performs SSL ins
    ```
    CORP_CA_CERT_FILE=config/corp-ca.crt
    ```
-4. Rebuild the image:
-   ```
-   ./admin.sh build
-   ```
 
-The cert is installed into the container's OS trust store on every container start. Relative paths in `CORP_CA_CERT_FILE` are resolved from the project root directory. If the path doesn't exist, a warning is printed to stderr and the container starts without it.
+The cert is mounted into each container at start and appended to the OS CA bundle — no image rebuild needed. All tools (`aws`, `terraform`, `git`, `curl`) trust it automatically. Relative paths in `CORP_CA_CERT_FILE` are resolved from the project root directory. If the path doesn't exist, a warning is printed to stderr and the container starts without it.
 
 In multi-admin environments, `bootstrap` records whether a corp cert is required in the canonical S3 settings. A second admin running `./admin.sh configure` or `./admin.sh up` will be warned if they haven't set `CORP_CA_CERT_FILE` in their `admin.env`.
 
