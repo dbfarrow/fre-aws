@@ -286,6 +286,13 @@ echo ""
 printf "  %-12s %s  •  %s  •  %s GB EBS\n" "Instances:" "${ITYPE}" "${SPOT_NOTE}" "${EBS}"
 echo ""
 
+if [[ -n "${LITELLM_BASE_URL:-}" ]]; then
+  printf "  %-12s %s\n" "LiteLLM:" "${LITELLM_BASE_URL}"
+else
+  printf "  %-12s not configured  (direct Anthropic API)\n" "LiteLLM:"
+fi
+echo ""
+
 if [[ -n "${BILLING_ALERT_EMAIL:-}" ]]; then
   printf "  %-12s \$%s/month budget  •  alerts → %s\n" \
     "Billing:" "${MONTHLY_BUDGET_USD:-10}" "${BILLING_ALERT_EMAIL}"
