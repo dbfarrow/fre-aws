@@ -67,6 +67,7 @@ echo ""
 OPTIONS=()
 IDX=1
 
+echo "  Projects"
 while IFS= read -r -d '' dir; do
   REPO_NAME=$(basename "${dir}")
   printf "   %d) %s\n" "${IDX}" "${REPO_NAME}"
@@ -75,14 +76,15 @@ while IFS= read -r -d '' dir; do
 done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
            -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
 
-if [[ ${#OPTIONS[@]} -gt 0 ]]; then
-  echo ""
+if [[ ${#OPTIONS[@]} -eq 0 ]]; then
+  echo "   (none)"
 fi
 
+echo ""
+echo "  Actions"
 echo "   c) Clone a GitHub repo"
 echo "   n) New project"
 echo "   s) Shell"
-echo "   q) Quit"
 if [[ -n "${_LITELLM_URL}" ]]; then
   if [[ -z "${_LITELLM_KEY}" ]]; then
     echo ""
@@ -94,6 +96,8 @@ if [[ -n "${_LITELLM_URL}" ]]; then
     echo "   k) Set LiteLLM API key"
   fi
 fi
+echo ""
+echo "   q) Quit"
 echo ""
 
 # Default: first repo if any exist, otherwise clone
