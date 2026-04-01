@@ -38,7 +38,7 @@ data "aws_ami" "amazon_linux_2023" {
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-2023*-x86_64"]
   }
 
   filter {
@@ -96,6 +96,28 @@ resource "aws_iam_role_policy" "ec2_self_stop" {
           "aws:ResourceTag/Username"    = var.username
         }
       }
+    }]
+  })
+}
+
+# Allow the instance to read and write its own LiteLLM API key in Secrets Manager.
+# Always present — harmless when LiteLLM is not configured (grants access to a secret
+# that doesn't exist). Scoped to this user's key path only.
+resource "aws_iam_role_policy" "litellm_secret" {
+  name = "litellm-secret-access"
+  role = aws_iam_role.user_ec2.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "LiteLLMKeyAccess"
+      Effect = "Allow"
+      Action = [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue"
+      ]
+      Resource = "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/${var.username}/litellm-key-*"
     }]
   })
 }

@@ -121,7 +121,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 ```
 .
 ├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, scripts
-├── scripts/entrypoint.sh        # Docker ENTRYPOINT: installs corporate CA cert (if mounted), then exec's command
+├── scripts/entrypoint.sh        # Docker ENTRYPOINT: appends corporate CA cert to OS bundle (if mounted), then exec's command
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
 ├── terraform/
@@ -195,13 +195,18 @@ Each user gets their own EC2 instance and S3 registry entry. In managed mode (`I
 `connect.sh` starts an ssh-agent inside Docker, loads `~/.ssh/fre-claude`, and opens SSH over an SSM tunnel (no inbound port 22). Agent forwarding (`ssh -A`) allows git operations on the EC2 using the local key.
 
 ### Session Launcher (`session_start.sh`)
-On connect, `.bash_profile` fires `session_start.sh` (guarded: only on interactive SSH, never inside tmux). The menu shows:
+On connect, `.bash_profile` fires `session_start.sh` (guarded: only on interactive SSH, never inside tmux). At startup it:
+1. Sources `~/.fre-config` (project name, username, region — written at provision time and by `refresh`)
+2. If LiteLLM is configured, fetches `ANTHROPIC_BASE_URL` from SSM and `ANTHROPIC_API_KEY` from Secrets Manager and exports both silently
+
+The menu shows:
 - Numbered list of repos in `~/repos` — selecting one reattaches or creates a named tmux session
 - `c` — clone a GitHub repo (prompts owner/repo, clones via SSH agent)
 - `n` — create a new project directory
 - `s` — open a plain shell
+- `k` — set or update the user's LiteLLM API key (only shown when LiteLLM URL is configured; also shows a notice if no key is found)
 
-Each repo option launches: `claude --continue 2>/dev/null || claude; exec bash` inside a named tmux session. `--continue` resumes the last conversation; the `|| claude` fallback handles new projects with no history. `exec bash` keeps the window open after Claude exits.
+Each repo option launches: `claude --continue 2>/dev/null || claude; exec bash` inside a named tmux session. `--continue` resumes the last conversation; the `|| claude` fallback handles new projects with no history. `exec bash` keeps the window open after Claude exits. When LiteLLM is active, `hasCompletedOnboarding: true` is merged into `~/.claude/settings.json` before Claude starts so the first-run wizard is skipped.
 
 ### Session Persistence
 tmux named sessions survive SSH/SSM disconnects. Reconnecting and selecting the same repo reattaches to the existing session — Claude picks up exactly where it left off.
@@ -213,7 +218,7 @@ A systemd timer (`autoshutdown.timer`) runs every 5 minutes:
 
 This means: deliberately exiting Claude → `exit` the bash shell → tmux session ends → instance stops itself in ~10–15 minutes. A midnight Lambda provides a safety net for forgotten detached sessions.
 
-**`./admin.sh refresh`** installs the autoshutdown timer live on a running instance (no rebuild needed). It also pushes `session_start.sh` and patches the correct login profile file (`.bash_profile` for bash users, `.zprofile` for zsh users — detected automatically from the instance's `/etc/passwd`). It does NOT touch user dotfiles.
+**`./admin.sh refresh`** installs the autoshutdown timer live on a running instance (no rebuild needed). It also pushes `session_start.sh`, patches the correct login profile file (`.bash_profile` for bash users, `.zprofile` for zsh users — detected automatically from the instance's `/etc/passwd`), writes `~/.fre-config`, and sets `hasCompletedOnboarding: true` in `~/.claude/settings.json`. It does NOT touch user dotfiles.
 
 **`./admin.sh push-config`** pushes personal dotfiles (`~/.tmux.conf`, `~/.bashrc`, `~/.zshrc`, `~/.vimrc`) from the host to the EC2 instance. Files missing on the host are skipped. `config/tmux.conf.example` is a reference config users can copy to `~/.tmux.conf` and push with this command.
 
@@ -241,7 +246,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
-- `ENTRYPOINT` is `scripts/entrypoint.sh`: installs a corporate CA cert mounted at `/certs/corp-ca.crt` into the OS trust store before exec'ing the actual command. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).
+- `ENTRYPOINT` is `scripts/entrypoint.sh`: appends a corporate CA cert mounted at `/certs/corp-ca.crt` directly to the OS CA bundle before exec'ing the actual command — no rebuild needed, near-zero overhead. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).
 
 ---
 
@@ -272,10 +277,18 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Canonical Configuration (Multi-Admin Synchronization)
-- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`.
+- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `litellm_base_url`.
 - `up.sh` fetches `settings.json` and compares it against local `admin.env`. If drift is found, it prints each mismatch and prompts `Continue anyway? [y/N]` before proceeding. Silently skipped when `settings.json` is absent (projects bootstrapped before this feature).
 - Second admins use `./admin.sh configure` to validate their local `admin.env`, check for drift, and regenerate `config/backend.env` — without running `bootstrap` themselves.
 - `SSO_PROFILE` in `admin.env` allows IC API calls (`sso-admin`, `identitystore`) to use a different AWS profile than `AWS_PROFILE` for cross-account Identity Center setups.
+
+### LiteLLM Gateway (Corporate Environments)
+- Admin sets `LITELLM_BASE_URL` in `admin.env`; `bootstrap` writes it to SSM Parameter Store at `/{project}/litellm/base-url`
+- EC2 instances read the URL at session time using `AmazonSSMManagedInstanceCore` (already attached — no new IAM changes needed for SSM reads)
+- Per-user API keys live in Secrets Manager at `{project}/{username}/litellm-key`; the EC2 role has a `litellm-secret-access` inline policy scoped to that path
+- The admin never handles user keys — users enter their key once via the `k` menu option; it's stored and fetched automatically on all subsequent connects
+- `~/.fre-config` on each EC2 instance holds `FRE_PROJECT_NAME`, `FRE_USERNAME`, `FRE_REGION` — written at provision time (`user_data_tail.sh`) and live-updated by `refresh`
+- When LiteLLM is not configured, session_start.sh makes no SSM or Secrets Manager calls (zero overhead)
 
 ### Scheduled Stop (Lambda)
 - Midnight Lambda stops all running instances to prevent overnight charges

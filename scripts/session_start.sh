@@ -16,6 +16,38 @@ if [[ ! -t 0 ]]; then
   exit 0
 fi
 
+# Source instance config (written at provision time and by refresh)
+# shellcheck source=/dev/null
+source ~/.fre-config 2>/dev/null
+
+# ---- LiteLLM gateway ----
+# If a LiteLLM base URL is configured for this environment, fetch the user's
+# API key from Secrets Manager and export both env vars so Claude routes through
+# the proxy without any interactive setup step.
+_LITELLM_URL=""
+_LITELLM_KEY=""
+if [[ -n "${FRE_PROJECT_NAME:-}" && -n "${FRE_REGION:-}" ]]; then
+  _LITELLM_URL=$(aws ssm get-parameter \
+    --name "/${FRE_PROJECT_NAME}/litellm/base-url" \
+    --region "${FRE_REGION}" \
+    --query 'Parameter.Value' --output text 2>/dev/null || true)
+  [[ "${_LITELLM_URL}" == "None" ]] && _LITELLM_URL=""
+
+  if [[ -n "${_LITELLM_URL}" ]]; then
+    _SECRET_ID="${FRE_PROJECT_NAME}/${FRE_USERNAME:-developer}/litellm-key"
+    _LITELLM_KEY=$(aws secretsmanager get-secret-value \
+      --secret-id "${_SECRET_ID}" \
+      --region "${FRE_REGION}" \
+      --query 'SecretString' --output text 2>/dev/null || true)
+    [[ "${_LITELLM_KEY}" == "None" ]] && _LITELLM_KEY=""
+
+    if [[ -n "${_LITELLM_KEY}" ]]; then
+      export ANTHROPIC_BASE_URL="${_LITELLM_URL}"
+      export ANTHROPIC_API_KEY="${_LITELLM_KEY}"
+    fi
+  fi
+fi
+
 # Refresh git identity if passed through SSH env
 [[ -n "${GIT_USER_NAME:-}"  ]] && git config --global user.name  "${GIT_USER_NAME}"
 [[ -n "${GIT_USER_EMAIL:-}" ]] && git config --global user.email "${GIT_USER_EMAIL}"
@@ -35,6 +67,7 @@ echo ""
 OPTIONS=()
 IDX=1
 
+echo "  Projects"
 while IFS= read -r -d '' dir; do
   REPO_NAME=$(basename "${dir}")
   printf "   %d) %s\n" "${IDX}" "${REPO_NAME}"
@@ -43,13 +76,28 @@ while IFS= read -r -d '' dir; do
 done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
            -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
 
-if [[ ${#OPTIONS[@]} -gt 0 ]]; then
-  echo ""
+if [[ ${#OPTIONS[@]} -eq 0 ]]; then
+  echo "   (none)"
 fi
 
+echo ""
+echo "  Actions"
 echo "   c) Clone a GitHub repo"
 echo "   n) New project"
 echo "   s) Shell"
+if [[ -n "${_LITELLM_URL}" ]]; then
+  if [[ -z "${_LITELLM_KEY}" ]]; then
+    echo ""
+    echo "  No LiteLLM API key found."
+  fi
+  if [[ -n "${_LITELLM_KEY}" ]]; then
+    echo "   k) Update LiteLLM API key"
+  else
+    echo "   k) Set LiteLLM API key"
+  fi
+fi
+echo ""
+echo "   q) Quit"
 echo ""
 
 # Default: first repo if any exist, otherwise clone
@@ -72,6 +120,15 @@ launch_in_repo() {
   # Ensure per-project web root and upload directories exist, with uploads linked into web root
   mkdir -p ~/www/"${name}" ~/uploads/"${name}"
   ln -sf ~/uploads/"${name}" ~/www/"${name}"/uploads
+  # When routing through LiteLLM, skip the first-run onboarding wizard so Claude
+  # starts connected immediately (the wizard prompts for an Anthropic key we've
+  # already injected via ANTHROPIC_API_KEY).
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    mkdir -p ~/.claude
+    (jq '.hasCompletedOnboarding = true' ~/.claude/settings.json 2>/dev/null \
+      || echo '{"hasCompletedOnboarding": true}') \
+      | tee ~/.claude/settings.json > /dev/null 2>&1 || true
+  fi
   if tmux has-session -t "${name}" 2>/dev/null; then
     echo "Reattaching to existing '${name}' session..."
     exec tmux attach-session -t "${name}"
@@ -90,6 +147,47 @@ if [[ "${CHOICE}" == "s" ]]; then
   echo "Repos are in ~/repos/. Type 'claude' to start Claude Code."
   cd "${HOME}"
   exec bash
+fi
+
+# ---------------------------------------------------------------------------
+# Quit
+# ---------------------------------------------------------------------------
+if [[ "${CHOICE}" == "q" ]]; then
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# LiteLLM API key management
+# ---------------------------------------------------------------------------
+if [[ "${CHOICE}" == "k" ]]; then
+  if [[ -z "${_LITELLM_URL}" ]]; then
+    echo "  LiteLLM not configured for this environment."
+    cd "${HOME}"
+    exec bash
+  fi
+  read -r -s -p "  Enter your LiteLLM API key: " _NEW_KEY
+  echo ""
+  if [[ -n "${_NEW_KEY}" ]]; then
+    _SECRET_ID="${FRE_PROJECT_NAME}/${FRE_USERNAME:-developer}/litellm-key"
+    if aws secretsmanager create-secret \
+        --name "${_SECRET_ID}" \
+        --secret-string "${_NEW_KEY}" \
+        --region "${FRE_REGION}" > /dev/null 2>&1; then
+      echo "  API key saved."
+    elif aws secretsmanager put-secret-value \
+        --secret-id "${_SECRET_ID}" \
+        --secret-string "${_NEW_KEY}" \
+        --region "${FRE_REGION}" > /dev/null 2>&1; then
+      echo "  API key updated."
+    else
+      echo "  ERROR: Failed to save API key. Check IAM permissions."
+    fi
+    export ANTHROPIC_BASE_URL="${_LITELLM_URL}"
+    export ANTHROPIC_API_KEY="${_NEW_KEY}"
+    _LITELLM_KEY="${_NEW_KEY}"
+  fi
+  # Re-invoke the menu so the user can pick a repo with the key now set
+  exec /home/developer/session_start.sh
 fi
 
 # ---------------------------------------------------------------------------
