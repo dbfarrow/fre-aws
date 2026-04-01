@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bootstrap.sh — One-time setup: creates the S3 bucket, DynamoDB table,
-# user registry, SES verification, and IAM Identity Center permission sets
+# bootstrap.sh — One-time setup: creates the S3 bucket, user registry,
+# SES verification, and IAM Identity Center permission sets
 # used by the rest of the tooling. Safe to re-run (all steps are idempotent).
 #
 # Flags:
@@ -335,7 +335,7 @@ if [[ "${S3_BUCKET_EXISTS}" == false ]]; then
 else
   printf "  %-24s %-36s %s\n" "S3 state bucket"     "${BUCKET_NAME}"                "exists  (versioning/encryption/tags will be refreshed)"
 fi
-printf "  %-24s %-36s %s\n" "State locking"       "(S3 native, no DynamoDB)"      "enabled"
+printf "  %-24s %-36s %s\n" "State locking"       "(S3 native)"                   "enabled"
 if [[ "${REGISTRY_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "CREATE"
 else

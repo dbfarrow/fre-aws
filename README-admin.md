@@ -52,7 +52,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 | AdministratorAccess | Needed to run the initial `./admin.sh bootstrap`. Bootstrap creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets automatically — you'll switch to that for all ongoing work. See [Credential Setup](#credential-setup). |
 | Root MFA | Strongly recommended. AWS Console → top-right menu → Security credentials → MFA. |
 
-> **What bootstrap creates automatically**: S3 state bucket (`{project}-{account_id}-tfstate`), DynamoDB lock table (`{project}-{account_id}-tflock`), SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`), and a canonical `settings.json` in S3 that records config values for multi-admin drift detection.
+> **What bootstrap creates automatically**: S3 state bucket (`{project}-{account_id}-tfstate`) with S3-native state locking, SES email identity, IAM permission sets (`{project}-admin-access` and `{project}-developer-access`), and a canonical `settings.json` in S3 that records config values for multi-admin drift detection.
 >
 > **What `up` creates automatically**: VPC, subnets, NAT Gateway (if configured), security groups, per-user EC2 instances and IAM roles, SSM access.
 
@@ -432,7 +432,6 @@ User configuration is stored in S3 (`<project>-tfstate/<project>/users.json`) an
 - **EC2 t3.micro**: 750 hours/month for the first 12 months
 - **EBS storage**: 30 GB/month free
 - **S3**: 5 GB storage + limited requests free
-- **DynamoDB**: 25 GB + 25 WCU/RCU free
 
 ### What is NOT free (costs money from day one)
 
@@ -496,7 +495,7 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 8.  ./admin.sh sso-login                                    ← authenticate (Option A only)
 9.  ./admin.sh verify                                       ← confirm credentials work
 10. ./admin.sh bootstrap --plan                             ← preview exactly what will be created
-    ./admin.sh bootstrap                                    ← creates S3, DynamoDB, permission sets,
+    ./admin.sh bootstrap                                    ← creates S3 bucket, permission sets,
                                                                SES verification, canonical settings;
                                                                prompts before applying
                                                                (runs as AdministratorAccess)
@@ -769,7 +768,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ### Infrastructure
 ```bash
-./admin.sh bootstrap                    # one-time: create S3, DynamoDB, permission sets, SES verification (prompts before applying)
+./admin.sh bootstrap                    # one-time: create S3 bucket, permission sets, SES verification (prompts before applying)
 ./admin.sh bootstrap --plan             # show what bootstrap will create without making any changes
 ./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh configure                    # second-admin onboarding: validate admin.env against canonical
@@ -868,7 +867,7 @@ terraform -chdir=terraform state list
 **To inspect a user's state:**
 ```bash
 ./admin.sh shell
-terraform -chdir=terraform/user init -backend-config="bucket=<bucket>" -backend-config="key=<project>/users/<username>/terraform.tfstate" -backend-config="region=<region>" -backend-config="dynamodb_table=<table>" -reconfigure
+terraform -chdir=terraform/user init -backend-config="bucket=<bucket>" -backend-config="key=<project>/users/<username>/terraform.tfstate" -backend-config="region=<region>" -reconfigure
 terraform -chdir=terraform/user state list
 ```
 

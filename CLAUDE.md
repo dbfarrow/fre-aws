@@ -128,7 +128,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── main.tf                  # Base module: VPC, security groups, billing, web app
 │   ├── variables.tf
 │   ├── outputs.tf               # Exports: subnet_id, security_group_id, etc.
-│   ├── backend.tf               # S3 + DynamoDB remote state (encrypted, KMS)
+│   ├── backend.tf               # S3 remote state with S3-native locking (encrypted)
 │   ├── versions.tf              # Terraform and provider version pins
 │   ├── user_data_main.sh        # EC2 bootstrap: installs Claude, tmux, autoshutdown timer
 │   ├── user_data_tail.sh        # EC2 bootstrap tail: .bash_profile session launcher hook
@@ -140,7 +140,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   │   └── versions.tf          # AWS provider only
 │   └── tests/                   # terraform test files (*.tftest.hcl)
 ├── scripts/
-│   ├── bootstrap.sh             # One-time: S3 state bucket, DynamoDB, canonical settings.json
+│   ├── bootstrap.sh             # One-time: S3 state bucket, canonical settings.json
 │   ├── configure.sh             # Second-admin onboarding: validate admin.env + regenerate backend.env
 │   ├── up.sh                    # Two-phase: base apply, then per-user apply loop
 │   ├── down.sh                  # Per-user destroy; optionally tears down base
@@ -171,7 +171,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 Each user gets their own EC2 instance and S3 registry entry. In managed mode (`IDENTITY_MODE=managed`), an IAM Identity Center user is also created. Users are managed via:
 
 ```
-./admin.sh bootstrap               # One-time setup: S3, DynamoDB, permission sets, canonical settings.json
+./admin.sh bootstrap               # One-time setup: S3 bucket, permission sets, canonical settings.json
 ./admin.sh configure               # Second-admin onboarding: validate admin.env + regenerate backend.env
 ./admin.sh add-user <username>     # S3 registry entry + Identity Center user (managed mode only)
 ./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
@@ -270,7 +270,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 
 ### State Management
 - Remote state in **S3 with versioning, KMS encryption, public access block**
-- State locking via **DynamoDB table**
+- State locking via **S3-native locking** (no DynamoDB table required)
 - Bucket and table names include the AWS account ID for global uniqueness: `${PROJECT_NAME}-${ACCOUNT_ID}-tfstate` / `${PROJECT_NAME}-${ACCOUNT_ID}-tflock`
 - Terraform state bucket is in us-east-1 (bootstrap ran there); EC2 resources are in us-west-2 — intentional
 - State is split: base state at `<project>/base/terraform.tfstate`; per-user state at `<project>/users/<username>/terraform.tfstate`
