@@ -73,7 +73,7 @@ source "${BACKEND_CONFIG_FILE}"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
+: "${PROJECT_NAME:?}" "${AWS_REGION:?}"
 : "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_KEY:?}" "${TF_BACKEND_REGION:?}"
 
 # ---------------------------------------------------------------------------

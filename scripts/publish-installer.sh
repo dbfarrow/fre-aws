@@ -31,14 +31,17 @@ source "${SCRIPT_DIR}/installer-bundle.sh"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${PROJECT_NAME:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 
 # ---------------------------------------------------------------------------
 # Verify AWS credentials before doing anything
 # ---------------------------------------------------------------------------
-aws sts get-caller-identity --profile "${AWS_PROFILE}" --output json >/dev/null 2>&1 || {
-  echo "ERROR: AWS credentials not valid for profile '${AWS_PROFILE}'." >&2
-  echo "       Run 'aws sso login --profile ${AWS_PROFILE}' and retry." >&2
+aws sts get-caller-identity "${_PROFILE_ARGS[@]}" --output json >/dev/null 2>&1 || {
+  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
+  echo "       If using SSO, run './admin.sh sso-login' first." >&2
   exit 1
 }
 
@@ -67,7 +70,7 @@ ROLE=$(jq -r       --arg u "${USERNAME}" '.[$u].role'       "${USERS_JSON}")
 
 # Download user.env from S3 to extract the AWS profile name
 aws s3 cp "s3://${TF_BACKEND_BUCKET}/${PROJECT_NAME}/users/${USERNAME}/user.env" \
-  "${USER_ENV_TMP}" --region "${TF_BACKEND_REGION}" --profile "${AWS_PROFILE}" 2>/dev/null || {
+  "${USER_ENV_TMP}" --region "${TF_BACKEND_REGION}" "${_PROFILE_ARGS[@]}" 2>/dev/null || {
   # S3 not found — check for local bundle dir (one-time migration path)
   LOCAL_BUNDLE_DIR="${SCRIPT_DIR}/../config/onboarding/${USERNAME}"
   if [[ -f "${LOCAL_BUNDLE_DIR}/user.env" ]]; then
@@ -103,12 +106,12 @@ if [[ "${NO_EMAIL_SEND:-}" == "true" ]]; then
 elif [[ -n "${SENDER_EMAIL:-}" ]]; then
   # In SES sandbox mode, the recipient must be verified before we can send.
   SES_STATUS=$(aws sesv2 get-email-identity --email-identity "${USER_EMAIL}" \
-    --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
     --query 'VerificationStatus' --output text 2>/dev/null || echo "NOT_FOUND")
   if [[ "${SES_STATUS}" != "SUCCESS" ]]; then
     if [[ "${SES_STATUS}" == "NOT_FOUND" ]]; then
       aws sesv2 create-email-identity --email-identity "${USER_EMAIL}" \
-        --region "${AWS_REGION}" --profile "${AWS_PROFILE}" >/dev/null
+        --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" >/dev/null
     fi
     echo "NOTE: ${USER_EMAIL} is not yet verified with SES (sandbox mode)."
     echo "  A verification email has been sent to that address."
@@ -130,7 +133,7 @@ elif [[ -n "${SENDER_EMAIL:-}" ]]; then
     --role "${ROLE}" \
     --aws-profile "${AWS_PROFILE_FOR_DEV}" \
     --aws-region "${AWS_REGION}" \
-    --aws-cli-profile "${AWS_PROFILE}" \
+    --aws-cli-profile "${AWS_PROFILE:-}" \
     --ses-region "${AWS_REGION}" \
     --sso-start-url "${SSO_START_URL:-}" \
     --sso-region "${SSO_REGION:-}" \

@@ -25,8 +25,11 @@ source "${SCRIPT_DIR}/../config/backend.env"
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_PROFILE:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
+: "${PROJECT_NAME:?}" "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 : "${DEV_USERNAME:?DEV_USERNAME must be set (pass via admin.sh remove-user <username>)}"
+
+_PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 
 echo "=== Remove User: ${DEV_USERNAME} ==="
 echo ""
@@ -97,18 +100,18 @@ else
   echo ""
   echo "Cleaning up IAM Identity Center..."
 
-  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  SSO_INSTANCE_ARN=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].InstanceArn' --output text 2>/dev/null || echo "")
 
-  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+  IDENTITY_STORE_ID=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
     sso-admin list-instances \
     --query 'Instances[0].IdentityStoreId' --output text 2>/dev/null || echo "")
 
   if [[ -z "${SSO_INSTANCE_ARN}" || "${SSO_INSTANCE_ARN}" == "None" ]]; then
     echo "  WARNING: No IAM Identity Center instance found in region ${SSO_REGION}. Skipping."
   else
-    SSO_USER_ID=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+    SSO_USER_ID=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
       identitystore list-users \
       --identity-store-id "${IDENTITY_STORE_ID}" \
       --filters "AttributePath=UserName,AttributeValue=${DEV_USERNAME}" \
@@ -118,7 +121,7 @@ else
       echo "  User '${DEV_USERNAME}' not found in Identity Center — nothing to remove."
     else
       # Remove all account assignments for this user
-      ASSIGNMENTS=$(aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      ASSIGNMENTS=$(aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
         sso-admin list-account-assignments-for-principal \
         --instance-arn "${SSO_INSTANCE_ARN}" \
         --principal-id "${SSO_USER_ID}" \
@@ -131,7 +134,7 @@ else
         while IFS= read -r assignment; do
           ACCT=$(echo "${assignment}" | jq -r '.account')
           PS_ARN=$(echo "${assignment}" | jq -r '.ps')
-          aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+          aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
             sso-admin delete-account-assignment \
             --instance-arn "${SSO_INSTANCE_ARN}" \
             --target-id "${ACCT}" \
@@ -144,7 +147,7 @@ else
       fi
 
       # Delete the identity store user
-      aws --region "${SSO_REGION}" --profile "${AWS_PROFILE}" \
+      aws --region "${SSO_REGION}" "${_PROFILE_ARGS[@]}" \
         identitystore delete-user \
         --identity-store-id "${IDENTITY_STORE_ID}" \
         --user-id "${SSO_USER_ID}"
@@ -160,9 +163,9 @@ if [[ -n "${AWS_REGION:-}" ]]; then
   echo ""
   echo "Cleaning up Secrets Manager..."
   SECRET_ID="${PROJECT_NAME}/${DEV_USERNAME}/ssh-key-passphrase"
-  if aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+  if aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager describe-secret --secret-id "${SECRET_ID}" >/dev/null 2>&1; then
-    aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    aws --region "${AWS_REGION}" "${_PROFILE_ARGS[@]}" \
       secretsmanager delete-secret \
       --secret-id "${SECRET_ID}" \
       --force-delete-without-recovery >/dev/null

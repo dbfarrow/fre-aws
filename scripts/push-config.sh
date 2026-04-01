@@ -31,7 +31,7 @@ source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 
 [[ -n "${_CALLER_PROFILE}" ]] && AWS_PROFILE="${_CALLER_PROFILE}"
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
 DEV_USERNAME="${DEV_USERNAME:-}"
 if [[ -z "${DEV_USERNAME}" ]]; then

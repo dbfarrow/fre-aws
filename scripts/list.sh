@@ -196,15 +196,17 @@ elif [[ "${VERBOSE}" == true ]]; then
     fi
 
     # Pull attributes from registry
-    user_email=$(jq -r --arg u "${username}" '.[$u].user_email   // "-"' "${USERS_JSON}")
-    role=$(      jq -r --arg u "${username}" '.[$u].role         // "-"' "${USERS_JSON}")
-    git_name=$(  jq -r --arg u "${username}" '.[$u].git_user_name  // "-"' "${USERS_JSON}")
-    git_email=$( jq -r --arg u "${username}" '.[$u].git_user_email // "-"' "${USERS_JSON}")
-    ssh_key=$(   jq -r --arg u "${username}" '.[$u].ssh_public_key // "-"' "${USERS_JSON}")
+    user_email=$(  jq -r --arg u "${username}" '.[$u].user_email      // "-"' "${USERS_JSON}")
+    role=$(        jq -r --arg u "${username}" '.[$u].role            // "-"' "${USERS_JSON}")
+    git_name=$(    jq -r --arg u "${username}" '.[$u].git_user_name   // "-"' "${USERS_JSON}")
+    git_email=$(   jq -r --arg u "${username}" '.[$u].git_user_email  // "-"' "${USERS_JSON}")
+    ssh_key=$(     jq -r --arg u "${username}" '.[$u].ssh_public_key  // "-"' "${USERS_JSON}")
+    pref_shell=$(  jq -r --arg u "${username}" '.[$u].preferred_shell // "-"' "${USERS_JSON}")
     ssh_key_short="${ssh_key:0:50}..."
 
     printf "    %-16s %s\n" "email:"    "${user_email}"
     printf "    %-16s %s\n" "role:"     "${role}"
+    printf "    %-16s %s\n" "shell:"    "${pref_shell}"
     printf "    %-16s %s\n" "git name:" "${git_name}"
     printf "    %-16s %s\n" "git email:" "${git_email}"
     printf "    %-16s %s\n" "ssh key:"  "${ssh_key_short}"

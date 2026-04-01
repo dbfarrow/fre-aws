@@ -59,6 +59,9 @@ user management:
   stat                  Show environment config, cost profile, and user/instance summary
   list [-v|--verbose]   List users and their instance state
                         -v shows all registry attributes (email, role, git, ssh key)
+  pull-user <user>      Download a user's registry entry to config/users/<user>.env
+  update-user [file]    Update a user's registry entry from a local .env file
+                        (does not touch Identity Center, bundles, or running instances)
 
 infrastructure:
   bootstrap [--plan] [--yes] [--profile <name>] [--region <region>]
@@ -502,6 +505,20 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "DEV_USERNAME=${USERNAME}" \
         "${IMAGE_NAME}" /workspace/scripts/update-user-key.sh
+      ;;
+    pull-user)
+      require_username
+      docker run "${DOCKER_ARGS[@]}" \
+        --env "DEV_USERNAME=${USERNAME}" \
+        "${IMAGE_NAME}" /workspace/scripts/pull-user.sh
+      ;;
+    update-user)
+      if [[ -z "${USERNAME}" ]]; then
+        echo "Usage: admin.sh update-user <file.env>" >&2
+        exit 1
+      fi
+      docker run "${DOCKER_ARGS[@]}" \
+        "${IMAGE_NAME}" /workspace/scripts/update-user.sh "/workspace/${USERNAME}"
       ;;
     start)
       if [[ -n "${USERNAME}" ]]; then

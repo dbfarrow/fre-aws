@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 # shellcheck source=scripts/users-s3.sh
 source "${SCRIPT_DIR}/users-s3.sh"
 
-: "${PROJECT_NAME:?}" "${AWS_REGION:?}" "${AWS_PROFILE:?}"
+: "${PROJECT_NAME:?}" "${AWS_REGION:?}"
 
 # ---------------------------------------------------------------------------
 # Admin SSH public key
@@ -79,7 +79,7 @@ _push_key() {
       "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
       "Name=instance-state-name,Values=running" \
     --query 'Reservations[0].Instances[0].InstanceId' \
-    --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    --region "${AWS_REGION}" \
     --output text 2>/dev/null || echo "")
 
   if [[ -z "${instance_id}" || "${instance_id}" == "None" ]]; then
@@ -105,7 +105,7 @@ _push_key() {
     --document-name "AWS-RunShellScript" \
     --targets "Key=instanceIds,Values=${instance_id}" \
     --parameters "${ssm_params}" \
-    --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+    --region "${AWS_REGION}" \
     --comment "fre-aws: add admin SSH key for ${username}" \
     --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
@@ -121,7 +121,7 @@ _push_key() {
     status=$(aws ssm get-command-invocation \
       --command-id "${cmd_id}" \
       --instance-id "${instance_id}" \
-      --region "${AWS_REGION}" --profile "${AWS_PROFILE}" \
+      --region "${AWS_REGION}" \
       --query 'Status' --output text 2>/dev/null || echo "Unknown")
     [[ "${status}" =~ ^(Success|Failed|Cancelled|TimedOut) ]] && break
   done

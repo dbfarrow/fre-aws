@@ -153,6 +153,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── list.sh                  # Users + EC2 instance state summary (skips IC enumeration in external mode)
 │   ├── add-user.sh              # Add user to S3 registry; creates Identity Center user in managed mode
 │   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
+│   ├── pull-user.sh             # Download registry entry for a user to config/users/<username>.env
+│   ├── update-user.sh           # Merge edited .env file back into S3 registry (no IC/instance changes)
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -175,6 +177,8 @@ Each user gets their own EC2 instance and S3 registry entry. In managed mode (`I
 ./admin.sh configure               # Second-admin onboarding: validate admin.env + regenerate backend.env
 ./admin.sh add-user <username>     # S3 registry entry + Identity Center user (managed mode only)
 ./admin.sh remove-user <username>  # Destroy EC2 instance + remove user (--keep-sso to preserve Identity Center)
+./admin.sh pull-user <username>    # Download registry entry to config/users/<username>.env
+./admin.sh update-user <file>      # Merge edited .env back into S3 registry (no IC/instance changes)
 ./admin.sh list                    # Show all users + instance state + timestamps
 ./admin.sh stat                    # Full environment status including billing
 ./admin.sh up <username>           # Provision EC2 instance for user
@@ -214,9 +218,11 @@ tmux named sessions survive SSH/SSM disconnects. Reconnecting and selecting the 
 ### Autoshutdown
 A systemd timer (`autoshutdown.timer`) runs every 5 minutes:
 - **tmux sessions exist** → reset idle timer, do nothing (user is working or session is detached)
-- **0 tmux sessions for 10+ minutes** → `sudo shutdown -h now`
+- **0 tmux sessions for `AUTOSHUTDOWN_IDLE_MINUTES`** → calls EC2 API to stop instance
 
-This means: deliberately exiting Claude → `exit` the bash shell → tmux session ends → instance stops itself in ~10–15 minutes. A midnight Lambda provides a safety net for forgotten detached sessions.
+The idle period defaults to 30 minutes and is configurable via `AUTOSHUTDOWN_IDLE_MINUTES` in `admin.env`. Increase it when debugging. `refresh` writes the value to `~/.fre-config`; the autoshutdown script reads it at runtime so no rebuild is needed after changes.
+
+This means: deliberately exiting Claude → `exit` the bash shell → tmux session ends → instance stops itself after the idle period. A midnight Lambda provides a safety net for forgotten detached sessions.
 
 **`./admin.sh refresh`** installs the autoshutdown timer live on a running instance (no rebuild needed). It also pushes `session_start.sh`, patches the correct login profile file (`.bash_profile` for bash users, `.zprofile` for zsh users — detected automatically from the instance's `/etc/passwd`), writes `~/.fre-config`, and sets `hasCompletedOnboarding: true` in `~/.claude/settings.json`. It does NOT touch user dotfiles.
 
@@ -278,8 +284,9 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Canonical Configuration (Multi-Admin Synchronization)
-- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `litellm_base_url`, `existing_vpc_id`, `existing_subnet_id`.
+- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores 25 fields: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, `sso_region`, `sso_start_url`, `sender_email`, `logo_url`, `billing_alert_email`, `monthly_budget_usd`, `budget_alert_threshold_percent`, `anomaly_threshold_usd`, `enable_anomaly_detection`, `enable_scheduled_stop`, `enable_web_app`, `web_app_url`, `app_domain`, `route53_zone_id`, `corp_ca_cert_required`.
 - `up.sh` fetches `settings.json` and compares it against local `admin.env`. If drift is found, it prints each mismatch and prompts `Continue anyway? [y/N]` before proceeding. Silently skipped when `settings.json` is absent (projects bootstrapped before this feature).
+- **Non-canonical fields** (legitimately per-admin, not stored): `AWS_PROFILE`, `CONNECT_PROFILE`, `SSH_KEY_FILE`, `SSO_PROFILE`, `OWNER_EMAIL`, `WEB_PREVIEW_PORT`, `REPO_URL`, `MY_USERNAME`, `PROJECT_NAME`.
 - Second admins use `./admin.sh configure` to validate their local `admin.env`, check for drift, and regenerate `config/backend.env` — without running `bootstrap` themselves.
 - `SSO_PROFILE` in `admin.env` allows IC API calls (`sso-admin`, `identitystore`) to use a different AWS profile than `AWS_PROFILE` for cross-account Identity Center setups.
 

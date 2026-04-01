@@ -23,12 +23,12 @@ source "${SCRIPT_DIR}/../config/backend.env" 2>/dev/null || true
 # Caller-provided profile wins (admin.sh refresh must use admin credentials, not user.env's profile)
 [[ -n "${_CALLER_PROFILE}" ]] && AWS_PROFILE="${_CALLER_PROFILE}"
 
-: "${AWS_REGION:?}" "${AWS_PROFILE:?}" "${PROJECT_NAME:?}"
+: "${AWS_REGION:?}" "${PROJECT_NAME:?}"
 
-# DEV_USERNAME: set by admin.sh (command arg)
-DEV_USERNAME="${DEV_USERNAME:-}"
+# DEV_USERNAME: set by admin.sh (command arg) or MY_USERNAME from admin.env
+DEV_USERNAME="${DEV_USERNAME:-${MY_USERNAME:-}}"
 if [[ -z "${DEV_USERNAME}" ]]; then
-  echo "ERROR: DEV_USERNAME not set. Use './admin.sh refresh <username>'." >&2
+  echo "ERROR: DEV_USERNAME not set. Use './admin.sh refresh <username>' or set MY_USERNAME in config/admin.env." >&2
   exit 1
 fi
 
