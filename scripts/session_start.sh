@@ -82,6 +82,7 @@ fi
 echo "   c) Clone a GitHub repo"
 echo "   n) New project"
 echo "   s) Shell"
+echo "   q) Quit"
 if [[ -n "${_LITELLM_URL}" ]]; then
   if [[ -z "${_LITELLM_KEY}" ]]; then
     echo ""
@@ -142,6 +143,13 @@ if [[ "${CHOICE}" == "s" ]]; then
   echo "Repos are in ~/repos/. Type 'claude' to start Claude Code."
   cd "${HOME}"
   exec bash
+fi
+
+# ---------------------------------------------------------------------------
+# Quit
+# ---------------------------------------------------------------------------
+if [[ "${CHOICE}" == "q" ]]; then
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
