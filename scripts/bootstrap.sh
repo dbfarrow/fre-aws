@@ -530,12 +530,14 @@ echo ""
 # ---------------------------------------------------------------------------
 if [[ -n "${LITELLM_BASE_URL:-}" ]]; then
   echo "LiteLLM gateway..."
-  $AWS ssm put-parameter \
+  # SSM must be written to AWS_REGION (the deployment region), not STATE_REGION
+  # (the S3 bucket region). $AWS may point to STATE_REGION when they differ.
+  aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" ssm put-parameter \
     --name "/${PROJECT_NAME}/litellm/base-url" \
     --value "${LITELLM_BASE_URL}" \
     --type "String" \
     --overwrite > /dev/null
-  echo "  Base URL written to SSM (/${PROJECT_NAME}/litellm/base-url)"
+  echo "  Base URL written to SSM (/${PROJECT_NAME}/litellm/base-url, region ${AWS_REGION})"
   echo ""
 fi
 
