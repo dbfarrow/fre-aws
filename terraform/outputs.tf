@@ -1,6 +1,6 @@
 output "vpc_id" {
   description = "VPC ID (shared across all user instances)."
-  value       = module.vpc.vpc_id
+  value       = local.vpc_id
 }
 
 output "network_mode" {
@@ -9,8 +9,8 @@ output "network_mode" {
 }
 
 output "subnet_id" {
-  description = "Subnet ID for user EC2 instances. Selected based on network_mode."
-  value       = local.use_private_subnet ? module.vpc.private_subnets[0] : module.vpc.public_subnets[0]
+  description = "Subnet ID for user EC2 instances. Selected based on network_mode (or existing_subnet_id when using an existing VPC)."
+  value       = local.subnet_id
 }
 
 output "associate_public_ip" {

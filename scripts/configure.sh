@@ -103,6 +103,8 @@ _chk "ebs_volume_size_gb" "$(echo "${CANONICAL_JSON}" | jq -r '.ebs_volume_size_
 _LOCAL_CORP_CA="false"; [[ -n "${CORP_CA_CERT_FILE:-}" ]] && _LOCAL_CORP_CA="true"
 _chk "corp_ca_cert_required" "$(echo "${CANONICAL_JSON}" | jq -r '.corp_ca_cert_required // empty')" "${_LOCAL_CORP_CA}"
 unset _LOCAL_CORP_CA
+_chk "existing_vpc_id"    "$(echo "${CANONICAL_JSON}" | jq -r '.existing_vpc_id // empty')"    "${EXISTING_VPC_ID:-}"
+_chk "existing_subnet_id" "$(echo "${CANONICAL_JSON}" | jq -r '.existing_subnet_id // empty')" "${EXISTING_SUBNET_ID:-}"
 echo ""
 
 # ---------------------------------------------------------------------------

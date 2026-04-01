@@ -256,6 +256,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - **VPC** with public and private subnets (via `terraform-aws-modules/vpc/aws`)
 - Default mode: EC2 in public subnet with public IP, all inbound traffic blocked by security group
 - `private_nat` mode: EC2 in private subnet + NAT Gateway (~$33/month extra)
+- **Bring-Your-Own VPC**: `EXISTING_VPC_ID` + `EXISTING_SUBNET_ID` in `admin.env` skip VPC creation entirely and deploy EC2 into the existing VPC. Both must be set together. The existing VPC must provide SSM connectivity. No VPC, NAT, or VPC endpoints are created — only the EC2 security group is placed in the existing VPC.
 - VPC Flow Logs: not enabled (cost); add before production
 
 ### EC2 Instance
@@ -277,7 +278,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Canonical Configuration (Multi-Admin Synchronization)
-- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `litellm_base_url`.
+- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `litellm_base_url`, `existing_vpc_id`, `existing_subnet_id`.
 - `up.sh` fetches `settings.json` and compares it against local `admin.env`. If drift is found, it prints each mismatch and prompts `Continue anyway? [y/N]` before proceeding. Silently skipped when `settings.json` is absent (projects bootstrapped before this feature).
 - Second admins use `./admin.sh configure` to validate their local `admin.env`, check for drift, and regenerate `config/backend.env` — without running `bootstrap` themselves.
 - `SSO_PROFILE` in `admin.env` allows IC API calls (`sso-admin`, `identitystore`) to use a different AWS profile than `AWS_PROFILE` for cross-account Identity Center setups.

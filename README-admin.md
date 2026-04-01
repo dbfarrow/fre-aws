@@ -10,6 +10,7 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 - [SSH Key](#ssh-key)
 - [Corporate CA Certificate (SSL inspection environments)](#corporate-ca-certificate-ssl-inspection-environments)
 - [LiteLLM Gateway (Corporate Environments)](#litellm-gateway-corporate-environments)
+- [Deploying into an Existing VPC](#deploying-into-an-existing-vpc)
 - [Credential Setup](#credential-setup)
   - [Option A: IAM Identity Center (Recommended)](#option-a-iam-identity-center-recommended)
   - [Option B: IAM User with Access Keys (Free Tier)](#option-b-iam-user-with-access-keys-free-tier)
@@ -160,6 +161,61 @@ aws secretsmanager get-secret-value --secret-id fre-aws/<username>/litellm-key -
 ### Environments without LiteLLM
 
 Leave `LITELLM_BASE_URL` unset (or commented out) in `admin.env`. The session launcher makes no SSM or Secrets Manager calls and behaves exactly as before — users set up Claude Code with their own Anthropic credentials through the standard first-run flow.
+
+---
+
+## Deploying into an Existing VPC
+
+In corporate environments where a networking team controls the VPC — including routes to internal resources like a LiteLLM proxy — you can deploy EC2 instances into an existing VPC instead of letting fre-aws create one.
+
+### When to use this
+
+- Your organisation has a central VPC with pre-configured routes to internal proxies or services
+- You need EC2 instances in a private subnet that already has SSM connectivity and internet access via NAT
+- A networking team manages VPC routing and you cannot create a new one
+
+### Setup
+
+Add to `config/admin.env`:
+
+```bash
+EXISTING_VPC_ID=vpc-0123456789abcdef0
+EXISTING_SUBNET_ID=subnet-0123456789abcdef0
+```
+
+Set `NETWORK_MODE` to match the subnet type:
+
+- `NETWORK_MODE=public` — public subnet, EC2 gets a public IP
+- `NETWORK_MODE=private_nat` — private subnet with outbound internet via NAT (most common for LiteLLM)
+- `NETWORK_MODE=private_endpoints` — private subnet using VPC endpoints (not needed when using existing VPC; the existing VPC must already provide SSM connectivity)
+
+### What fre-aws does (and does not do)
+
+When `EXISTING_VPC_ID` is set:
+
+- **Skipped**: VPC creation, NAT Gateway, VPC endpoints (the existing VPC must already provide all required routing, including SSM)
+- **Still created**: EC2 security group (`{project}-ec2-sg`) in the existing VPC — this is the only new resource placed in it
+
+### Pre-flight validation
+
+`./admin.sh up` validates the IDs before any Terraform runs:
+
+- Both `EXISTING_VPC_ID` and `EXISTING_SUBNET_ID` must be set together. Setting one without the other is an error.
+- The VPC must exist in `AWS_REGION`.
+- The subnet must belong to the specified VPC.
+
+If any check fails, `up` exits with a clear error message before touching anything.
+
+### Requirements for the existing VPC
+
+The existing VPC must provide:
+
+- **SSM connectivity** — EC2 instances communicate with SSM over HTTPS (port 443). Ensure either a NAT Gateway, internet gateway (with public subnet), or SSM VPC endpoints are present.
+- **Outbound internet access** — required for package installs, Claude API calls, and GitHub access during bootstrap
+
+### Drift detection
+
+`EXISTING_VPC_ID` and `EXISTING_SUBNET_ID` are included in the canonical `settings.json` written by `bootstrap`. If a second admin runs `./admin.sh configure` without these settings set, they will see a WARNING on those two fields.
 
 ---
 
