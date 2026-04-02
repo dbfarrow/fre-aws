@@ -404,17 +404,17 @@ _stale_push_check() {
     [[ -f "${f}" ]] && tracked+=("${f}")
   done
   [[ ${#tracked[@]} -eq 0 ]] && return 0
-  local stale=()
+  _STALE_FILES=()
   if [[ ! -f "${timestamp_file}" ]]; then
-    stale=("${tracked[@]}")
+    _STALE_FILES=("${tracked[@]}")
   else
     for f in "${tracked[@]}"; do
-      [[ "${f}" -nt "${timestamp_file}" ]] && stale+=("${f}")
+      [[ "${f}" -nt "${timestamp_file}" ]] && _STALE_FILES+=("${f}")
     done
   fi
-  [[ ${#stale[@]} -eq 0 ]] && return 0
+  [[ ${#_STALE_FILES[@]} -eq 0 ]] && return 0
   echo "Config files changed since last push to '${username}':"
-  for f in "${stale[@]}"; do printf "  %s\n" "$(basename "${f}")"; done
+  for f in "${_STALE_FILES[@]}"; do printf "  %s\n" "$(basename "${f}")"; done
   echo ""
   read -r -p "Push config before connecting? [y/N] " _push_confirm
   echo ""
@@ -608,11 +608,9 @@ if [[ "${MODE}" == "admin" ]]; then
         _stale_push_check "${USERNAME}" "$(pwd)/config"
         if [[ "${_DO_PUSH}" == true ]]; then
           _PUSH_CFG_ARGS=()
-          [[ -f "${HOME}/.tmux.conf" ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.tmux.conf:/host-configs/tmux.conf:ro")
-          [[ -f "${HOME}/.bashrc"   ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.bashrc:/host-configs/bashrc:ro")
-          [[ -f "${HOME}/.zshrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.zshrc:/host-configs/zshrc:ro")
-          [[ -f "${HOME}/.vimrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.vimrc:/host-configs/vimrc:ro")
-          [[ -f "${HOME}/.fre-aws"  ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.fre-aws:/host-configs/fre-aws:ro")
+          for _f in "${_STALE_FILES[@]}"; do
+            _fname="$(basename "${_f}")"; _PUSH_CFG_ARGS+=("--volume" "${_f}:/host-configs/${_fname#.}:ro")
+          done
           if [[ -n "${AGENT_SOCK}" ]]; then
             docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
               --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
@@ -815,11 +813,9 @@ if [[ "${MODE}" == "user" ]]; then
       _stale_push_check "${MY_USERNAME}" "${USER_SCRIPT_DIR}/config"
       if [[ "${_DO_PUSH}" == true ]]; then
         _PUSH_CFG_ARGS=()
-        [[ -f "${HOME}/.tmux.conf" ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.tmux.conf:/host-configs/tmux.conf:ro")
-        [[ -f "${HOME}/.bashrc"   ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.bashrc:/host-configs/bashrc:ro")
-        [[ -f "${HOME}/.zshrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.zshrc:/host-configs/zshrc:ro")
-        [[ -f "${HOME}/.vimrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.vimrc:/host-configs/vimrc:ro")
-        [[ -f "${HOME}/.fre-aws"  ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.fre-aws:/host-configs/fre-aws:ro")
+        for _f in "${_STALE_FILES[@]}"; do
+          _fname="$(basename "${_f}")"; _PUSH_CFG_ARGS+=("--volume" "${_f}:/host-configs/${_fname#.}:ro")
+        done
         PUSH_ARGS=("${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}")
         if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
           PUSH_ARGS+=("--volume" "${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock" "--env" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
