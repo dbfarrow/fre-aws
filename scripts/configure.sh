@@ -124,6 +124,7 @@ _chk "enable_web_app"     "$(echo "${CANONICAL_JSON}" | jq -r '.enable_web_app /
 _chk "web_app_url"        "$(echo "${CANONICAL_JSON}" | jq -r '.web_app_url // empty')"        "${WEB_APP_URL:-}"
 _chk "app_domain"         "$(echo "${CANONICAL_JSON}" | jq -r '.app_domain // empty')"         "${APP_DOMAIN:-}"
 _chk "route53_zone_id"    "$(echo "${CANONICAL_JSON}" | jq -r '.route53_zone_id // empty')"    "${ROUTE53_ZONE_ID:-}"
+_chk "bucket_policy_principal_arn" "$(echo "${CANONICAL_JSON}" | jq -r '.bucket_policy_principal_arn // empty')" "${BUCKET_POLICY_PRINCIPAL_ARN:-}"
 echo ""
 
 # ---------------------------------------------------------------------------

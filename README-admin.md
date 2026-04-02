@@ -219,6 +219,70 @@ The existing VPC must provide:
 
 ---
 
+## S3 State Bucket Policy (Corporate Environments)
+
+In corporate environments, the role used to run `bootstrap` (which creates the S3 state bucket) is often a higher-privilege bootstrapper role, while day-to-day operations (`up`, `configure`, `stat`, `list`) are run with a lower-privilege daily-driver role. Because S3 bucket access defaults to IAM-only, the daily-driver role may lack `s3:PutObject` on the state bucket and fail silently when Terraform tries to save state.
+
+The fix: set `BUCKET_POLICY_PRINCIPAL_ARN` in `config/admin.env` and re-run `bootstrap`. Bootstrap will write an S3 bucket policy that explicitly grants the daily-driver role the permissions Terraform needs.
+
+### Setup
+
+Add to `config/admin.env`:
+
+```bash
+# Stable IAM role (exact ARN):
+BUCKET_POLICY_PRINCIPAL_ARN=arn:aws:iam::123456789012:role/my-daily-driver-role
+
+# IAM Identity Center / SSO role (wildcard ARN — hex suffix varies per provisioning):
+BUCKET_POLICY_PRINCIPAL_ARN=arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_MyPermSet_*
+```
+
+Then re-run bootstrap:
+
+```bash
+./admin.sh bootstrap --plan   # preview the change
+./admin.sh bootstrap --yes    # apply it
+```
+
+Bootstrap outputs:
+```
+Bucket policy...
+  Policy applied: arn:aws:iam::123456789012:role/my-daily-driver-role
+```
+
+### Wildcard ARN support
+
+IAM Identity Center provisions roles named `AWSReservedSSO_<name>_<hex-suffix>` where the suffix is random and changes on re-provisioning. S3 bucket policies don't support wildcards in the `Principal` field — but they do support `aws:PrincipalArn` with `StringLike` in a `Condition` block.
+
+When `BUCKET_POLICY_PRINCIPAL_ARN` contains `*`, bootstrap automatically uses the wildcard form:
+
+```json
+{
+  "Principal": {"AWS": "*"},
+  "Condition": {"StringLike": {"aws:PrincipalArn": "arn:.../*AWSReservedSSO_MyPermSet_*"}}
+}
+```
+
+This matches any role with the stable prefix regardless of suffix.
+
+### Permissions granted
+
+The bucket policy grants these S3 actions to the configured ARN on both the bucket and its objects:
+
+- `s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration` — Terraform init checks
+- `s3:ListBucket` — list state keys
+- `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` — read/write/delete state
+- `s3:GetObjectVersion` — read specific state version
+
+### Notes
+
+- Idempotent — re-running bootstrap with the same ARN is safe; `put-bucket-policy` always overwrites
+- If `BUCKET_POLICY_PRINCIPAL_ARN` is removed from `admin.env`, bootstrap leaves the existing policy in place (avoids accidental access loss); remove it manually via the AWS Console or CLI if needed
+- The `bootstrap --plan` output shows `CREATE`, `exists (no changes)`, or `UPDATE` depending on the current policy state
+- `configure`'s drift check includes `bucket_policy_principal_arn` so second admins are reminded to set it
+
+---
+
 ## Credential Setup
 
 `./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets scoped to what this project actually needs. After that one-time step, you reassign yourself to `{project}-admin-access` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
@@ -798,7 +862,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ```
 
 **`up` pre-flight checks:**
-- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ, it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature. The canonical fields include: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, SSO settings, billing settings, and web app settings (25 fields total).
+- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ, it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature. The canonical fields include: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, SSO settings, billing settings, web app settings, and `bucket_policy_principal_arn` (26 fields total).
 - **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
 - **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
 
