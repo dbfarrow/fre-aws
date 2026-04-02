@@ -6,6 +6,14 @@
 # local setup without running bootstrap yourself.
 set -euo pipefail
 
+FIX_DRIFT=false
+for arg in "$@"; do
+  case "${arg}" in
+    --fix-drift) FIX_DRIFT=true ;;
+    *) echo "ERROR: Unknown option: ${arg}" >&2; exit 1 ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/../config/admin.env"
 
@@ -85,15 +93,44 @@ echo ""
 # ---------------------------------------------------------------------------
 # Drift check
 # ---------------------------------------------------------------------------
+_drift_fixes=()   # "KEY=canonical_value" pairs to auto-apply
+_drift_manual=()  # labels that require manual intervention
+
+# Escape a string for use as the replacement in: sed s|...|replacement|
+_sed_escape_replacement() {
+  printf '%s' "$1" | sed 's/[&\\|]/\\&/g'
+}
+
+# Update a KEY=value line in a bash env file (active or commented stub)
+_fix_setting() {
+  local key="$1" val="$2" file="$3"
+  local escaped_val
+  escaped_val=$(_sed_escape_replacement "${val}")
+  if grep -qE "^${key}=" "${file}"; then
+    sed -i "s|^${key}=.*|${key}=${escaped_val}|" "${file}"
+  elif grep -qE "^# ${key}=" "${file}"; then
+    sed -i "s|^# ${key}=.*|${key}=${escaped_val}|" "${file}"
+  else
+    printf '\n# (added by configure --fix-drift)\n%s=%s\n' "${key}" "${val}" >> "${file}"
+  fi
+}
+
 echo "Drift check:"
 _drift=false
 _chk() {
   local label="$1" canonical="$2" local_val="$3"
   if [[ "${canonical}" != "${local_val}" ]]; then
-    printf "  %-20s %-8s canonical=%-16s local=%s\n" "${label}" "WARNING:" "${canonical}" "${local_val}"
+    printf "  %-34s %-8s canonical=%-20s local=%s\n" "${label}" "WARNING:" "${canonical}" "${local_val}"
     _drift=true
+    if [[ "${label}" == "corp_ca_cert_required" ]]; then
+      _drift_manual+=("${label}")
+    else
+      local env_key
+      env_key=$(echo "${label}" | tr '[:lower:]' '[:upper:]')
+      _drift_fixes+=("${env_key}=${canonical}")
+    fi
   else
-    printf "  %-20s %-8s %s\n" "${label}" "OK" "${canonical}"
+    printf "  %-34s %-8s %s\n" "${label}" "OK" "${canonical}"
   fi
 }
 
@@ -126,6 +163,53 @@ _chk "app_domain"         "$(echo "${CANONICAL_JSON}" | jq -r '.app_domain // em
 _chk "route53_zone_id"    "$(echo "${CANONICAL_JSON}" | jq -r '.route53_zone_id // empty')"    "${ROUTE53_ZONE_ID:-}"
 _chk "bucket_policy_principal_arn" "$(echo "${CANONICAL_JSON}" | jq -r '.bucket_policy_principal_arn // empty')" "${BUCKET_POLICY_PRINCIPAL_ARN:-}"
 echo ""
+
+if [[ "${FIX_DRIFT}" == true ]]; then
+  if [[ ${#_drift_fixes[@]} -eq 0 && ${#_drift_manual[@]} -eq 0 ]]; then
+    echo "No drift found — config/admin.env is already in sync."
+    echo ""
+  else
+    if [[ ${#_drift_fixes[@]} -gt 0 ]]; then
+      echo "Changes to apply to config/admin.env:"
+      for _fix in "${_drift_fixes[@]}"; do
+        _fkey="${_fix%%=*}"
+        _fval="${_fix#*=}"
+        printf "  %-34s = %s\n" "${_fkey}" "${_fval:-(empty)}"
+      done
+      echo ""
+    fi
+    if [[ ${#_drift_manual[@]} -gt 0 ]]; then
+      echo "Manual fixes required (cannot be auto-applied):"
+      for _m in "${_drift_manual[@]}"; do
+        if [[ "${_m}" == "corp_ca_cert_required" ]]; then
+          echo "  corp_ca_cert_required — set or unset CORP_CA_CERT_FILE in config/admin.env"
+        else
+          echo "  ${_m}"
+        fi
+      done
+      echo ""
+    fi
+    if [[ ${#_drift_fixes[@]} -gt 0 ]]; then
+      read -r -p "Apply changes to config/admin.env? [y/N] " _confirm
+      if [[ "${_confirm}" =~ ^[Yy]$ ]]; then
+        cp "${CONFIG_FILE}" "${CONFIG_FILE}.bak"
+        echo "  Backup written to config/admin.env.bak"
+        for _fix in "${_drift_fixes[@]}"; do
+          _fkey="${_fix%%=*}"
+          _fval="${_fix#*=}"
+          _fix_setting "${_fkey}" "${_fval}" "${CONFIG_FILE}"
+        done
+        echo "  config/admin.env updated."
+        echo ""
+        echo "Re-run configure to verify all fields are in sync."
+      else
+        echo "Aborted — no changes made."
+      fi
+      echo ""
+    fi
+  fi
+fi
+unset -f _fix_setting _sed_escape_replacement
 
 # ---------------------------------------------------------------------------
 # Write backend.env

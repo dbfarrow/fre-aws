@@ -71,9 +71,12 @@ infrastructure:
                         --yes     Skip the confirmation prompt.
                         --profile Use a named AWS profile instead of admin.env.
                         --region  Override the deploy region from admin.env.
-  configure             Second-admin onboarding: validate local admin.env against
+  configure [--fix-drift]
+                        Second-admin onboarding: validate local admin.env against
                         canonical S3 settings and regenerate config/backend.env.
                         Run this after the super-admin has bootstrapped the project.
+                        --fix-drift  Apply canonical values back to local admin.env
+                                     (shows a diff and prompts for confirmation first).
   up [user]             Create / update base infrastructure + all users (or just one user)
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
@@ -457,7 +460,7 @@ if [[ "${MODE}" == "admin" ]]; then
         "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
       ;;
     configure)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh "${@:2}"
       ;;
     up)
       ADMIN_SSH_PUB_KEY=""

@@ -598,7 +598,7 @@ If the project is already bootstrapped by another admin, you don't need to run `
 10. ./admin.sh up <username>                                ← you're ready to provision instances
 ```
 
-`configure` warns if any of your `admin.env` values differ from the canonical settings (region, network mode, spot preference, EBS size, identity mode). Fix any mismatches before running `up` to avoid conflicting infrastructure.
+`configure` warns if any of your `admin.env` values differ from the canonical settings (region, network mode, spot preference, EBS size, identity mode). Fix any mismatches before running `up` to avoid conflicting infrastructure. To apply canonical values automatically, run `./admin.sh configure --fix-drift` — it shows each change and prompts for confirmation before modifying `config/admin.env` (a backup is written to `config/admin.env.bak` first).
 
 ---
 
@@ -855,6 +855,8 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh configure                    # second-admin onboarding: validate admin.env against canonical
                                         # S3 settings and regenerate config/backend.env
+./admin.sh configure --fix-drift        # same as above, then apply canonical values to admin.env
+                                        # (shows diff and confirms before writing; backs up first)
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
 ./admin.sh down --all                   # destroy all user instances, then base (full teardown)
