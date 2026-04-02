@@ -29,6 +29,11 @@ unset _SESSIONS
 # shellcheck source=/dev/null
 source ~/.fre-config 2>/dev/null
 
+# Source user-managed env vars (created locally as ~/.fre-aws, pushed via push-config).
+# Silently skipped if not present — zero overhead for users who don't need it.
+# shellcheck source=/dev/null
+source ~/.fre-aws-user-env 2>/dev/null || true
+
 # ---- LiteLLM gateway ----
 # If a LiteLLM base URL is configured for this environment, fetch the user's
 # API key from Secrets Manager and export both env vars so Claude routes through

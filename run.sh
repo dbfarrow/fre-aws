@@ -636,6 +636,7 @@ if [[ "${MODE}" == "admin" ]]; then
       [[ -f "${HOME}/.bashrc"   ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.bashrc:/host-configs/bashrc:ro")
       [[ -f "${HOME}/.zshrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.zshrc:/host-configs/zshrc:ro")
       [[ -f "${HOME}/.vimrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.vimrc:/host-configs/vimrc:ro")
+      [[ -f "${HOME}/.fre-aws"  ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.fre-aws:/host-configs/fre-aws:ro")
       if [[ -n "${AGENT_SOCK}" ]]; then
         docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
