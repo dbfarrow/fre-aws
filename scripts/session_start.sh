@@ -16,6 +16,15 @@ if [[ ! -t 0 ]]; then
   exit 0
 fi
 
+# Auto-reattach: if exactly one tmux session is running, skip the menu and
+# reconnect immediately — handles the "dropped connection" case transparently.
+mapfile -t _SESSIONS < <(tmux list-sessions -F '#S' 2>/dev/null || true)
+if [[ ${#_SESSIONS[@]} -eq 1 ]]; then
+  echo "Reconnecting to '${_SESSIONS[0]}'..."
+  exec tmux attach-session -t "${_SESSIONS[0]}"
+fi
+unset _SESSIONS
+
 # Source instance config (written at provision time and by refresh)
 # shellcheck source=/dev/null
 source ~/.fre-config 2>/dev/null
