@@ -31,6 +31,14 @@ if [[ -z "${DEV_USERNAME}" ]]; then
   exit 1
 fi
 
+# Preflight: session-manager-plugin is required for SSH-over-SSM ProxyCommand
+if ! command -v session-manager-plugin &>/dev/null; then
+  echo "ERROR: session-manager-plugin is not installed or not in PATH." >&2
+  echo "       Install it with: brew install --cask session-manager-plugin" >&2
+  echo "       Or download from: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html" >&2
+  exit 1
+fi
+
 _PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
