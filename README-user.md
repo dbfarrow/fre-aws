@@ -163,7 +163,7 @@ Each time you connect, you'll see a menu:
 
 ### Session persistence
 
-Each repo opens in a named **tmux** session. If your SSH connection drops (or you close your laptop), the session keeps running on the instance. The next time you connect and select the same repo, you'll be reattached to the same session — Claude Code and your conversation history right where you left them.
+Each repo opens in a named **tmux** session. If your SSH connection drops (or you close your laptop), the session keeps running on the instance. The next time you connect, if you only have one active session running, you'll be reattached to it automatically — no menu, no selection needed. If you have multiple sessions running, the menu appears and you pick which one to rejoin. Either way, Claude Code and your conversation history are right where you left them.
 
 `claude --continue` is used automatically on every launch, so your conversation context is always restored even after a fresh connect.
 

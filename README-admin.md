@@ -756,12 +756,13 @@ Power users can push their own dotfiles from their local machine to their EC2 in
 
 `push-config` looks for these files on the **host** machine and pushes any that exist:
 
-| Host file | EC2 destination |
-|-----------|----------------|
-| `~/.tmux.conf` | `~/.tmux.conf` |
-| `~/.bashrc` | `~/.bashrc` |
-| `~/.zshrc` | `~/.zshrc` |
-| `~/.vimrc` | `~/.vimrc` |
+| Host file | EC2 destination | Notes |
+|-----------|----------------|-------|
+| `~/.tmux.conf` | `~/.tmux.conf` | |
+| `~/.bashrc` | `~/.bashrc` | |
+| `~/.zshrc` | `~/.zshrc` | |
+| `~/.vimrc` | `~/.vimrc` | |
+| `~/.fre-aws` | `~/.fre-aws-user-env` | Sourced before Claude launches — use for extra env vars (LiteLLM settings, personal config, etc.) |
 
 Files not found on the host are skipped silently. `push-config` never touches `~/.bash_profile` or `~/.zprofile` — those are system-managed (session launcher hook).
 
@@ -878,7 +879,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ```bash
 ./admin.sh connect     <username>       # SSH into an instance (uses {project}-developer-access)
 ./admin.sh refresh     <username>       # push system config (session_start.sh, autoshutdown, profile guard)
-./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc)
+./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc, ~/.fre-aws)
 ./admin.sh ssm         <username>       # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
                                         # running instances (idempotent, uses SSM — no SSH needed)
