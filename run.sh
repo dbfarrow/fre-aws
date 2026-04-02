@@ -71,9 +71,12 @@ infrastructure:
                         --yes     Skip the confirmation prompt.
                         --profile Use a named AWS profile instead of admin.env.
                         --region  Override the deploy region from admin.env.
-  configure             Second-admin onboarding: validate local admin.env against
+  configure [--fix-drift]
+                        Second-admin onboarding: validate local admin.env against
                         canonical S3 settings and regenerate config/backend.env.
                         Run this after the super-admin has bootstrapped the project.
+                        --fix-drift  Apply canonical values back to local admin.env
+                                     (shows a diff and prompts for confirmation first).
   up [user]             Create / update base infrastructure + all users (or just one user)
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
@@ -388,6 +391,37 @@ if [[ "${MODE}" == "user" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Stale config detection helper
+# Sets _DO_PUSH=false; if tracked dotfiles are newer than the last push timestamp,
+# prints them and prompts the user; sets _DO_PUSH=true if confirmed.
+# ---------------------------------------------------------------------------
+_stale_push_check() {
+  local username="$1" config_dir="$2"
+  _DO_PUSH=false
+  local timestamp_file="${config_dir}/.last-push-${username}"
+  local tracked=()
+  for f in "${HOME}/.tmux.conf" "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.vimrc" "${HOME}/.fre-aws"; do
+    [[ -f "${f}" ]] && tracked+=("${f}")
+  done
+  [[ ${#tracked[@]} -eq 0 ]] && return 0
+  _STALE_FILES=()
+  if [[ ! -f "${timestamp_file}" ]]; then
+    _STALE_FILES=("${tracked[@]}")
+  else
+    for f in "${tracked[@]}"; do
+      [[ "${f}" -nt "${timestamp_file}" ]] && _STALE_FILES+=("${f}")
+    done
+  fi
+  [[ ${#_STALE_FILES[@]} -eq 0 ]] && return 0
+  echo "Config files changed since last push to '${username}':"
+  for f in "${_STALE_FILES[@]}"; do printf "  %s\n" "$(basename "${f}")"; done
+  echo ""
+  read -r -p "Push config before connecting? [y/N] " _push_confirm
+  echo ""
+  [[ "${_push_confirm}" =~ ^[Yy]$ ]] && _DO_PUSH=true
+}
+
+# ---------------------------------------------------------------------------
 # Admin dispatch
 # ---------------------------------------------------------------------------
 if [[ "${MODE}" == "admin" ]]; then
@@ -457,7 +491,7 @@ if [[ "${MODE}" == "admin" ]]; then
         "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
       ;;
     configure)
-      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh "${@:2}"
       ;;
     up)
       ADMIN_SSH_PUB_KEY=""
@@ -570,6 +604,31 @@ if [[ "${MODE}" == "admin" ]]; then
       _CONNECT_PROFILE_ARG=()
       [[ -n "${_CONNECT_PROFILE}" ]] && _CONNECT_PROFILE_ARG=("--env" "AWS_PROFILE=${_CONNECT_PROFILE}")
       AGENT_SOCK=$(_detect_ssh_agent_sock)
+      if [[ "${USERNAME}" == "${MY_USERNAME:-}" ]]; then
+        _stale_push_check "${USERNAME}" "$(pwd)/config"
+        if [[ "${_DO_PUSH}" == true ]]; then
+          _PUSH_CFG_ARGS=()
+          for _f in "${_STALE_FILES[@]}"; do
+            _fname="$(basename "${_f}")"; _PUSH_CFG_ARGS+=("--volume" "${_f}:/host-configs/${_fname#.}:ro")
+          done
+          if [[ -n "${AGENT_SOCK}" ]]; then
+            docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
+              --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
+              --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
+              --env "DEV_USERNAME=${USERNAME}" \
+              --env "AWS_PROFILE=${AWS_PROFILE}" \
+              "${IMAGE_NAME}" /workspace/scripts/push-config.sh \
+            && touch "$(pwd)/config/.last-push-${USERNAME}"
+          else
+            docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
+              --env "DEV_USERNAME=${USERNAME}" \
+              --env "AWS_PROFILE=${AWS_PROFILE}" \
+              "${IMAGE_NAME}" /workspace/scripts/push-config.sh \
+            && touch "$(pwd)/config/.last-push-${USERNAME}"
+          fi
+          echo ""
+        fi
+      fi
       if [[ -n "${AGENT_SOCK}" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
         docker run "${DOCKER_ARGS[@]}" \
@@ -633,18 +692,21 @@ if [[ "${MODE}" == "admin" ]]; then
       [[ -f "${HOME}/.bashrc"   ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.bashrc:/host-configs/bashrc:ro")
       [[ -f "${HOME}/.zshrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.zshrc:/host-configs/zshrc:ro")
       [[ -f "${HOME}/.vimrc"    ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.vimrc:/host-configs/vimrc:ro")
+      [[ -f "${HOME}/.fre-aws"  ]] && _PUSH_CFG_ARGS+=("--volume" "${HOME}/.fre-aws:/host-configs/fre-aws:ro")
       if [[ -n "${AGENT_SOCK}" ]]; then
         docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "AWS_PROFILE=${AWS_PROFILE}" \
-          "${IMAGE_NAME}" /workspace/scripts/push-config.sh
+          "${IMAGE_NAME}" /workspace/scripts/push-config.sh \
+        && touch "$(pwd)/config/.last-push-${USERNAME}"
       else
         docker run "${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "AWS_PROFILE=${AWS_PROFILE}" \
-          "${IMAGE_NAME}" /workspace/scripts/push-config.sh
+          "${IMAGE_NAME}" /workspace/scripts/push-config.sh \
+        && touch "$(pwd)/config/.last-push-${USERNAME}"
       fi
       ;;
     ssm)
@@ -748,6 +810,30 @@ if [[ "${MODE}" == "user" ]]; then
       [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       CONNECT_ARGS+=("--publish" "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}")
+      _stale_push_check "${MY_USERNAME}" "${USER_SCRIPT_DIR}/config"
+      if [[ "${_DO_PUSH}" == true ]]; then
+        _PUSH_CFG_ARGS=()
+        for _f in "${_STALE_FILES[@]}"; do
+          _fname="$(basename "${_f}")"; _PUSH_CFG_ARGS+=("--volume" "${_f}:/host-configs/${_fname#.}:ro")
+        done
+        PUSH_ARGS=("${DOCKER_ARGS[@]}" "${_PUSH_CFG_ARGS[@]}")
+        if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+          PUSH_ARGS+=("--volume" "${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock" "--env" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
+        elif [[ -S "/run/host-services/ssh-auth.sock" ]]; then
+          PUSH_ARGS+=("--volume" "/run/host-services/ssh-auth.sock:/tmp/ssh-agent.sock" "--env" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
+        elif [[ -f "${USER_SCRIPT_DIR}/.ssh/fre-claude" ]]; then
+          PUSH_ARGS+=("--volume" "${USER_SCRIPT_DIR}/.ssh:/root/.ssh:ro" "--env" "SSH_KEY_FILE=/root/.ssh/fre-claude" "--env" "SSH_KEY_PASSPHRASE_SECRET=${PROJECT_NAME}/${MY_USERNAME}/ssh-key-passphrase")
+        elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+          PUSH_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro" "--env" "SSH_KEY_FILE=/root/.ssh/id_ed25519")
+        elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+          PUSH_ARGS+=("--volume" "${HOME}/.ssh:/root/.ssh:ro" "--env" "SSH_KEY_FILE=/root/.ssh/id_rsa")
+        fi
+        docker run "${PUSH_ARGS[@]}" \
+          --env "DEV_USERNAME=${MY_USERNAME}" \
+          "${IMAGE_NAME}" /workspace/scripts/push-config.sh \
+        && touch "${USER_SCRIPT_DIR}/config/.last-push-${MY_USERNAME}"
+        echo ""
+      fi
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/connect.sh
       ;;
     upload)

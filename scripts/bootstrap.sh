@@ -280,6 +280,17 @@ if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
   fi
 fi
 
+# Existing bucket policy principal (for plan display / change detection)
+CURRENT_POLICY_PRINCIPAL=""
+if [[ "${S3_BUCKET_EXISTS}" == true ]]; then
+  _existing_policy=$($AWS s3api get-bucket-policy --bucket "${BUCKET_NAME}" \
+    --query Policy --output text 2>/dev/null || echo "")
+  if [[ -n "${_existing_policy}" ]]; then
+    CURRENT_POLICY_PRINCIPAL=$(echo "${_existing_policy}" | \
+      jq -r '.Statement[0].Principal.AWS // empty' 2>/dev/null || echo "")
+  fi
+fi
+
 # Compute canonical setting values now — used in both plan display and execution
 _CORP_CA_REQUIRED="false"
 [[ -n "${CORP_CA_CERT_FILE:-}" ]] && _CORP_CA_REQUIRED="true"
@@ -341,6 +352,25 @@ if [[ "${REGISTRY_EXISTS}" == false ]]; then
 else
   printf "  %-24s %-36s %s\n" "S3 user registry"   "${PROJECT_NAME}/users.json"    "exists  (no changes)"
 fi
+if [[ -n "${BUCKET_POLICY_PRINCIPAL_ARN:-}" ]]; then
+  if [[ -z "${CURRENT_POLICY_PRINCIPAL}" ]]; then
+    printf "  %-24s %-36s %s\n" "Bucket policy" \
+      "(${BUCKET_POLICY_PRINCIPAL_ARN})" "CREATE"
+  elif [[ "${CURRENT_POLICY_PRINCIPAL}" == "${BUCKET_POLICY_PRINCIPAL_ARN}" ]]; then
+    printf "  %-24s %-36s %s\n" "Bucket policy" \
+      "${BUCKET_POLICY_PRINCIPAL_ARN}" "exists  (no changes)"
+  else
+    printf "  %-24s %-36s %s\n" "Bucket policy" \
+      "${CURRENT_POLICY_PRINCIPAL} → ${BUCKET_POLICY_PRINCIPAL_ARN}" "UPDATE"
+  fi
+else
+  if [[ -n "${CURRENT_POLICY_PRINCIPAL}" ]]; then
+    printf "  %-24s %-36s %s\n" "Bucket policy" \
+      "${CURRENT_POLICY_PRINCIPAL}" "exists  (BUCKET_POLICY_PRINCIPAL_ARN unset — no changes)"
+  else
+    printf "  %-24s %-36s %s\n" "Bucket policy" "(not configured)" "SKIP"
+  fi
+fi
 if [[ "${SETTINGS_EXISTS}" == false ]]; then
   printf "  %-24s %-36s %s\n" "Canonical settings"  "${PROJECT_NAME}/settings.json" "CREATE"
 else
@@ -387,6 +417,7 @@ _settings_row "enable_web_app"                "${ENABLE_WEB_APP:-false}"
 _settings_row "web_app_url"                   "${WEB_APP_URL:-}"
 _settings_row "app_domain"                    "${APP_DOMAIN:-}"
 _settings_row "route53_zone_id"               "${ROUTE53_ZONE_ID:-}"
+_settings_row "bucket_policy_principal_arn"   "${BUCKET_POLICY_PRINCIPAL_ARN:-}"
 unset -f _settings_row
 printf "  %-24s %-36s %s\n" "LiteLLM gateway" \
   "${LITELLM_BASE_URL:-(not configured)}" \
@@ -527,6 +558,50 @@ $AWS s3api put-bucket-tagging \
   --bucket "${BUCKET_NAME}" \
   --tagging "TagSet=[{Key=ProjectName,Value=${PROJECT_NAME}},{Key=ManagedBy,Value=fre-aws}]"
 echo "  Tags applied."
+
+# S3 bucket policy — grant daily-driver role Terraform state access
+if [[ -n "${BUCKET_POLICY_PRINCIPAL_ARN:-}" ]]; then
+  echo "S3 bucket policy..."
+  _ACTIONS='["s3:GetBucketVersioning","s3:GetEncryptionConfiguration","s3:ListBucket","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:GetObjectVersion"]'
+  if [[ "${BUCKET_POLICY_PRINCIPAL_ARN}" == *"*"* ]]; then
+    # Wildcard ARN (SSO role with random suffix) — Principal:"*" + StringLike condition
+    _BUCKET_POLICY=$(jq -n \
+      --arg pattern "${BUCKET_POLICY_PRINCIPAL_ARN}" \
+      --arg bucket  "${BUCKET_NAME}" \
+      --argjson actions "${_ACTIONS}" \
+      '{
+        Version: "2012-10-17",
+        Statement: [{
+          Sid:       "TerraformStateAccess",
+          Effect:    "Allow",
+          Principal: {AWS: "*"},
+          Action:    $actions,
+          Resource:  [("arn:aws:s3:::" + $bucket), ("arn:aws:s3:::" + $bucket + "/*")],
+          Condition: {StringLike: {"aws:PrincipalArn": $pattern}}
+        }]
+      }')
+  else
+    # Stable IAM role ARN — direct Principal
+    _BUCKET_POLICY=$(jq -n \
+      --arg principal "${BUCKET_POLICY_PRINCIPAL_ARN}" \
+      --arg bucket    "${BUCKET_NAME}" \
+      --argjson actions "${_ACTIONS}" \
+      '{
+        Version: "2012-10-17",
+        Statement: [{
+          Sid:       "TerraformStateAccess",
+          Effect:    "Allow",
+          Principal: {AWS: $principal},
+          Action:    $actions,
+          Resource:  [("arn:aws:s3:::" + $bucket), ("arn:aws:s3:::" + $bucket + "/*")]
+        }]
+      }')
+  fi
+  $AWS s3api put-bucket-policy --bucket "${BUCKET_NAME}" --policy "${_BUCKET_POLICY}"
+  unset _BUCKET_POLICY _ACTIONS
+  echo "  Policy applied: ${BUCKET_POLICY_PRINCIPAL_ARN}"
+fi
+
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -587,6 +662,7 @@ jq -n \
   --arg web_app_url                    "${WEB_APP_URL:-}" \
   --arg app_domain                     "${APP_DOMAIN:-}" \
   --arg route53_zone_id                "${ROUTE53_ZONE_ID:-}" \
+  --arg bucket_policy_principal_arn    "${BUCKET_POLICY_PRINCIPAL_ARN:-}" \
   '$ARGS.named' \
   | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
 unset _CORP_CA_REQUIRED

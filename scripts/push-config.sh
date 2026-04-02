@@ -9,6 +9,7 @@
 #   /host-configs/bashrc     →  ~/.bashrc
 #   /host-configs/zshrc      →  ~/.zshrc
 #   /host-configs/vimrc      →  ~/.vimrc
+#   /host-configs/fre-aws    →  ~/.fre-aws-user-env  (sourced before Claude launches)
 #
 # Does NOT touch ~/.bash_profile or ~/.zprofile — those are system-managed.
 set -euo pipefail
@@ -97,16 +98,17 @@ _push_file() {
   fi
 }
 
-_push_file "/host-configs/tmux.conf" "~/.tmux.conf" "~/.tmux.conf"
-_push_file "/host-configs/bashrc"    "~/.bashrc"    "~/.bashrc"
-_push_file "/host-configs/zshrc"     "~/.zshrc"     "~/.zshrc"
-_push_file "/host-configs/vimrc"     "~/.vimrc"     "~/.vimrc"
+_push_file "/host-configs/tmux.conf" "~/.tmux.conf"        "~/.tmux.conf"
+_push_file "/host-configs/bashrc"    "~/.bashrc"           "~/.bashrc"
+_push_file "/host-configs/zshrc"     "~/.zshrc"            "~/.zshrc"
+_push_file "/host-configs/vimrc"     "~/.vimrc"            "~/.vimrc"
+_push_file "/host-configs/fre-aws"   "~/.fre-aws-user-env" "~/.fre-aws"
 
 echo ""
 if [[ "${PUSHED}" -eq 0 ]]; then
   echo "=== Nothing to push ==="
   echo "    None of the expected dotfiles were found on the host."
-  echo "    Expected: ~/.tmux.conf  ~/.bashrc  ~/.zshrc  ~/.vimrc"
+  echo "    Expected: ~/.tmux.conf  ~/.bashrc  ~/.zshrc  ~/.vimrc  ~/.fre-aws"
 else
   echo "=== push-config complete: ${PUSHED} pushed, ${SKIPPED} skipped ==="
   echo "    Changes take effect on the next 'source <file>' or new shell session."

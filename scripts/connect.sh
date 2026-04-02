@@ -31,6 +31,14 @@ if [[ -z "${DEV_USERNAME}" ]]; then
   exit 1
 fi
 
+# Preflight: session-manager-plugin is required for SSH-over-SSM ProxyCommand
+if ! command -v session-manager-plugin &>/dev/null; then
+  echo "ERROR: session-manager-plugin is not installed or not in PATH." >&2
+  echo "       Install it with: brew install --cask session-manager-plugin" >&2
+  echo "       Or download from: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html" >&2
+  exit 1
+fi
+
 _PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
 CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
@@ -67,9 +75,44 @@ INSTANCE_STATE=$(aws ec2 describe-instances \
 }
 
 if [[ "${INSTANCE_STATE}" != "running" ]]; then
-  echo "ERROR: Instance ${INSTANCE_ID} is '${INSTANCE_STATE}', not running." >&2
-  echo "       Run './user.sh start'  (or: ./admin.sh start ${DEV_USERNAME}) first." >&2
-  exit 1
+  if [[ "${INSTANCE_STATE}" == "stopped" ]]; then
+    read -r -p "Instance is stopped. Start it now? [y/N] " _start_confirm
+    if [[ ! "${_start_confirm}" =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 0
+    fi
+    echo "Starting ${INSTANCE_ID}..."
+    aws ec2 start-instances --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}" > /dev/null
+    echo "Waiting for instance to be running..."
+    aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}"
+    echo "Waiting for SSM agent..."
+    _ssm_ready=false
+    for _i in $(seq 1 24); do
+      _ping=$(aws ssm describe-instance-information \
+        --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+        --region "${AWS_REGION}" \
+        --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+      if [[ "${_ping}" == "Online" ]]; then _ssm_ready=true; break; fi
+      sleep 5
+    done
+    if [[ "${_ssm_ready}" != true ]]; then
+      echo "WARNING: SSM agent not yet responding. Connection may fail — try again in a moment."
+    else
+      echo "  Instance is ready."
+    fi
+    echo ""
+  elif [[ "${INSTANCE_STATE}" == "pending" ]]; then
+    echo "Instance is starting up, waiting..."
+    aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}"
+    echo "  Running. Connecting..."
+    echo ""
+  elif [[ "${INSTANCE_STATE}" == "stopping" ]]; then
+    echo "Instance is currently stopping. Wait a moment and try again." >&2
+    exit 0
+  else
+    echo "ERROR: Instance is in state '${INSTANCE_STATE}' — cannot connect." >&2
+    exit 1
+  fi
 fi
 
 echo "Connecting to ${INSTANCE_ID} (${DEV_USERNAME}) via SSH over SSM..."

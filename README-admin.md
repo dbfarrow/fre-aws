@@ -219,6 +219,70 @@ The existing VPC must provide:
 
 ---
 
+## S3 State Bucket Policy (Corporate Environments)
+
+In corporate environments, the role used to run `bootstrap` (which creates the S3 state bucket) is often a higher-privilege bootstrapper role, while day-to-day operations (`up`, `configure`, `stat`, `list`) are run with a lower-privilege daily-driver role. Because S3 bucket access defaults to IAM-only, the daily-driver role may lack `s3:PutObject` on the state bucket and fail silently when Terraform tries to save state.
+
+The fix: set `BUCKET_POLICY_PRINCIPAL_ARN` in `config/admin.env` and re-run `bootstrap`. Bootstrap will write an S3 bucket policy that explicitly grants the daily-driver role the permissions Terraform needs.
+
+### Setup
+
+Add to `config/admin.env`:
+
+```bash
+# Stable IAM role (exact ARN):
+BUCKET_POLICY_PRINCIPAL_ARN=arn:aws:iam::123456789012:role/my-daily-driver-role
+
+# IAM Identity Center / SSO role (wildcard ARN — hex suffix varies per provisioning):
+BUCKET_POLICY_PRINCIPAL_ARN=arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_MyPermSet_*
+```
+
+Then re-run bootstrap:
+
+```bash
+./admin.sh bootstrap --plan   # preview the change
+./admin.sh bootstrap --yes    # apply it
+```
+
+Bootstrap outputs:
+```
+Bucket policy...
+  Policy applied: arn:aws:iam::123456789012:role/my-daily-driver-role
+```
+
+### Wildcard ARN support
+
+IAM Identity Center provisions roles named `AWSReservedSSO_<name>_<hex-suffix>` where the suffix is random and changes on re-provisioning. S3 bucket policies don't support wildcards in the `Principal` field — but they do support `aws:PrincipalArn` with `StringLike` in a `Condition` block.
+
+When `BUCKET_POLICY_PRINCIPAL_ARN` contains `*`, bootstrap automatically uses the wildcard form:
+
+```json
+{
+  "Principal": {"AWS": "*"},
+  "Condition": {"StringLike": {"aws:PrincipalArn": "arn:.../*AWSReservedSSO_MyPermSet_*"}}
+}
+```
+
+This matches any role with the stable prefix regardless of suffix.
+
+### Permissions granted
+
+The bucket policy grants these S3 actions to the configured ARN on both the bucket and its objects:
+
+- `s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration` — Terraform init checks
+- `s3:ListBucket` — list state keys
+- `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` — read/write/delete state
+- `s3:GetObjectVersion` — read specific state version
+
+### Notes
+
+- Idempotent — re-running bootstrap with the same ARN is safe; `put-bucket-policy` always overwrites
+- If `BUCKET_POLICY_PRINCIPAL_ARN` is removed from `admin.env`, bootstrap leaves the existing policy in place (avoids accidental access loss); remove it manually via the AWS Console or CLI if needed
+- The `bootstrap --plan` output shows `CREATE`, `exists (no changes)`, or `UPDATE` depending on the current policy state
+- `configure`'s drift check includes `bucket_policy_principal_arn` so second admins are reminded to set it
+
+---
+
 ## Credential Setup
 
 `./admin.sh bootstrap` requires **AdministratorAccess** — broad enough to create IAM roles, permission sets, S3 buckets, KMS keys, and more. Once bootstrap completes, it creates tighter `{project}-admin-access` and `{project}-developer-access` permission sets scoped to what this project actually needs. After that one-time step, you reassign yourself to `{project}-admin-access` and drop AdministratorAccess — bootstrap is the only time you need the broader permissions.
@@ -534,7 +598,7 @@ If the project is already bootstrapped by another admin, you don't need to run `
 10. ./admin.sh up <username>                                ← you're ready to provision instances
 ```
 
-`configure` warns if any of your `admin.env` values differ from the canonical settings (region, network mode, spot preference, EBS size, identity mode). Fix any mismatches before running `up` to avoid conflicting infrastructure.
+`configure` warns if any of your `admin.env` values differ from the canonical settings (region, network mode, spot preference, EBS size, identity mode). Fix any mismatches before running `up` to avoid conflicting infrastructure. To apply canonical values automatically, run `./admin.sh configure --fix-drift` — it shows each change and prompts for confirmation before modifying `config/admin.env` (a backup is written to `config/admin.env.bak` first).
 
 ---
 
@@ -692,16 +756,33 @@ Power users can push their own dotfiles from their local machine to their EC2 in
 
 `push-config` looks for these files on the **host** machine and pushes any that exist:
 
-| Host file | EC2 destination |
-|-----------|----------------|
-| `~/.tmux.conf` | `~/.tmux.conf` |
-| `~/.bashrc` | `~/.bashrc` |
-| `~/.zshrc` | `~/.zshrc` |
-| `~/.vimrc` | `~/.vimrc` |
+| Host file | EC2 destination | Notes |
+|-----------|----------------|-------|
+| `~/.tmux.conf` | `~/.tmux.conf` | |
+| `~/.bashrc` | `~/.bashrc` | |
+| `~/.zshrc` | `~/.zshrc` | |
+| `~/.vimrc` | `~/.vimrc` | |
+| `~/.fre-aws` | `~/.fre-aws-user-env` | Sourced before Claude launches — use for extra env vars (LiteLLM settings, personal config, etc.) |
 
 Files not found on the host are skipped silently. `push-config` never touches `~/.bash_profile` or `~/.zprofile` — those are system-managed (session launcher hook).
 
 A reference tmux config is available at `config/tmux.conf.example`. Copy it to `~/.tmux.conf` and push it with `push-config` if you want the project's default key bindings.
+
+#### Stale config detection on connect
+
+When running `./admin.sh connect <username>` where `<username>` matches `MY_USERNAME` in `admin.env`, the connect command automatically checks whether any of the tracked dotfiles have changed since the last push. If stale files are found, it lists them and prompts:
+
+```
+Config files changed since last push to 'dave':
+  .tmux.conf
+  .fre-aws
+
+Push config before connecting? [y/N]
+```
+
+Confirming pushes the files and records a timestamp (`config/.last-push-<username>`). Declining skips the push and connects normally. The check is silent when no tracked dotfiles exist or nothing has changed. Connecting as a different user never triggers the check.
+
+The same check runs automatically in `user.sh connect`.
 
 ### Pushing script updates to users
 
@@ -791,6 +872,8 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ./admin.sh bootstrap --yes              # skip the confirmation prompt (for re-runs)
 ./admin.sh configure                    # second-admin onboarding: validate admin.env against canonical
                                         # S3 settings and regenerate config/backend.env
+./admin.sh configure --fix-drift        # same as above, then apply canonical values to admin.env
+                                        # (shows diff and confirms before writing; backs up first)
 ./admin.sh up                           # provision base infrastructure + all user instances
 ./admin.sh up <username>                # provision base (no-op if current) + one user's instance
 ./admin.sh down --all                   # destroy all user instances, then base (full teardown)
@@ -798,7 +881,7 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ```
 
 **`up` pre-flight checks:**
-- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ, it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature. The canonical fields include: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, SSO settings, billing settings, and web app settings (25 fields total).
+- **Canonical settings drift** — `up` fetches `settings.json` from S3 and compares it against your local `admin.env`. If any values differ, it prints the mismatches and prompts `Continue anyway? [y/N]`. Declining exits cleanly so you can run `./admin.sh configure` first. Silently skipped for projects bootstrapped before this feature. The canonical fields include: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, SSO settings, billing settings, web app settings, and `bucket_policy_principal_arn` (26 fields total).
 - **VPC quota** — if the project VPC doesn't exist yet, `up` checks the current VPC count against the per-region limit (default 5). It exits immediately with a clear message if the limit is reached rather than surfacing a Terraform error mid-apply.
 - **EC2 replacement safety gate** — if the Terraform plan would destroy and recreate a user's EC2 instance (and EBS volume), `up` halts before applying and requires you to type `replace <username>` explicitly. A plain `y` is not accepted. This prevents accidental data loss from AMI drift or other unexpected ForceNew changes.
 
@@ -811,8 +894,11 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ### Connecting
 ```bash
 ./admin.sh connect     <username>       # SSH into an instance (uses {project}-developer-access)
+                                        # stopped instances: prompts to start before connecting
+                                        # pending instances: waits for running state automatically
+                                        # stale dotfiles: prompts to push if MY_USERNAME matches
 ./admin.sh refresh     <username>       # push system config (session_start.sh, autoshutdown, profile guard)
-./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc)
+./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc, ~/.fre-aws)
 ./admin.sh ssm         <username>       # direct SSM shell (fallback when SSH isn't working)
 ./admin.sh push-admin-keys [username]   # append admin SSH key to authorized_keys on one or all
                                         # running instances (idempotent, uses SSM — no SSH needed)
