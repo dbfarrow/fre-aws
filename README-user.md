@@ -143,8 +143,7 @@ Choose [1]:
 
 ```bash
 ~/fre-aws/user.sh sso-login  # log in to AWS (once per day, when your session expires)
-~/fre-aws/user.sh start      # start your instance (if it's stopped)
-~/fre-aws/user.sh connect    # connect to your instance
+~/fre-aws/user.sh connect    # connect to your instance (offers to start it if stopped)
 ~/fre-aws/user.sh stop       # stop your instance manually (optional — see below)
 ```
 
@@ -227,7 +226,7 @@ Contact your admin and ask them to run `./admin.sh publish-installer <your-usern
 Your AWS SSO session has expired. Run `~/fre-aws/user.sh sso-login` to re-authenticate, then try again.
 
 **`ERROR: No instance found for user '...'`**
-Your instance may be stopped. Run `~/fre-aws/user.sh start`, wait about 30 seconds, then try `~/fre-aws/user.sh connect` again. If it's still not found, contact your admin — your instance may not have been provisioned yet.
+Your instance hasn't been provisioned yet. Contact your admin and ask them to run `./admin.sh up <your-username>`.
 
 **`ForbiddenException: No access` after SSO login**
 The browser login succeeded but your AWS user hasn't been granted access to the account — this is an admin-side setup step. Contact your admin and ask them to verify you're assigned the correct permission set in IAM Identity Center.
@@ -238,7 +237,7 @@ The installer normally places your SSH key at `~/fre-aws/.ssh/fre-claude`. If it
 **`kex_exchange_identification: Connection closed by remote host`**
 The SSH tunnel through SSM failed. Most common causes:
 1. Credentials aren't valid — run `~/fre-aws/user.sh sso-login` and try again
-2. Instance isn't running — run `~/fre-aws/user.sh start` first
+2. Instance isn't running — run `~/fre-aws/user.sh connect` again (it will offer to start it), or `~/fre-aws/user.sh start` first
 3. Instance is unhealthy — contact your admin
 
 **Instance feels slow or unresponsive**

@@ -768,6 +768,22 @@ Files not found on the host are skipped silently. `push-config` never touches `~
 
 A reference tmux config is available at `config/tmux.conf.example`. Copy it to `~/.tmux.conf` and push it with `push-config` if you want the project's default key bindings.
 
+#### Stale config detection on connect
+
+When running `./admin.sh connect <username>` where `<username>` matches `MY_USERNAME` in `admin.env`, the connect command automatically checks whether any of the tracked dotfiles have changed since the last push. If stale files are found, it lists them and prompts:
+
+```
+Config files changed since last push to 'dave':
+  .tmux.conf
+  .fre-aws
+
+Push config before connecting? [y/N]
+```
+
+Confirming pushes the files and records a timestamp (`config/.last-push-<username>`). Declining skips the push and connects normally. The check is silent when no tracked dotfiles exist or nothing has changed. Connecting as a different user never triggers the check.
+
+The same check runs automatically in `user.sh connect`.
+
 ### Pushing script updates to users
 
 After updating any script in `scripts/`:
@@ -878,6 +894,9 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 ### Connecting
 ```bash
 ./admin.sh connect     <username>       # SSH into an instance (uses {project}-developer-access)
+                                        # stopped instances: prompts to start before connecting
+                                        # pending instances: waits for running state automatically
+                                        # stale dotfiles: prompts to push if MY_USERNAME matches
 ./admin.sh refresh     <username>       # push system config (session_start.sh, autoshutdown, profile guard)
 ./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc, ~/.fre-aws)
 ./admin.sh ssm         <username>       # direct SSM shell (fallback when SSH isn't working)
