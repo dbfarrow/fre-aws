@@ -958,13 +958,20 @@ INLINE_DOCKERFILE
       fi
 
       # Phase 4: Run program on host — no DooD needed
-      _runner=""
+      # Build the container entry command based on script path.
+      # __main__.py must run as `python3 -m <pkg>` (not direct file) so relative imports work.
+      # Safe on bash 3.2 (macOS): use length check rather than "${empty_arr[@]}" with set -u.
       case "${RUN_SCRIPT}" in
-        *.py) _runner="python3" ;;
-        *.js) _runner="node" ;;
-        *.ts) _runner="npx ts-node" ;;
-        *.sh) _runner="bash" ;;
+        */__main__.py|__main__.py)
+          _pkg="${RUN_SCRIPT%/__main__.py}"; _pkg="${_pkg##*/}"
+          _run_cmd=(python3 -m "${_pkg}") ;;
+        *.py) _run_cmd=(python3 "${RUN_SCRIPT}") ;;
+        *.js) _run_cmd=(node "${RUN_SCRIPT}") ;;
+        *.ts) _run_cmd=(npx ts-node "${RUN_SCRIPT}") ;;
+        *.sh) _run_cmd=(bash "${RUN_SCRIPT}") ;;
+        *)    _run_cmd=("${RUN_SCRIPT}") ;;
       esac
+      [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
       RUN_PROGRAM_ARGS=(
         "--rm"
         "--volume" "${RUN_TEMP_DIR}/project/${RUN_PROJECT}:/app"
@@ -979,11 +986,6 @@ INLINE_DOCKERFILE
           RUN_PROGRAM_ARGS+=("--env" "${_line}")
         done < "${RUN_ENV_FILE_HOST}"
       fi
-      # Build the container command — safe on bash 3.2 (macOS) where "${empty_arr[@]}"
-      # with set -u throws "unbound variable". Length check avoids that.
-      # shellcheck disable=SC2086
-      _run_cmd=(${_runner} "${RUN_SCRIPT}")
-      [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
       echo ""
       echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
       echo "─────────────────────────────────────────"
