@@ -979,12 +979,16 @@ INLINE_DOCKERFILE
           RUN_PROGRAM_ARGS+=("--env" "${_line}")
         done < "${RUN_ENV_FILE_HOST}"
       fi
+      # Build the container command — safe on bash 3.2 (macOS) where "${empty_arr[@]}"
+      # with set -u throws "unbound variable". Length check avoids that.
+      # shellcheck disable=SC2086
+      _run_cmd=(${_runner} "${RUN_SCRIPT}")
+      [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
       echo ""
       echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
       echo "─────────────────────────────────────────"
-      # shellcheck disable=SC2086
       docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
-        ${_runner} "${RUN_SCRIPT}" "${RUN_SCRIPT_ARGS[@]}" 2>&1 \
+        "${_run_cmd[@]}" 2>&1 \
         | tee "${RUN_TEMP_DIR}/output.txt"
       echo "─────────────────────────────────────────"
 
