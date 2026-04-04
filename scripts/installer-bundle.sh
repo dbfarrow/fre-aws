@@ -77,14 +77,15 @@ _create_installer_bundle() {
   local tmp_dir
   tmp_dir=$(mktemp -d)
 
-  cp "${SCRIPT_DIR}/../run.sh"       "${tmp_dir}/user.sh"
+  cp "${SCRIPT_DIR}/../run.sh"          "${tmp_dir}/user.sh"
   chmod +x "${tmp_dir}/user.sh"
-  cp "${SCRIPT_DIR}/../Dockerfile"   "${tmp_dir}/Dockerfile"
-  cp "${SCRIPT_DIR}/install.sh"      "${tmp_dir}/install.sh"
+  cp "${SCRIPT_DIR}/../Dockerfile"      "${tmp_dir}/Dockerfile"
+  cp "${SCRIPT_DIR}/../Dockerfile.run"  "${tmp_dir}/Dockerfile.run"
+  cp "${SCRIPT_DIR}/install.sh"         "${tmp_dir}/install.sh"
   chmod +x "${tmp_dir}/install.sh"
 
   mkdir -p "${tmp_dir}/scripts"
-  for s in connect.sh start.sh stop.sh verify.sh update.sh upload.sh; do
+  for s in connect.sh start.sh stop.sh verify.sh update.sh upload.sh run.sh; do
     if [[ -f "${SCRIPT_DIR}/${s}" ]]; then
       cp "${SCRIPT_DIR}/${s}" "${tmp_dir}/scripts/"
     fi

@@ -203,6 +203,38 @@ If you have multiple projects, you'll see a numbered menu to pick which one. Or 
 
 Files land in `~/uploads/<project>/` on your instance. Directories are synced with rsync — re-uploading the same directory only transfers what changed. Everything uploaded is also browseable at `http://localhost:8080/<project>/uploads/`. Once uploaded, tell Claude "I uploaded a file" — it will check that directory.
 
+### Running programs locally
+
+Some programs need to run on your Mac — to reach local files, local services, or local credentials that EC2 can't access. The `run` command handles this: it downloads the project from EC2, runs the script in a Docker container on your machine, and uploads the output back to EC2 for Claude to read.
+
+```bash
+~/fre-aws/user.sh run <project> <script-path> [options] [-- script-args...]
+```
+
+Examples:
+
+```bash
+~/fre-aws/user.sh run myproject scripts/analyze.py
+~/fre-aws/user.sh run myproject scripts/fetch.py --mount ~/Documents/data:/data
+~/fre-aws/user.sh run myproject scripts/process.py --env-file ~/.secrets/myproject.env
+~/fre-aws/user.sh run myproject scripts/analyze.py --mount ~/Downloads/input:/input -- --verbose
+~/fre-aws/user.sh run myproject app.js --mount ~/Desktop/output:/output
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--mount local:container` | Mount a local path into the container (repeat for multiple mounts) |
+| `--env-file <file>` | Load environment variables from a local `.env` file (KEY=VALUE format) |
+| `--` | Everything after `--` is passed as arguments to your script |
+
+The runner is detected automatically from the file extension: `.py` → `python3`, `.js` → `node`, `.ts` → `npx ts-node`, `.sh` → `bash`. Other extensions are executed directly (requires a shebang line).
+
+Output is streamed to your terminal and saved to `~/uploads/<project>/run-output.txt` on your instance. When Claude asks you to run something, it will tell you the exact command. After running, just say **"done"** — Claude will check the output file automatically.
+
+**Project-specific dependencies:** If your project needs Python packages or Node modules beyond the defaults, Claude will create a `.fre-run.dockerfile` in your project root that adds them. This file is built automatically the first time you run.
+
 ---
 
 ## Keeping your tools up to date

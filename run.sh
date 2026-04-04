@@ -294,8 +294,8 @@ if [[ "${MODE}" == "user" ]]; then
     CONFIG_ARG=""
   fi
 
-  # upload uses $2 as the file/directory to transfer, not a config override
-  [[ "${COMMAND}" == "upload" ]] && CONFIG_ARG=""
+  # upload and run use $2 as command arguments, not a config override
+  [[ "${COMMAND}" == "upload" || "${COMMAND}" == "run" ]] && CONFIG_ARG=""
 
   if [[ -n "${CONFIG_ARG}" ]]; then
     DEV_CONFIG="${CONFIG_ARG}"
@@ -855,6 +855,82 @@ if [[ "${MODE}" == "user" ]]; then
         "--env" "UPLOAD_PROJECT=${3:-}"
       )
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/upload.sh
+      ;;
+    run)
+      RUN_PROJECT="${2:-}"
+      RUN_SCRIPT="${3:-}"
+      [[ -z "${RUN_PROJECT}" || -z "${RUN_SCRIPT}" ]] && {
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
+        exit 1
+      }
+      if [[ ! -S /var/run/docker.sock ]]; then
+        echo "ERROR: Docker socket not found at /var/run/docker.sock" >&2
+        echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
+        exit 1
+      fi
+      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=()
+      _rarg_state="opts"
+      for _rarg in "${@:4}"; do
+        if [[ "${_rarg_state}" == "past_doubledash" ]]; then
+          RUN_SCRIPT_ARGS+=("${_rarg}"); continue
+        fi
+        if [[ -n "${_rarg_state}" && "${_rarg_state}" != "opts" ]]; then
+          case "${_rarg_state}" in
+            mount)
+              _h="${_rarg%%:*}"; _h="${_h/#\~/${HOME}}"; _c="${_rarg#*:}"
+              RUN_MOUNT_ARGS+=("${_h}:${_c}") ;;
+            env-file)
+              _ep="${_rarg/#\~/${HOME}}"; [[ "${_ep}" != /* ]] && _ep="$(pwd)/${_ep}"
+              [[ ! -f "${_ep}" ]] && { echo "ERROR: env-file not found: ${_rarg}" >&2; exit 1; }
+              RUN_ENV_FILE_HOST="${_ep}" ;;
+          esac
+          _rarg_state="opts"; continue
+        fi
+        case "${_rarg}" in
+          --) _rarg_state="past_doubledash" ;;
+          --mount) _rarg_state="mount" ;;
+          --env-file) _rarg_state="env-file" ;;
+          --mount=*)
+            _v="${_rarg#--mount=}"; _h="${_v%%:*}"; _h="${_h/#\~/${HOME}}"
+            RUN_MOUNT_ARGS+=("${_h}:${_v#*:}") ;;
+          --env-file=*)
+            _v="${_rarg#--env-file=}"; _v="${_v/#\~/${HOME}}"
+            [[ "${_v}" != /* ]] && _v="$(pwd)/${_v}"; RUN_ENV_FILE_HOST="${_v}" ;;
+          *)
+            echo "ERROR: Unknown option: ${_rarg}" >&2
+            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [-- args...]" >&2
+            exit 1 ;;
+        esac
+      done
+      if [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]]; then
+        RUN_SCRIPT_ARGS_B64=$(printf '%s\0' "${RUN_SCRIPT_ARGS[@]}" | base64 | tr -d '\n')
+      else
+        RUN_SCRIPT_ARGS_B64=""
+      fi
+      RUN_TEMP_DIR=$(mktemp -d /tmp/fre-run-XXXXXX)
+      trap 'rm -rf "${RUN_TEMP_DIR}"' EXIT
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      _setup_user_ssh_auth
+      CONNECT_ARGS+=(
+        "--volume" "/var/run/docker.sock:/var/run/docker.sock"
+        "--volume" "${RUN_TEMP_DIR}:/run-workspace"
+        "--env" "HOST_TEMP_DIR=${RUN_TEMP_DIR}"
+        "--env" "RUN_PROJECT=${RUN_PROJECT}"
+        "--env" "RUN_SCRIPT=${RUN_SCRIPT}"
+        "--env" "RUN_IMAGE_NAME=${IMAGE_NAME}-run"
+        "--env" "RUN_SCRIPT_ARGS_B64=${RUN_SCRIPT_ARGS_B64}"
+        "--env" "RUN_MOUNT_COUNT=${#RUN_MOUNT_ARGS[@]}"
+      )
+      [[ -n "${RUN_ENV_FILE_HOST}" ]] && CONNECT_ARGS+=(
+        "--volume" "${RUN_ENV_FILE_HOST}:/run-env-file:ro"
+        "--env" "RUN_ENV_FILE=/run-env-file"
+      )
+      for (( _mi=0; _mi<${#RUN_MOUNT_ARGS[@]}; _mi++ )); do
+        CONNECT_ARGS+=("--env" "RUN_MOUNT_${_mi}=${RUN_MOUNT_ARGS[${_mi}]}")
+      done
+      [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]] && \
+        CONNECT_ARGS+=("--volume" "${USER_SCRIPT_DIR}/Dockerfile.run:/run-dockerfile-base:ro")
+      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/run.sh
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \

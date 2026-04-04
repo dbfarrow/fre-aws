@@ -120,7 +120,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 
 ```
 .
-├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, scripts
+├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, docker.io, scripts
+├── Dockerfile.run               # Base image for local program execution (Python 3 + Node.js)
 ├── scripts/entrypoint.sh        # Docker ENTRYPOINT: appends corporate CA cert to OS bundle (if mounted), then exec's command
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
@@ -155,6 +156,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
 │   ├── pull-user.sh             # Download registry entry for a user to config/users/<username>.env
 │   ├── update-user.sh           # Merge edited .env file back into S3 registry (no IC/instance changes)
+│   ├── run.sh                   # Local execution: SCP project from EC2, build images via DooD, run, upload output
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -228,6 +230,30 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 
 **`./admin.sh push-config`** pushes personal dotfiles (`~/.tmux.conf`, `~/.bashrc`, `~/.zshrc`, `~/.vimrc`) from the host to the EC2 instance. Files missing on the host are skipped. `config/tmux.conf.example` is a reference config users can copy to `~/.tmux.conf` and push with this command.
 
+### Local program execution (`./user.sh run`)
+
+When a project needs to run locally (local files, local APIs, local credentials EC2 can't reach), use `./user.sh run`. It downloads the project from EC2, runs it in a Docker container on the user's Mac, and uploads the output to `~/uploads/<project>/run-output.txt` on EC2.
+
+**When building a project that will use `./user.sh run`, Claude should:**
+
+1. Create `.fre-run.dockerfile` in the project root extending `fre-run-base:latest`:
+   ```dockerfile
+   FROM fre-run-base:latest
+   RUN pip install requests pandas
+   ```
+2. Add `.fre-run.dockerfile` to the project's own `.gitignore`
+3. Give the user a single copy-pasteable `run` command with all `--mount` flags and exact container paths
+4. After the user says "done": `cat ~/uploads/<project>/run-output.txt`
+
+**Example Claude message:**
+> Run it locally with:
+> `~/fre-aws/user.sh run myproject scripts/analyze.py --mount ~/Documents/sales:/data -- --year 2025`
+> Then tell me **done**.
+
+**Architecture:** Docker-out-of-Docker (DooD) — the tooling container mounts the host's `/var/run/docker.sock` and runs the program container directly against the host daemon. A temp dir created on the host (`/tmp/fre-run-XXXXXX`) is mounted into the tooling container at `/run-workspace` and passed as `HOST_TEMP_DIR`; the program container volume path is resolved by the host daemon using the host path.
+
+**Base image** (`fre-run-base:latest`): built from `Dockerfile.run` on first run if not present; Python 3 + Node.js + common tools. **Project image** (`<image>-run:latest`): built from `.fre-run.dockerfile` if present; otherwise base used directly.
+
 ---
 
 ## Key Technologies
@@ -248,8 +274,9 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 ## Dockerfile Notes
 
 - Base image: `debian:bookworm-slim`
-- Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**
+- Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**, **docker.io**
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
+- `docker.io` is required for `./user.sh run` (DooD — Docker CLI runs against the host daemon via mounted socket)
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
 - `ENTRYPOINT` is `scripts/entrypoint.sh`: appends a corporate CA cert mounted at `/certs/corp-ca.crt` directly to the OS CA bundle before exec'ing the actual command — no rebuild needed, near-zero overhead. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).
