@@ -872,6 +872,11 @@ if [[ "${MODE}" == "user" ]]; then
         echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
         exit 1
       }
+      [[ "${RUN_SCRIPT}" == --* ]] && {
+        echo "ERROR: <script-path> is required before options (got '${RUN_SCRIPT}')" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
+        exit 1
+      }
       if [[ ! -S /var/run/docker.sock ]]; then
         echo "ERROR: Docker socket not found at /var/run/docker.sock" >&2
         echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
