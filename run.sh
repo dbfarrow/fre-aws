@@ -941,6 +941,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs npm curl wget jq git ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV UV_BREAK_SYSTEM_PACKAGES=1
 WORKDIR /app
 INLINE_DOCKERFILE
         fi
