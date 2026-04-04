@@ -916,17 +916,22 @@ if [[ "${MODE}" == "user" ]]; then
             exit 1 ;;
         esac
       done
+      # Stable per-project cache dir — rsync only transfers changes on repeat runs
+      RUN_CACHE_DIR="${HOME}/.fre-run-cache/${RUN_PROJECT}"
+      mkdir -p "${RUN_CACHE_DIR}"
+      # Temp dir holds output.txt for this run only; cleaned up on exit
       RUN_TEMP_DIR=$(mktemp -d /tmp/fre-run-XXXXXX)
       trap 'rm -rf "${RUN_TEMP_DIR}"' EXIT
+
+      # Base args shared by both tooling container calls (download + upload)
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
       _setup_user_ssh_auth
-      CONNECT_ARGS+=(
-        "--volume" "${RUN_TEMP_DIR}:/run-workspace"
-        "--env" "RUN_PROJECT=${RUN_PROJECT}"
-      )
+      CONNECT_ARGS+=("--env" "RUN_PROJECT=${RUN_PROJECT}")
 
-      # Phase 1: Download project from EC2 into temp dir
-      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/run.sh
+      # Phase 1: Download project from EC2 into persistent cache
+      docker run "${CONNECT_ARGS[@]}" \
+        "--volume" "${RUN_CACHE_DIR}:/run-workspace/project/${RUN_PROJECT}" \
+        "${IMAGE_NAME}" /workspace/scripts/run.sh
 
       # Phase 2: Build base image on host if not already present
       if ! docker image inspect fre-run-base:latest >/dev/null 2>&1; then
@@ -937,8 +942,11 @@ if [[ "${MODE}" == "user" ]]; then
           docker build -t fre-run-base:latest - <<'INLINE_DOCKERFILE'
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs npm curl wget jq git ca-certificates build-essential \
+    locales nodejs npm curl wget jq git ca-certificates build-essential \
+    && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 WORKDIR /app
@@ -948,19 +956,18 @@ INLINE_DOCKERFILE
 
       # Phase 3: Build project image on host if .fre-run.dockerfile exists
       RUN_ACTIVE_IMAGE="fre-run-base:latest"
-      RUN_PROJECT_DOCKERFILE="${RUN_TEMP_DIR}/project/${RUN_PROJECT}/.fre-run.dockerfile"
+      RUN_PROJECT_DOCKERFILE="${RUN_CACHE_DIR}/.fre-run.dockerfile"
       if [[ -f "${RUN_PROJECT_DOCKERFILE}" ]]; then
         echo "Building project image (${IMAGE_NAME}-run:latest)..."
         docker build -t "${IMAGE_NAME}-run:latest" \
           -f "${RUN_PROJECT_DOCKERFILE}" \
-          "${RUN_TEMP_DIR}/project/${RUN_PROJECT}/"
+          "${RUN_CACHE_DIR}/"
         RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
       fi
 
-      # Phase 4: Run program on host — no DooD needed
-      # Build the container entry command based on script path.
-      # __main__.py must run as `python3 -m <pkg>` (not direct file) so relative imports work.
-      # Safe on bash 3.2 (macOS): use length check rather than "${empty_arr[@]}" with set -u.
+      # Phase 4: Run program on host
+      # __main__.py runs as `python3 -m <pkg>` so relative imports resolve.
+      # Length check on RUN_SCRIPT_ARGS avoids bash 3.2 set -u empty-array bug.
       case "${RUN_SCRIPT}" in
         */__main__.py|__main__.py)
           _pkg="${RUN_SCRIPT%/__main__.py}"; _pkg="${_pkg##*/}"
@@ -974,7 +981,7 @@ INLINE_DOCKERFILE
       [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
       RUN_PROGRAM_ARGS=(
         "--rm"
-        "--volume" "${RUN_TEMP_DIR}/project/${RUN_PROJECT}:/app"
+        "--volume" "${RUN_CACHE_DIR}:/app"
         "--workdir" "/app"
       )
       for _mount in "${RUN_MOUNT_ARGS[@]}"; do
@@ -995,7 +1002,9 @@ INLINE_DOCKERFILE
       echo "─────────────────────────────────────────"
 
       # Phase 5: Upload output back to EC2
-      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
+      docker run "${CONNECT_ARGS[@]}" \
+        "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
+        "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \
