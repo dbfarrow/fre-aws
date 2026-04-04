@@ -308,6 +308,10 @@ if [[ "${MODE}" == "user" ]]; then
     [[ "${DEV_CONFIG}" != /* ]] && DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
   else
     DEV_CONFIG="${USER_SCRIPT_DIR}/config/user.env"
+    # Fall back to admin.env when user.env doesn't exist (admin testing user commands)
+    if [[ ! -f "${DEV_CONFIG}" && -f "${USER_SCRIPT_DIR}/config/admin.env" ]]; then
+      DEV_CONFIG="${USER_SCRIPT_DIR}/config/admin.env"
+    fi
   fi
 
   if [[ ! -f "${DEV_CONFIG}" ]]; then
