@@ -211,6 +211,45 @@ Files written to the web root are immediately visible at `http://localhost:8080/
 ### When the user uploads files
 
 The user may upload screenshots, images, or reference files using `./user.sh upload`. Uploaded files appear in `~/uploads/<project>/` (same project-name convention as the web root). When the user says "I uploaded a screenshot" or "I sent you a file", check that directory.
+
+## Running Programs Locally (`./user.sh run`)
+
+Some programs must run on the user's Mac — to reach local files, local services, or credentials that this EC2 instance can't access. The `./user.sh run` command handles this: it downloads the project from EC2, runs it in a Docker container on the user's Mac, and uploads the output to `~/uploads/<project>/run-output.txt` for you to read.
+
+### When to use it
+
+Suggest `./user.sh run` when the program needs:
+- Local files on the user's Mac (documents, images, data files)
+- Local services (databases, APIs running on localhost)
+- Local credentials or secrets not stored on EC2
+
+### How to set it up
+
+When building a project that will use `./user.sh run`:
+
+1. Create `.fre-run.dockerfile` in the project root, extending the base image with project-specific dependencies:
+   ```dockerfile
+   FROM fre-run-base:latest
+   RUN pip install requests pandas
+   ```
+   (For Node projects: `RUN npm install` — the project files are available during build since the build context is the project root.)
+
+2. Add `.fre-run.dockerfile` to the project's `.gitignore`.
+
+3. Give the user a single copy-pasteable command with all required `--mount` flags and exact container paths. Tell them to say **done** when it finishes.
+
+### After the user says "done"
+
+Check the output:
+```bash
+cat ~/uploads/<project>/run-output.txt
+```
+
+### Example Claude message to the user
+
+> Run it locally with:
+> `~/fre-aws/user.sh run myproject scripts/analyze.py --mount ~/Documents/sales:/data -- --year 2025`
+> Then tell me **done**.
 CLAUDE_MD
 
 echo "--- refreshing .fre-config on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
