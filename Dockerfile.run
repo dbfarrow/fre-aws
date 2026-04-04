@@ -1,12 +1,9 @@
 # Dockerfile.run — Base image for running user programs locally via ./user.sh run
+# Python 3.12 + Node.js + common tools.
 # Extend with .fre-run.dockerfile in your project root for project-specific deps.
-FROM debian:bookworm-slim
+FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
     nodejs \
     npm \
     curl \

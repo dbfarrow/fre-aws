@@ -935,9 +935,8 @@ if [[ "${MODE}" == "user" ]]; then
           docker build -t fre-run-base:latest - < "${USER_SCRIPT_DIR}/Dockerfile.run"
         else
           docker build -t fre-run-base:latest - <<'INLINE_DOCKERFILE'
-FROM debian:bookworm-slim
+FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv python3-dev \
     nodejs npm curl wget jq git ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
