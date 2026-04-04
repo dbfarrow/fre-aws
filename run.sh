@@ -943,7 +943,8 @@ if [[ "${MODE}" == "user" ]]; then
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     locales nodejs npm curl wget jq git ca-certificates build-essential \
-    && locale-gen en_US.UTF-8 \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
