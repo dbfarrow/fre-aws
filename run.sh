@@ -154,6 +154,11 @@ file sharing:
                         on your EC2 instance. Directories are synced with
                         rsync — only changed files are transferred. If
                         project is omitted, a menu of your repos is shown.
+  run <project> <script> [--mount local:container] [--env-file file] [-- args...]
+                        Download a project from EC2, run it locally in
+                        Docker, and upload the output back to EC2 as
+                        ~/uploads/<project>/run-output.txt. Requires Docker
+                        to be running. Tell Claude "done" after it completes.
 
 maintenance:
   update                Download and apply the latest scripts from S3
