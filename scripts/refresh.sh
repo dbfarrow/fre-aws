@@ -236,7 +236,7 @@ When building a project that will use `./user.sh run`:
 
 2. Add `.fre-run.dockerfile` to the project's `.gitignore`.
 
-3. Give the user a single copy-pasteable command with all required `--mount` flags and exact container paths. Tell them to say **done** when it finishes.
+3. Give the user a **single copy-pasteable command** with no placeholders — use the exact project name (matching `~/repos/<name>`), the exact relative script path within the project, and full absolute Mac paths for every `--mount` flag. Tell them to say **done** when it finishes.
 
 ### After the user says "done"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# run.sh — Phase 1 of ./user.sh run: download project from EC2 via rsync over SSM tunnel.
-# Runs inside the tooling container. Docker commands run on the host after this exits.
+# run-upload.sh — Phase 3 of ./user.sh run: upload output.txt back to EC2.
+# Runs inside the tooling container after the host has executed the program.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -111,39 +111,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Verify project exists on EC2
+# Upload output.txt to EC2
 # ---------------------------------------------------------------------------
-if ! ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" "test -d ~/repos/${RUN_PROJECT}" 2>/dev/null; then
-  echo "ERROR: Project '${RUN_PROJECT}' not found on instance." >&2
-  AVAILABLE=$(ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" 'ls ~/repos/ 2>/dev/null || true')
-  if [[ -n "${AVAILABLE}" ]]; then
-    echo "Available projects:" >&2
-    while IFS= read -r repo; do
-      echo "  ${repo}" >&2
-    done <<< "${AVAILABLE}"
-  fi
-  exit 1
-fi
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "mkdir -p ~/uploads/${RUN_PROJECT}/ ~/www/${RUN_PROJECT}/ && ln -sf ~/uploads/${RUN_PROJECT} ~/www/${RUN_PROJECT}/uploads"
+scp "${SSH_OPTS[@]}" /run-workspace/output.txt \
+  developer@"${INSTANCE_ID}":~/uploads/"${RUN_PROJECT}"/run-output.txt
 
-# ---------------------------------------------------------------------------
-# Download project from EC2 via rsync (exclude .git — no need for history)
-# ---------------------------------------------------------------------------
-mkdir -p /run-workspace/project/"${RUN_PROJECT}"
-
-# Build SSH wrapper so rsync can use the SSM ProxyCommand (contains spaces)
-SSH_WRAPPER=$(mktemp)
-chmod 700 "${SSH_WRAPPER}"
-{
-  echo '#!/bin/sh'
-  printf 'exec ssh'
-  printf ' %q' "${SSH_OPTS[@]}"
-  printf ' "$@"\n'
-} > "${SSH_WRAPPER}"
-trap 'rm -f "${SSH_WRAPPER}"' EXIT
-
-echo "Downloading '${RUN_PROJECT}' from EC2 (excluding .git)..."
-rsync -az --exclude '.git' --progress \
-  -e "${SSH_WRAPPER}" \
-  developer@"${INSTANCE_ID}":~/repos/"${RUN_PROJECT}"/ \
-  /run-workspace/project/"${RUN_PROJECT}"/
-echo "Download complete."
+echo ""
+echo "Run complete. Tell Claude: done"

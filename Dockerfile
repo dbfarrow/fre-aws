@@ -34,7 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     rsync \
     tzdata \
-    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

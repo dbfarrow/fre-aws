@@ -877,8 +877,8 @@ if [[ "${MODE}" == "user" ]]; then
         echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
         exit 1
       }
-      if [[ ! -S /var/run/docker.sock ]]; then
-        echo "ERROR: Docker socket not found at /var/run/docker.sock" >&2
+      if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: Docker not found." >&2
         echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
         exit 1
       fi
@@ -916,35 +916,80 @@ if [[ "${MODE}" == "user" ]]; then
             exit 1 ;;
         esac
       done
-      if [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]]; then
-        RUN_SCRIPT_ARGS_B64=$(printf '%s\0' "${RUN_SCRIPT_ARGS[@]}" | base64 | tr -d '\n')
-      else
-        RUN_SCRIPT_ARGS_B64=""
-      fi
       RUN_TEMP_DIR=$(mktemp -d /tmp/fre-run-XXXXXX)
       trap 'rm -rf "${RUN_TEMP_DIR}"' EXIT
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
       _setup_user_ssh_auth
       CONNECT_ARGS+=(
-        "--volume" "/var/run/docker.sock:/var/run/docker.sock"
         "--volume" "${RUN_TEMP_DIR}:/run-workspace"
-        "--env" "HOST_TEMP_DIR=${RUN_TEMP_DIR}"
         "--env" "RUN_PROJECT=${RUN_PROJECT}"
-        "--env" "RUN_SCRIPT=${RUN_SCRIPT}"
-        "--env" "RUN_IMAGE_NAME=${IMAGE_NAME}-run"
-        "--env" "RUN_SCRIPT_ARGS_B64=${RUN_SCRIPT_ARGS_B64}"
-        "--env" "RUN_MOUNT_COUNT=${#RUN_MOUNT_ARGS[@]}"
       )
-      [[ -n "${RUN_ENV_FILE_HOST}" ]] && CONNECT_ARGS+=(
-        "--volume" "${RUN_ENV_FILE_HOST}:/run-env-file:ro"
-        "--env" "RUN_ENV_FILE=/run-env-file"
-      )
-      for (( _mi=0; _mi<${#RUN_MOUNT_ARGS[@]}; _mi++ )); do
-        CONNECT_ARGS+=("--env" "RUN_MOUNT_${_mi}=${RUN_MOUNT_ARGS[${_mi}]}")
-      done
-      [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]] && \
-        CONNECT_ARGS+=("--volume" "${USER_SCRIPT_DIR}/Dockerfile.run:/run-dockerfile-base:ro")
+
+      # Phase 1: Download project from EC2 into temp dir
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/run.sh
+
+      # Phase 2: Build base image on host if not already present
+      if ! docker image inspect fre-run-base:latest >/dev/null 2>&1; then
+        echo "Building base run image (fre-run-base:latest)..."
+        if [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]]; then
+          docker build -t fre-run-base:latest - < "${USER_SCRIPT_DIR}/Dockerfile.run"
+        else
+          docker build -t fre-run-base:latest - <<'INLINE_DOCKERFILE'
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv python3-dev \
+    nodejs npm curl wget jq git ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+WORKDIR /app
+INLINE_DOCKERFILE
+        fi
+      fi
+
+      # Phase 3: Build project image on host if .fre-run.dockerfile exists
+      RUN_ACTIVE_IMAGE="fre-run-base:latest"
+      RUN_PROJECT_DOCKERFILE="${RUN_TEMP_DIR}/project/${RUN_PROJECT}/.fre-run.dockerfile"
+      if [[ -f "${RUN_PROJECT_DOCKERFILE}" ]]; then
+        echo "Building project image (${IMAGE_NAME}-run:latest)..."
+        docker build -t "${IMAGE_NAME}-run:latest" \
+          -f "${RUN_PROJECT_DOCKERFILE}" \
+          "${RUN_TEMP_DIR}/project/${RUN_PROJECT}/"
+        RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
+      fi
+
+      # Phase 4: Run program on host — no DooD needed
+      _runner=""
+      case "${RUN_SCRIPT}" in
+        *.py) _runner="python3" ;;
+        *.js) _runner="node" ;;
+        *.ts) _runner="npx ts-node" ;;
+        *.sh) _runner="bash" ;;
+      esac
+      RUN_PROGRAM_ARGS=(
+        "--rm"
+        "--volume" "${RUN_TEMP_DIR}/project/${RUN_PROJECT}:/app"
+        "--workdir" "/app"
+      )
+      for _mount in "${RUN_MOUNT_ARGS[@]}"; do
+        RUN_PROGRAM_ARGS+=("--volume" "${_mount}")
+      done
+      if [[ -n "${RUN_ENV_FILE_HOST}" ]]; then
+        while IFS= read -r _line || [[ -n "${_line}" ]]; do
+          [[ -z "${_line}" || "${_line}" =~ ^# ]] && continue
+          RUN_PROGRAM_ARGS+=("--env" "${_line}")
+        done < "${RUN_ENV_FILE_HOST}"
+      fi
+      echo ""
+      echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
+      echo "─────────────────────────────────────────"
+      # shellcheck disable=SC2086
+      docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
+        ${_runner} "${RUN_SCRIPT}" "${RUN_SCRIPT_ARGS[@]}" 2>&1 \
+        | tee "${RUN_TEMP_DIR}/output.txt"
+      echo "─────────────────────────────────────────"
+
+      # Phase 5: Upload output back to EC2
+      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \

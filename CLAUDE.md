@@ -242,7 +242,7 @@ When a project needs to run locally (local files, local APIs, local credentials 
    RUN pip install requests pandas
    ```
 2. Add `.fre-run.dockerfile` to the project's own `.gitignore`
-3. Give the user a single copy-pasteable `run` command with all `--mount` flags and exact container paths
+3. Give the user a single copy-pasteable `run` command with no placeholders — exact project name, exact relative script path, full absolute Mac paths for every `--mount`
 4. After the user says "done": `cat ~/uploads/<project>/run-output.txt`
 
 **Example Claude message:**
@@ -274,9 +274,8 @@ When a project needs to run locally (local files, local APIs, local credentials 
 ## Dockerfile Notes
 
 - Base image: `debian:bookworm-slim`
-- Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**, **docker.io**
+- Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
-- `docker.io` is required for `./user.sh run` (DooD — Docker CLI runs against the host daemon via mounted socket)
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
 - `ENTRYPOINT` is `scripts/entrypoint.sh`: appends a corporate CA cert mounted at `/certs/corp-ca.crt` directly to the OS CA bundle before exec'ing the actual command — no rebuild needed, near-zero overhead. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).
