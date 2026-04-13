@@ -1004,15 +1004,20 @@ INLINE_DOCKERFILE
       echo ""
       echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
       echo "─────────────────────────────────────────"
+      _run_exit=0
       docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
         "${_run_cmd[@]}" 2>&1 \
-        | tee "${RUN_TEMP_DIR}/output.txt"
+        | tee "${RUN_TEMP_DIR}/output.txt" || _run_exit=$?
       echo "─────────────────────────────────────────"
 
-      # Phase 5: Upload output back to EC2
+      # Phase 5: Upload output back to EC2 (always runs, even if program failed)
       docker run "${CONNECT_ARGS[@]}" \
         "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
         "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
+      if [[ "${_run_exit}" -ne 0 ]]; then
+        echo "⚠  Program exited with code ${_run_exit} — output uploaded for Claude to diagnose."
+        exit "${_run_exit}"
+      fi
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \
