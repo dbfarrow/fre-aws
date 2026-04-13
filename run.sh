@@ -964,6 +964,13 @@ INLINE_DOCKERFILE
           -f "${RUN_PROJECT_DOCKERFILE}" \
           "${RUN_CACHE_DIR}/"
         RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
+      else
+        echo ""
+        echo "⚠  No .fre-run.dockerfile found in ~/repos/${RUN_PROJECT}/ on EC2."
+        echo "   Project dependencies will NOT be installed — running with base image only."
+        echo "   To fix: connect to EC2 and tell Claude:"
+        echo "   \"Create a .fre-run.dockerfile for this project so I can run it locally with ./user.sh run\""
+        echo ""
       fi
 
       # Phase 4: Run program on host
