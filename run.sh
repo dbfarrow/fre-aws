@@ -950,48 +950,109 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV UV_BREAK_SYSTEM_PACKAGES=1
+RUN pip install --quiet uv
 WORKDIR /app
 INLINE_DOCKERFILE
         fi
       fi
 
-      # Phase 3: Build project image on host if .fre-run.dockerfile exists
+      # Phase 3: Build system image if .fre-run.dockerfile exists.
+      # .fre-run.dockerfile is for SYSTEM packages (apt-get) only — no pip/uv/npm installs.
+      # Project deps are installed into the mounted cache dir in Phase 3.5 and persist
+      # between runs without any Docker image rebuild.
       RUN_ACTIVE_IMAGE="fre-run-base:latest"
       RUN_PROJECT_DOCKERFILE="${RUN_CACHE_DIR}/.fre-run.dockerfile"
       if [[ -f "${RUN_PROJECT_DOCKERFILE}" ]]; then
-        echo "Building project image (${IMAGE_NAME}-run:latest)..."
+        echo "Building project system image (${IMAGE_NAME}-run:latest)..."
         docker build -t "${IMAGE_NAME}-run:latest" \
           -f "${RUN_PROJECT_DOCKERFILE}" \
           "${RUN_CACHE_DIR}/"
         RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
-      else
-        echo ""
-        echo "⚠  No .fre-run.dockerfile found in ~/repos/${RUN_PROJECT}/ on EC2."
-        echo "   Project dependencies will NOT be installed — running with base image only."
-        echo "   To fix: connect to EC2 and tell Claude:"
-        echo "   \"Create a .fre-run.dockerfile for this project so I can run it locally with ./user.sh run\""
-        echo ""
       fi
 
-      # Phase 4: Run program on host
+      # Phase 3.5: Install project dependencies into the cache dir.
+      # The venv / node_modules live in ~/.fre-run-cache/<project>/ on the host and
+      # survive between runs — deps only reinstall when package files change.
+      _dep_type=""
+      if [[ -f "${RUN_CACHE_DIR}/uv.lock" ]]; then
+        _dep_type="uv-lock"
+      elif [[ -f "${RUN_CACHE_DIR}/pyproject.toml" ]]; then
+        _dep_type="uv"
+      elif [[ -f "${RUN_CACHE_DIR}/requirements.txt" ]]; then
+        _dep_type="pip"
+      elif [[ -f "${RUN_CACHE_DIR}/package.json" ]]; then
+        _dep_type="npm"
+      fi
+
+      case "${_dep_type}" in
+        uv-lock)
+          echo "Syncing Python dependencies (uv sync)..."
+          docker run --rm \
+            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+            "${RUN_ACTIVE_IMAGE}" uv sync ;;
+        uv)
+          echo "Installing Python dependencies (uv)..."
+          docker run --rm \
+            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+            "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet && uv pip install -e . --quiet" ;;
+        pip)
+          echo "Installing Python dependencies (pip)..."
+          docker run --rm \
+            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+            "${RUN_ACTIVE_IMAGE}" \
+            bash -c "python3 -m venv .venv 2>/dev/null || true && .venv/bin/pip install -q -r requirements.txt" ;;
+        npm)
+          echo "Installing Node.js dependencies (npm)..."
+          docker run --rm \
+            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+            "${RUN_ACTIVE_IMAGE}" npm install --silent ;;
+        "")
+          echo ""
+          echo "⚠  No dependency file found (uv.lock, pyproject.toml, requirements.txt, package.json)."
+          echo "   Running with no project deps installed."
+          echo "" ;;
+      esac
+
+      # Phase 4: Run program on host.
+      # uv projects: prepend 'uv run' so the project venv is activated automatically.
+      # pip/venv projects: set VIRTUAL_ENV + PATH so the mounted .venv is used.
       # __main__.py runs as `python3 -m <pkg>` so relative imports resolve.
       # Length check on RUN_SCRIPT_ARGS avoids bash 3.2 set -u empty-array bug.
+      _uv_run=false
+      [[ "${_dep_type}" == "uv-lock" || "${_dep_type}" == "uv" ]] && _uv_run=true
+
       case "${RUN_SCRIPT}" in
         */__main__.py|__main__.py)
           _pkg="${RUN_SCRIPT%/__main__.py}"; _pkg="${_pkg##*/}"
-          _run_cmd=(python3 -m "${_pkg}") ;;
-        *.py) _run_cmd=(python3 "${RUN_SCRIPT}") ;;
+          if [[ "${_uv_run}" == true ]]; then
+            _run_cmd=(uv run python3 -m "${_pkg}")
+          else
+            _run_cmd=(python3 -m "${_pkg}")
+          fi ;;
+        *.py)
+          if [[ "${_uv_run}" == true ]]; then
+            _run_cmd=(uv run python3 "${RUN_SCRIPT}")
+          else
+            _run_cmd=(python3 "${RUN_SCRIPT}")
+          fi ;;
         *.js) _run_cmd=(node "${RUN_SCRIPT}") ;;
         *.ts) _run_cmd=(npx ts-node "${RUN_SCRIPT}") ;;
         *.sh) _run_cmd=(bash "${RUN_SCRIPT}") ;;
         *)    _run_cmd=("${RUN_SCRIPT}") ;;
       esac
       [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
+
       RUN_PROGRAM_ARGS=(
         "--rm"
         "--volume" "${RUN_CACHE_DIR}:/app"
         "--workdir" "/app"
       )
+      if [[ "${_dep_type}" == "pip" ]]; then
+        RUN_PROGRAM_ARGS+=(
+          "--env" "VIRTUAL_ENV=/app/.venv"
+          "--env" "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+        )
+      fi
       for _mount in "${RUN_MOUNT_ARGS[@]}"; do
         RUN_PROGRAM_ARGS+=("--volume" "${_mount}")
       done

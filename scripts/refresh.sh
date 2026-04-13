@@ -227,14 +227,20 @@ Suggest `./user.sh run` when the program needs:
 
 When building a project that will use `./user.sh run`:
 
-1. Create `.fre-run.dockerfile` in the project root, extending the base image with project-specific dependencies:
+1. **Project dependencies are installed automatically** — `./user.sh run` detects the package manager from the project files and installs into a cached venv/node_modules on the user's Mac:
+   - `uv.lock` → `uv sync`
+   - `pyproject.toml` (no lockfile) → `uv pip install -e .`
+   - `requirements.txt` → `pip install -r requirements.txt`
+   - `package.json` → `npm install`
+
+   **Do NOT put `pip install`, `uv sync`, or `npm install` in `.fre-run.dockerfile`** — those belong in the project's standard package files, not the Dockerfile.
+
+2. Only create `.fre-run.dockerfile` if the project needs **extra system packages** (e.g. `libpq-dev`, `ffmpeg`, `libreoffice`):
    ```dockerfile
    FROM fre-run-base:latest
-   RUN pip install requests pandas
+   RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev && rm -rf /var/lib/apt/lists/*
    ```
-   (For Node projects: `RUN npm install` — the project files are available during build since the build context is the project root.)
-
-2. Add `.fre-run.dockerfile` to the project's `.gitignore`.
+   If no extra system packages are needed, skip this file entirely.
 
 3. Give the user a **single copy-pasteable command** with no placeholders — use the exact project name (matching `~/repos/<name>`), the exact relative script path within the project, and full absolute Mac paths for every `--mount` flag. Tell them to say **done** when it finishes.
 
