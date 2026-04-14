@@ -972,46 +972,64 @@ INLINE_DOCKERFILE
 
       # Phase 3.5: Install project dependencies into the cache dir.
       # The venv / node_modules live in ~/.fre-run-cache/<project>/ on the host and
-      # survive between runs — deps only reinstall when package files change.
+      # survive between runs. A stamp file tracks the mtime of the dep file; install
+      # only runs when the dep file is newer than the stamp (i.e. changed on EC2).
       _dep_type=""
+      _dep_src=""
       if [[ -f "${RUN_CACHE_DIR}/uv.lock" ]]; then
-        _dep_type="uv-lock"
+        _dep_type="uv-lock"; _dep_src="${RUN_CACHE_DIR}/uv.lock"
       elif [[ -f "${RUN_CACHE_DIR}/pyproject.toml" ]]; then
-        _dep_type="uv"
+        _dep_type="uv";      _dep_src="${RUN_CACHE_DIR}/pyproject.toml"
       elif [[ -f "${RUN_CACHE_DIR}/requirements.txt" ]]; then
-        _dep_type="pip"
+        _dep_type="pip";     _dep_src="${RUN_CACHE_DIR}/requirements.txt"
       elif [[ -f "${RUN_CACHE_DIR}/package.json" ]]; then
         _dep_type="npm"
+        if [[ -f "${RUN_CACHE_DIR}/package-lock.json" ]]; then
+          _dep_src="${RUN_CACHE_DIR}/package-lock.json"
+        else
+          _dep_src="${RUN_CACHE_DIR}/package.json"
+        fi
       fi
 
-      case "${_dep_type}" in
-        uv-lock)
-          echo "Syncing Python dependencies (uv sync)..."
-          docker run --rm \
-            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
-            "${RUN_ACTIVE_IMAGE}" uv sync ;;
-        uv)
-          echo "Installing Python dependencies (uv)..."
-          docker run --rm \
-            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
-            "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet && uv pip install -e . --quiet" ;;
-        pip)
-          echo "Installing Python dependencies (pip)..."
-          docker run --rm \
-            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
-            "${RUN_ACTIVE_IMAGE}" \
-            bash -c "python3 -m venv .venv 2>/dev/null || true && .venv/bin/pip install -q -r requirements.txt" ;;
-        npm)
-          echo "Installing Node.js dependencies (npm)..."
-          docker run --rm \
-            "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
-            "${RUN_ACTIVE_IMAGE}" npm install --silent ;;
-        "")
-          echo ""
-          echo "⚠  No dependency file found (uv.lock, pyproject.toml, requirements.txt, package.json)."
-          echo "   Running with no project deps installed."
-          echo "" ;;
-      esac
+      _dep_stamp="${RUN_CACHE_DIR}/.fre-dep-installed"
+      _needs_install=true
+      if [[ -n "${_dep_src}" && -f "${_dep_stamp}" && "${_dep_src}" -ot "${_dep_stamp}" ]]; then
+        _needs_install=false
+      fi
+
+      if [[ "${_needs_install}" == true && -n "${_dep_type}" ]]; then
+        case "${_dep_type}" in
+          uv-lock)
+            echo "Syncing Python dependencies (uv sync)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" uv sync ;;
+          uv)
+            echo "Installing Python dependencies (uv)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet && uv pip install -e . --quiet" ;;
+          pip)
+            echo "Installing Python dependencies (pip)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" \
+              bash -c "python3 -m venv .venv 2>/dev/null || true && .venv/bin/pip install -q -r requirements.txt" ;;
+          npm)
+            echo "Installing Node.js dependencies (npm)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" npm install --silent ;;
+        esac
+        touch "${_dep_stamp}"
+      elif [[ "${_needs_install}" == false ]]; then
+        echo "Dependencies up to date."
+      elif [[ -z "${_dep_type}" ]]; then
+        echo ""
+        echo "⚠  No dependency file found (uv.lock, pyproject.toml, requirements.txt, package.json)."
+        echo "   Running with no project deps installed."
+        echo ""
+      fi
 
       # Phase 4: Run program on host.
       # uv projects: prepend 'uv run' so the project venv is activated automatically.
