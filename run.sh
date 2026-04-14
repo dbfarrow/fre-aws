@@ -869,12 +869,12 @@ if [[ "${MODE}" == "user" ]]; then
       RUN_PROJECT="${2:-}"
       RUN_SCRIPT="${3:-}"
       [[ -z "${RUN_PROJECT}" || -z "${RUN_SCRIPT}" ]] && {
-        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [-- args...]" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [--tty] [-- args...]" >&2
         exit 1
       }
       [[ "${RUN_SCRIPT}" == --* ]] && {
         echo "ERROR: <script-path> is required before options (got '${RUN_SCRIPT}')" >&2
-        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [-- args...]" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [--tty] [-- args...]" >&2
         exit 1
       }
       if ! command -v docker >/dev/null 2>&1; then
@@ -882,7 +882,7 @@ if [[ "${MODE}" == "user" ]]; then
         echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
         exit 1
       fi
-      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=(); RUN_LOCAL=false
+      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=(); RUN_LOCAL=false; RUN_TTY=false
       _rarg_state="opts"
       for _rarg in "${@:4}"; do
         if [[ "${_rarg_state}" == "past_doubledash" ]]; then
@@ -911,9 +911,10 @@ if [[ "${MODE}" == "user" ]]; then
             _v="${_rarg#--env-file=}"; _v="${_v/#\~/${HOME}}"
             [[ "${_v}" != /* ]] && _v="$(pwd)/${_v}"; RUN_ENV_FILE_HOST="${_v}" ;;
           --local) RUN_LOCAL=true ;;
+          --tty)   RUN_TTY=true ;;
           *)
             echo "ERROR: Unknown option: ${_rarg}" >&2
-            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [--local] [-- args...]" >&2
+            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [--local] [--tty] [-- args...]" >&2
             exit 1 ;;
         esac
       done
@@ -1105,13 +1106,20 @@ INLINE_DOCKERFILE
       echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
       echo "─────────────────────────────────────────"
       _run_exit=0
-      docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
-        "${_run_cmd[@]}" 2>&1 \
-        | tee "${RUN_TEMP_DIR}/output.txt" || _run_exit=$?
+      if [[ "${RUN_TTY}" == true ]]; then
+        # TTY mode: allocate pseudo-TTY for interactive/TUI programs.
+        # Cannot pipe through tee — output is not captured or uploaded.
+        docker run --interactive --tty "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
+          "${_run_cmd[@]}" || _run_exit=$?
+      else
+        docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
+          "${_run_cmd[@]}" 2>&1 \
+          | tee "${RUN_TEMP_DIR}/output.txt" || _run_exit=$?
+      fi
       echo "─────────────────────────────────────────"
 
-      # Phase 5: Upload output back to EC2 (skipped with --local)
-      if [[ "${RUN_LOCAL}" == false ]]; then
+      # Phase 5: Upload output back to EC2 (skipped with --local or --tty)
+      if [[ "${RUN_LOCAL}" == false && "${RUN_TTY}" == false ]]; then
         docker run "${CONNECT_ARGS[@]}" \
           "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
           "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
