@@ -869,12 +869,12 @@ if [[ "${MODE}" == "user" ]]; then
       RUN_PROJECT="${2:-}"
       RUN_SCRIPT="${3:-}"
       [[ -z "${RUN_PROJECT}" || -z "${RUN_SCRIPT}" ]] && {
-        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [-- args...]" >&2
         exit 1
       }
       [[ "${RUN_SCRIPT}" == --* ]] && {
         echo "ERROR: <script-path> is required before options (got '${RUN_SCRIPT}')" >&2
-        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [-- args...]" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [-- args...]" >&2
         exit 1
       }
       if ! command -v docker >/dev/null 2>&1; then
@@ -882,7 +882,7 @@ if [[ "${MODE}" == "user" ]]; then
         echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
         exit 1
       fi
-      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=()
+      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=(); RUN_LOCAL=false
       _rarg_state="opts"
       for _rarg in "${@:4}"; do
         if [[ "${_rarg_state}" == "past_doubledash" ]]; then
@@ -910,14 +910,20 @@ if [[ "${MODE}" == "user" ]]; then
           --env-file=*)
             _v="${_rarg#--env-file=}"; _v="${_v/#\~/${HOME}}"
             [[ "${_v}" != /* ]] && _v="$(pwd)/${_v}"; RUN_ENV_FILE_HOST="${_v}" ;;
+          --local) RUN_LOCAL=true ;;
           *)
             echo "ERROR: Unknown option: ${_rarg}" >&2
-            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [-- args...]" >&2
+            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [--local] [-- args...]" >&2
             exit 1 ;;
         esac
       done
       # Stable per-project cache dir — rsync only transfers changes on repeat runs
       RUN_CACHE_DIR="${HOME}/.fre-run-cache/${RUN_PROJECT}"
+      if [[ "${RUN_LOCAL}" == true && ! -d "${RUN_CACHE_DIR}" ]]; then
+        echo "ERROR: No local cache found for '${RUN_PROJECT}'." >&2
+        echo "       Run without --local first to download the project from EC2." >&2
+        exit 1
+      fi
       mkdir -p "${RUN_CACHE_DIR}"
       # Temp dir holds output.txt for this run only; cleaned up on exit
       RUN_TEMP_DIR=$(mktemp -d /tmp/fre-run-XXXXXX)
@@ -925,13 +931,19 @@ if [[ "${MODE}" == "user" ]]; then
 
       # Base args shared by both tooling container calls (download + upload)
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
-      _setup_user_ssh_auth
-      CONNECT_ARGS+=("--env" "RUN_PROJECT=${RUN_PROJECT}")
+      if [[ "${RUN_LOCAL}" == false ]]; then
+        _setup_user_ssh_auth
+        CONNECT_ARGS+=("--env" "RUN_PROJECT=${RUN_PROJECT}")
+      fi
 
-      # Phase 1: Download project from EC2 into persistent cache
-      docker run "${CONNECT_ARGS[@]}" \
-        "--volume" "${RUN_CACHE_DIR}:/run-workspace/project/${RUN_PROJECT}" \
-        "${IMAGE_NAME}" /workspace/scripts/run.sh
+      # Phase 1: Download project from EC2 into persistent cache (skipped with --local)
+      if [[ "${RUN_LOCAL}" == false ]]; then
+        docker run "${CONNECT_ARGS[@]}" \
+          "--volume" "${RUN_CACHE_DIR}:/run-workspace/project/${RUN_PROJECT}" \
+          "${IMAGE_NAME}" /workspace/scripts/run.sh
+      else
+        echo "Skipping download (--local)."
+      fi
 
       # Phase 2: Build base image — rebuild if absent or if Dockerfile content changed.
       # Hash is stored in ~/.fre-run-cache/.fre-base-hash; any change to Dockerfile.run
@@ -1090,13 +1102,20 @@ INLINE_DOCKERFILE
         | tee "${RUN_TEMP_DIR}/output.txt" || _run_exit=$?
       echo "─────────────────────────────────────────"
 
-      # Phase 5: Upload output back to EC2 (always runs, even if program failed)
-      docker run "${CONNECT_ARGS[@]}" \
-        "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
-        "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
-      if [[ "${_run_exit}" -ne 0 ]]; then
-        echo "⚠  Program exited with code ${_run_exit} — output uploaded for Claude to diagnose."
-        exit "${_run_exit}"
+      # Phase 5: Upload output back to EC2 (skipped with --local)
+      if [[ "${RUN_LOCAL}" == false ]]; then
+        docker run "${CONNECT_ARGS[@]}" \
+          "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
+          "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
+        if [[ "${_run_exit}" -ne 0 ]]; then
+          echo "⚠  Program exited with code ${_run_exit} — output uploaded for Claude to diagnose."
+          exit "${_run_exit}"
+        fi
+      else
+        if [[ "${_run_exit}" -ne 0 ]]; then
+          echo "⚠  Program exited with code ${_run_exit}."
+          exit "${_run_exit}"
+        fi
       fi
       ;;
     update)
