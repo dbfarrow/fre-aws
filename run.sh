@@ -985,13 +985,21 @@ INLINE_DOCKERFILE
       # .fre-run.dockerfile is for SYSTEM packages (apt-get) only — no pip/uv/npm installs.
       # Project deps are installed into the mounted cache dir in Phase 3.5 and persist
       # between runs without any Docker image rebuild.
+      # Hash check: only rebuild when .fre-run.dockerfile content changes or image is absent.
       RUN_ACTIVE_IMAGE="fre-run-base:latest"
       RUN_PROJECT_DOCKERFILE="${RUN_CACHE_DIR}/.fre-run.dockerfile"
       if [[ -f "${RUN_PROJECT_DOCKERFILE}" ]]; then
-        echo "Building project system image (${IMAGE_NAME}-run:latest)..."
-        docker build -t "${IMAGE_NAME}-run:latest" \
-          -f "${RUN_PROJECT_DOCKERFILE}" \
-          "${RUN_CACHE_DIR}/"
+        _proj_hash_file="${RUN_CACHE_DIR}/.fre-proj-hash"
+        _proj_hash=$(cksum "${RUN_PROJECT_DOCKERFILE}" | awk '{print $1}')
+        _stored_proj_hash=$(cat "${_proj_hash_file}" 2>/dev/null || echo "")
+        if ! docker image inspect "${IMAGE_NAME}-run:latest" >/dev/null 2>&1 || \
+            [[ "${_proj_hash}" != "${_stored_proj_hash}" ]]; then
+          echo "Building project system image (${IMAGE_NAME}-run:latest)..."
+          docker build -t "${IMAGE_NAME}-run:latest" \
+            -f "${RUN_PROJECT_DOCKERFILE}" \
+            "${RUN_CACHE_DIR}/"
+          echo "${_proj_hash}" > "${_proj_hash_file}"
+        fi
         RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
       fi
 

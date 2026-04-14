@@ -142,7 +142,12 @@ chmod 700 "${SSH_WRAPPER}"
 trap 'rm -f "${SSH_WRAPPER}"' EXIT
 
 echo "Downloading '${RUN_PROJECT}' from EC2 (excluding .git)..."
-rsync -az --exclude '.git' --progress \
+rsync -az --delete \
+  --exclude '.git' \
+  --exclude '.venv/' \
+  --exclude 'node_modules/' \
+  --exclude '.fre-dep-installed' \
+  --progress \
   -e "${SSH_WRAPPER}" \
   developer@"${INSTANCE_ID}":~/repos/"${RUN_PROJECT}"/ \
   /run-workspace/project/"${RUN_PROJECT}"/
