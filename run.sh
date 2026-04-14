@@ -933,8 +933,20 @@ if [[ "${MODE}" == "user" ]]; then
         "--volume" "${RUN_CACHE_DIR}:/run-workspace/project/${RUN_PROJECT}" \
         "${IMAGE_NAME}" /workspace/scripts/run.sh
 
-      # Phase 2: Build base image on host if not already present
-      if ! docker image inspect fre-run-base:latest >/dev/null 2>&1; then
+      # Phase 2: Build base image — rebuild if absent or if Dockerfile content changed.
+      # Hash is stored in ~/.fre-run-cache/.fre-base-hash; any change to Dockerfile.run
+      # (or bump of the inline version string) triggers an automatic rebuild.
+      mkdir -p "${HOME}/.fre-run-cache"
+      _base_hash_file="${HOME}/.fre-run-cache/.fre-base-hash"
+      if [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]]; then
+        _base_hash=$(cksum "${USER_SCRIPT_DIR}/Dockerfile.run" | awk '{print $1}')
+      else
+        _base_hash="inline-v3"  # bump this string whenever the inline Dockerfile below changes
+      fi
+      _stored_base_hash=$(cat "${_base_hash_file}" 2>/dev/null || echo "")
+
+      if ! docker image inspect fre-run-base:latest >/dev/null 2>&1 || \
+          [[ "${_base_hash}" != "${_stored_base_hash}" ]]; then
         echo "Building base run image (fre-run-base:latest)..."
         if [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]]; then
           docker build -t fre-run-base:latest - < "${USER_SCRIPT_DIR}/Dockerfile.run"
@@ -954,6 +966,7 @@ RUN pip install --quiet uv
 WORKDIR /app
 INLINE_DOCKERFILE
         fi
+        echo "${_base_hash}" > "${_base_hash_file}"
       fi
 
       # Phase 3: Build system image if .fre-run.dockerfile exists.
