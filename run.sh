@@ -1033,7 +1033,7 @@ INLINE_DOCKERFILE
             echo "Installing Python dependencies (uv)..."
             docker run --rm \
               "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
-              "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet && uv pip install -e . --quiet" ;;
+              "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet 2>/dev/null || true; uv pip install -e . --quiet" ;;
           pip)
             echo "Installing Python dependencies (pip)..."
             docker run --rm \
