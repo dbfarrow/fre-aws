@@ -1032,27 +1032,15 @@ INLINE_DOCKERFILE
       fi
 
       # Phase 4: Run program on host.
-      # uv projects: prepend 'uv run' so the project venv is activated automatically.
-      # pip/venv projects: set VIRTUAL_ENV + PATH so the mounted .venv is used.
+      # All Python package managers (uv, pip) create .venv in the project dir.
+      # Activate it via VIRTUAL_ENV + PATH — no dependency on uv being in the container.
       # __main__.py runs as `python3 -m <pkg>` so relative imports resolve.
       # Length check on RUN_SCRIPT_ARGS avoids bash 3.2 set -u empty-array bug.
-      _uv_run=false
-      [[ "${_dep_type}" == "uv-lock" || "${_dep_type}" == "uv" ]] && _uv_run=true
-
       case "${RUN_SCRIPT}" in
         */__main__.py|__main__.py)
           _pkg="${RUN_SCRIPT%/__main__.py}"; _pkg="${_pkg##*/}"
-          if [[ "${_uv_run}" == true ]]; then
-            _run_cmd=(uv run python3 -m "${_pkg}")
-          else
-            _run_cmd=(python3 -m "${_pkg}")
-          fi ;;
-        *.py)
-          if [[ "${_uv_run}" == true ]]; then
-            _run_cmd=(uv run python3 "${RUN_SCRIPT}")
-          else
-            _run_cmd=(python3 "${RUN_SCRIPT}")
-          fi ;;
+          _run_cmd=(python3 -m "${_pkg}") ;;
+        *.py) _run_cmd=(python3 "${RUN_SCRIPT}") ;;
         *.js) _run_cmd=(node "${RUN_SCRIPT}") ;;
         *.ts) _run_cmd=(npx ts-node "${RUN_SCRIPT}") ;;
         *.sh) _run_cmd=(bash "${RUN_SCRIPT}") ;;
@@ -1065,7 +1053,7 @@ INLINE_DOCKERFILE
         "--volume" "${RUN_CACHE_DIR}:/app"
         "--workdir" "/app"
       )
-      if [[ "${_dep_type}" == "pip" ]]; then
+      if [[ "${_dep_type}" == "uv-lock" || "${_dep_type}" == "uv" || "${_dep_type}" == "pip" ]]; then
         RUN_PROGRAM_ARGS+=(
           "--env" "VIRTUAL_ENV=/app/.venv"
           "--env" "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin"
