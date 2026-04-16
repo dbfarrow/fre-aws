@@ -8,8 +8,12 @@
 [[ -f /etc/bash.bashrc ]] && source /etc/bash.bashrc
 [[ -f /root/.user.bashrc ]] && source /root/.user.bashrc
 
-# Coloured project-aware prompt
-export PS1="\[\e[1;36m\][${FRE_PROJECT}]\[\e[0m\] \u@\h:\w\$ "
+# Coloured project-aware prompt (bash and zsh use different escape syntax)
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  export PROMPT="%F{cyan}[${FRE_PROJECT}]%f %n@%m:%~%# "
+else
+  export PS1="\[\e[1;36m\][${FRE_PROJECT}]\[\e[0m\] \u@\h:\w\$ "
+fi
 
 # csync: pull current project state from EC2
 csync() { /workspace/scripts/csync.sh "$@"; }

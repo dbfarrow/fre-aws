@@ -1225,6 +1225,7 @@ ZDOTRC
         "--env" "FRE_PROJECT=${PROJECT_ARG}"
         "--env" "FRE_LOCAL_DIR=/projects"
       )
+      CONNECT_ARGS+=("--env" "SHELL=/bin/${_shell_cmd}")
       [[ "${_shell_cmd}" == "zsh" ]] && CONNECT_ARGS+=("--env" "ZDOTDIR=/zdotdir")
       if [[ ${#_dotfile_mounts[@]} -gt 0 ]]; then
         CONNECT_ARGS+=("${_dotfile_mounts[@]}")
