@@ -34,6 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     rsync \
     tzdata \
+    vim \
+    tmux \
+    zsh \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

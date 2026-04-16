@@ -4,8 +4,9 @@
 # NOTE: Do NOT use set -euo pipefail here — this file is sourced as an rcfile
 # and strict mode would cause the interactive shell to exit on any error.
 
-# Source system defaults
+# Source system defaults then user config (bash path; zsh sources .user.zshrc via ZDOTDIR)
 [[ -f /etc/bash.bashrc ]] && source /etc/bash.bashrc
+[[ -f /root/.user.bashrc ]] && source /root/.user.bashrc
 
 # Coloured project-aware prompt
 export PS1="\[\e[1;36m\][${FRE_PROJECT}]\[\e[0m\] \u@\h:\w\$ "
@@ -16,7 +17,8 @@ csync() { /workspace/scripts/csync.sh "$@"; }
 # cpush: upload a file back to EC2 for Claude to read
 cpush() { /workspace/scripts/cpush.sh "$@"; }
 
-export -f csync cpush
+# export -f is bash-only; in zsh functions defined here are already in scope
+[[ -n "${BASH_VERSION:-}" ]] && export -f csync cpush
 
 # Land in the project directory
 _local_proj="${FRE_LOCAL_DIR}/${FRE_PROJECT}"

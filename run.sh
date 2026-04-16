@@ -1188,6 +1188,35 @@ INLINE_DOCKERFILE
         done
       fi
 
+      # Detect shell: prefer zsh if the user has a .zshrc, else bash
+      _shell_cmd="bash"
+      _shell_launch_args=(--rcfile /workspace/scripts/local-shell-init.sh)
+      _zdotdir_tmp=""
+      if [[ -f "${HOME}/.zshrc" ]]; then
+        _shell_cmd="zsh"
+        _shell_launch_args=()
+        # Create a temp ZDOTDIR with a .zshrc that sources the user's config
+        # then our init. Cleaned up after docker exits.
+        _zdotdir_tmp=$(mktemp -d)
+        cat > "${_zdotdir_tmp}/.zshrc" <<'ZDOTRC'
+[[ -f /root/.user.zshrc ]] && source /root/.user.zshrc
+source /workspace/scripts/local-shell-init.sh
+ZDOTRC
+        trap 'rm -rf "${_zdotdir_tmp}"' EXIT
+      fi
+
+      # Mount dotfiles that exist on the host (skip missing)
+      _dotfile_mounts=()
+      [[ -f "${HOME}/.vimrc" ]]    && _dotfile_mounts+=("--volume" "${HOME}/.vimrc:/root/.vimrc:ro")
+      [[ -d "${HOME}/.vim" ]]      && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
+      [[ -f "${HOME}/.tmux.conf" ]] && _dotfile_mounts+=("--volume" "${HOME}/.tmux.conf:/root/.tmux.conf:ro")
+      if [[ "${_shell_cmd}" == "zsh" ]]; then
+        _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.user.zshrc:ro")
+        _dotfile_mounts+=("--volume" "${_zdotdir_tmp}:/zdotdir")
+      elif [[ -f "${HOME}/.bashrc" ]]; then
+        _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
+      fi
+
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
       _setup_user_ssh_auth
       CONNECT_ARGS+=(
@@ -1195,6 +1224,10 @@ INLINE_DOCKERFILE
         "--env" "FRE_PROJECT=${PROJECT_ARG}"
         "--env" "FRE_LOCAL_DIR=/projects"
       )
+      [[ "${_shell_cmd}" == "zsh" ]] && CONNECT_ARGS+=("--env" "ZDOTDIR=/zdotdir")
+      if [[ ${#_dotfile_mounts[@]} -gt 0 ]]; then
+        CONNECT_ARGS+=("${_dotfile_mounts[@]}")
+      fi
       if [[ ${#_extra_mounts[@]} -gt 0 ]]; then
         CONNECT_ARGS+=("${_extra_mounts[@]}")
       fi
@@ -1203,12 +1236,14 @@ INLINE_DOCKERFILE
         echo "docker run \\" >&2
         for _a in "${CONNECT_ARGS[@]}"; do printf '  %q \\\n' "${_a}" >&2; done
         printf '  %q \\\n' "${IMAGE_NAME}" >&2
-        echo "  bash --rcfile /workspace/scripts/local-shell-init.sh" >&2
+        printf '  %q' "${_shell_cmd}" >&2
+        for _a in "${_shell_launch_args[@]}"; do printf ' %q' "${_a}" >&2; done
+        echo "" >&2
         echo "" >&2
       fi
 
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" \
-        bash --rcfile /workspace/scripts/local-shell-init.sh
+        "${_shell_cmd}" "${_shell_launch_args[@]}"
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \
