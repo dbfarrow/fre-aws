@@ -4,7 +4,8 @@
 # NOTE: Do NOT use set -euo pipefail here — this file is sourced as an rcfile
 # and strict mode would cause the interactive shell to exit on any error.
 
-# Source system defaults then user config (bash path; zsh sources .user.zshrc via ZDOTDIR)
+# Source system defaults then user config
+# bash: sources .user.bashrc if mounted; zsh: ~/.zshrc is sourced after this file automatically
 [[ -f /etc/bash.bashrc ]] && source /etc/bash.bashrc
 [[ -f /root/.user.bashrc ]] && source /root/.user.bashrc
 

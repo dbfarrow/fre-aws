@@ -1192,28 +1192,20 @@ INLINE_DOCKERFILE
       _host_shell="$(basename "${SHELL:-bash}")"
       _shell_cmd="bash"
       _shell_launch_args=(--rcfile /workspace/scripts/local-shell-init.sh)
-      _zdotdir_tmp=""
       if [[ "${_host_shell}" == "zsh" ]]; then
         _shell_cmd="zsh"
         _shell_launch_args=()
-        # Create a temp ZDOTDIR with a .zshrc that sources the user's config
-        # then our init. Cleaned up after docker exits.
-        _zdotdir_tmp=$(mktemp -d)
-        cat > "${_zdotdir_tmp}/.zshrc" <<'ZDOTRC'
-[[ -f /root/.user.zshrc ]] && source /root/.user.zshrc
-source /workspace/scripts/local-shell-init.sh
-ZDOTRC
-        trap 'rm -rf "${_zdotdir_tmp}"' EXIT
       fi
 
       # Mount dotfiles that exist on the host (skip missing)
       _dotfile_mounts=()
-      [[ -f "${HOME}/.vimrc" ]]    && _dotfile_mounts+=("--volume" "${HOME}/.vimrc:/root/.vimrc:ro")
-      [[ -d "${HOME}/.vim" ]]      && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
+      [[ -f "${HOME}/.vimrc" ]]     && _dotfile_mounts+=("--volume" "${HOME}/.vimrc:/root/.vimrc:ro")
+      [[ -d "${HOME}/.vim" ]]       && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
       [[ -f "${HOME}/.tmux.conf" ]] && _dotfile_mounts+=("--volume" "${HOME}/.tmux.conf:/root/.tmux.conf:ro")
       if [[ "${_shell_cmd}" == "zsh" ]]; then
-        [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.user.zshrc:ro")
-        _dotfile_mounts+=("--volume" "${_zdotdir_tmp}:/zdotdir")
+        [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.zshrc:ro")
+        # Inject our init via /etc/zsh/zshrc — sourced before ~/.zshrc in all zsh sessions
+        _dotfile_mounts+=("--volume" "/workspace/scripts/local-shell-init.sh:/etc/zsh/zshrc:ro")
       else
         [[ -f "${HOME}/.bashrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
       fi
@@ -1226,7 +1218,6 @@ ZDOTRC
         "--env" "FRE_LOCAL_DIR=/projects"
       )
       CONNECT_ARGS+=("--env" "SHELL=/bin/${_shell_cmd}")
-      [[ "${_shell_cmd}" == "zsh" ]] && CONNECT_ARGS+=("--env" "ZDOTDIR=/zdotdir")
       if [[ ${#_dotfile_mounts[@]} -gt 0 ]]; then
         CONNECT_ARGS+=("${_dotfile_mounts[@]}")
       fi
