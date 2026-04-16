@@ -156,9 +156,9 @@ rsync -az --delete \
 echo "Sync complete."
 
 # ---------------------------------------------------------------------------
-# Auto-install project dependencies (set LOCAL_SHELL_AUTO_INSTALL=false to skip)
+# Auto-install project dependencies (opt-in: set LOCAL_SHELL_AUTO_INSTALL=true to enable)
 # ---------------------------------------------------------------------------
-if [[ "${LOCAL_SHELL_AUTO_INSTALL:-true}" == "true" ]]; then
+if [[ "${LOCAL_SHELL_AUTO_INSTALL:-false}" == "true" ]]; then
   _dep_type=""
   if [[ -f "${DEST_DIR}/uv.lock" ]]; then
     _dep_type="uv-lock"

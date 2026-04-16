@@ -260,7 +260,7 @@ After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-
 | Variable | Description |
 |----------|-------------|
 | `LOCAL_SYNC_DIR` | Where projects are synced locally (default: `~/claude`). Projects land at `${LOCAL_SYNC_DIR}/<project>/`. |
-| `LOCAL_SHELL_AUTO_INSTALL` | Set to `false` to skip automatic dependency installation after `csync` (default: `true`). |
+| `LOCAL_SHELL_AUTO_INSTALL` | Set to `true` to automatically install dependencies after `csync` (default: `false`). |
 | `LOCAL_MOUNTS_<project>` | Extra host paths to mount into the shell. Use the project name with hyphens replaced by underscores. Space-separated `host:container` pairs. |
 
 Example `user.env` additions:
