@@ -23,9 +23,15 @@ _local_proj="${FRE_LOCAL_DIR}/${FRE_PROJECT}"
 mkdir -p "${_local_proj}"
 cd "${_local_proj}"
 
+# Activate venv if present
+if [[ -f "${_local_proj}/.venv/bin/activate" ]]; then
+  source "${_local_proj}/.venv/bin/activate"
+fi
+
 echo ""
 echo "fre local shell  —  project: ${FRE_PROJECT}"
 echo "  dir:   ${_local_proj}"
+[[ -n "${VIRTUAL_ENV:-}" ]] && echo "  venv:  active (${VIRTUAL_ENV})"
 echo ""
 echo "  csync          pull '${FRE_PROJECT}' from EC2 into this directory"
 echo "  cpush [file]   upload file (default: output.txt) back to Claude"
