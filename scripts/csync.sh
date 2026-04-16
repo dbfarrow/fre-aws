@@ -154,3 +154,37 @@ rsync -az --delete \
   developer@"${INSTANCE_ID}":~/repos/"${FRE_PROJECT}"/ \
   "${DEST_DIR}/"
 echo "Sync complete."
+
+# ---------------------------------------------------------------------------
+# Auto-install project dependencies (set LOCAL_SHELL_AUTO_INSTALL=false to skip)
+# ---------------------------------------------------------------------------
+if [[ "${LOCAL_SHELL_AUTO_INSTALL:-true}" == "true" ]]; then
+  _dep_type=""
+  if [[ -f "${DEST_DIR}/uv.lock" ]]; then
+    _dep_type="uv-lock"
+  elif [[ -f "${DEST_DIR}/pyproject.toml" ]]; then
+    _dep_type="uv"
+  elif [[ -f "${DEST_DIR}/requirements.txt" ]]; then
+    _dep_type="pip"
+  elif [[ -f "${DEST_DIR}/package.json" ]]; then
+    _dep_type="npm"
+  fi
+
+  if [[ -n "${_dep_type}" ]]; then
+    echo "Installing dependencies (${_dep_type})..."
+    cd "${DEST_DIR}"
+    case "${_dep_type}" in
+      uv-lock)
+        uv sync ;;
+      uv)
+        uv venv --quiet 2>/dev/null || true
+        uv pip install -e . --quiet ;;
+      pip)
+        python3 -m venv .venv 2>/dev/null || true
+        .venv/bin/pip install -q -r requirements.txt ;;
+      npm)
+        npm install --silent ;;
+    esac
+    echo "Dependencies ready."
+  fi
+fi

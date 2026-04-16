@@ -258,7 +258,7 @@ When a project needs to run locally (local files, local APIs, local credentials 
 
 For power users who want to run programs interactively without the `run` round-trip overhead. Drops into a persistent Docker container scoped to a single project, with two short commands:
 
-- **`csync`** — rsync from EC2 `~/repos/<project>/` into a visible local dir (`${LOCAL_SYNC_DIR}/<project>/`, default `~/claude/<project>/`). The local dir is bind-mounted into the container so files are immediately accessible on the Mac.
+- **`csync`** — rsync from EC2 `~/repos/<project>/` into a visible local dir (`${LOCAL_SYNC_DIR}/<project>/`, default `~/claude/<project>/`). After sync, auto-detects and installs project dependencies (`uv.lock` → `uv sync`, `pyproject.toml` → `uv pip install`, `requirements.txt` → `pip install`, `package.json` → `npm install`). The venv lives in the project dir on the host and persists between sessions. Set `LOCAL_SHELL_AUTO_INSTALL=false` to skip.
 - **`cpush [file]`** — upload a local file to EC2 `~/uploads/<project>/run-output.txt` (default: `output.txt` in cwd). Tell Claude "done" after cpush completes.
 
 **Architecture:** Same tooling container as `run`, but no DooD — the container is long-lived (interactive shell) rather than ephemeral. The project dir is mounted from the host at `/projects/<project>/`, so files synced by `csync` are visible on the Mac's filesystem immediately.
@@ -294,6 +294,7 @@ For power users who want to run programs interactively without the `run` round-t
 - Base image: `debian:bookworm-slim`
 - Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
+- `python3-pip`, `python3-venv`, `nodejs`, `npm`, and `uv` (via pip) are included for `local-shell` auto-install support
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
 - `ENTRYPOINT` is `scripts/entrypoint.sh`: appends a corporate CA cert mounted at `/certs/corp-ca.crt` directly to the OS CA bundle before exec'ing the actual command — no rebuild needed, near-zero overhead. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).

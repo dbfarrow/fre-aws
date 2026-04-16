@@ -246,10 +246,12 @@ If you want to run programs interactively — editing files, running commands, c
 Inside the shell:
 
 ```bash
-csync                                 # pull latest project state from EC2
+csync                                 # pull latest project state from EC2 + install deps
 python scripts/analyze.py             # run directly — output goes to terminal
 python scripts/analyze.py > output.txt && cpush   # capture and push to Claude
 ```
+
+`csync` automatically installs project dependencies after syncing — it detects `uv.lock`, `pyproject.toml`, `requirements.txt`, or `package.json` and runs the appropriate tool (`uv sync`, `uv pip install`, `pip install`, or `npm install`). The venv lives in the project directory on your Mac and persists between sessions.
 
 After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-output.txt`.
 
@@ -258,6 +260,7 @@ After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-
 | Variable | Description |
 |----------|-------------|
 | `LOCAL_SYNC_DIR` | Where projects are synced locally (default: `~/claude`). Projects land at `${LOCAL_SYNC_DIR}/<project>/`. |
+| `LOCAL_SHELL_AUTO_INSTALL` | Set to `false` to skip automatic dependency installation after `csync` (default: `true`). |
 | `LOCAL_MOUNTS_<project>` | Extra host paths to mount into the shell. Use the project name with hyphens replaced by underscores. Space-separated `host:container` pairs. |
 
 Example `user.env` additions:

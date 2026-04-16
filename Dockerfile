@@ -71,6 +71,17 @@ RUN SSM_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "ubuntu_arm64" || echo "ubunt
     && session-manager-plugin --version
 
 # ---------------------------------------------------------------------------
+# Local shell tools (uv, pip, nodejs, npm — for ./user.sh local-shell)
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-venv \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --quiet --break-system-packages uv
+
+# ---------------------------------------------------------------------------
 # Project scripts
 # ---------------------------------------------------------------------------
 WORKDIR /workspace
