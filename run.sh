@@ -1202,6 +1202,7 @@ INLINE_DOCKERFILE
       [[ -f "${HOME}/.vimrc" ]]     && _dotfile_mounts+=("--volume" "${HOME}/.vimrc:/root/.vimrc:ro")
       [[ -d "${HOME}/.vim" ]]       && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
       [[ -f "${HOME}/.tmux.conf" ]] && _dotfile_mounts+=("--volume" "${HOME}/.tmux.conf:/root/.tmux.conf:ro")
+      [[ -d "${HOME}/.ssh" ]]       && _dotfile_mounts+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
       if [[ "${_shell_cmd}" == "zsh" ]]; then
         [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.zshrc:ro")
         # Inject our init via /etc/zsh/zshrc — sourced before ~/.zshrc in all zsh sessions
