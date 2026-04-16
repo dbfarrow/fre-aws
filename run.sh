@@ -1188,11 +1188,12 @@ INLINE_DOCKERFILE
         done
       fi
 
-      # Detect shell: prefer zsh if the user has a .zshrc, else bash
+      # Detect shell from host $SHELL; fall back to bash for anything not supported
+      _host_shell="$(basename "${SHELL:-bash}")"
       _shell_cmd="bash"
       _shell_launch_args=(--rcfile /workspace/scripts/local-shell-init.sh)
       _zdotdir_tmp=""
-      if [[ -f "${HOME}/.zshrc" ]]; then
+      if [[ "${_host_shell}" == "zsh" ]]; then
         _shell_cmd="zsh"
         _shell_launch_args=()
         # Create a temp ZDOTDIR with a .zshrc that sources the user's config
@@ -1211,10 +1212,10 @@ ZDOTRC
       [[ -d "${HOME}/.vim" ]]      && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
       [[ -f "${HOME}/.tmux.conf" ]] && _dotfile_mounts+=("--volume" "${HOME}/.tmux.conf:/root/.tmux.conf:ro")
       if [[ "${_shell_cmd}" == "zsh" ]]; then
-        _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.user.zshrc:ro")
+        [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.user.zshrc:ro")
         _dotfile_mounts+=("--volume" "${_zdotdir_tmp}:/zdotdir")
-      elif [[ -f "${HOME}/.bashrc" ]]; then
-        _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
+      else
+        [[ -f "${HOME}/.bashrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
       fi
 
       CONNECT_ARGS=("${DOCKER_ARGS[@]}")
