@@ -159,9 +159,11 @@ file sharing:
                         Docker, and upload the output back to EC2 as
                         ~/uploads/<project>/run-output.txt. Requires Docker
                         to be running. Tell Claude "done" after it completes.
-  local-shell <project> Drop into a persistent local shell scoped to a
+  local-shell <project> [--verbose]
+                        Drop into a persistent local shell scoped to a
                         project. csync pulls the current state from EC2;
                         cpush uploads output back for Claude to read.
+                        --verbose prints the full docker command before launch.
                         Config: LOCAL_SYNC_DIR (default: ~/claude)
                                 LOCAL_MOUNTS_<project>=host:container ...
 
@@ -1141,8 +1143,19 @@ INLINE_DOCKERFILE
       ;;
     local-shell)
       PROJECT_ARG="${2:-}"
+      LOCAL_SHELL_VERBOSE=false
+      for _arg in "${@:2}"; do
+        [[ "${_arg}" == "--verbose" || "${_arg}" == "-v" ]] && LOCAL_SHELL_VERBOSE=true
+        [[ "${_arg}" != -* ]] && [[ -z "${PROJECT_ARG}" || "${_arg}" == "${PROJECT_ARG}" ]] && PROJECT_ARG="${_arg}"
+      done
+      # Re-extract project as the first non-flag arg
+      PROJECT_ARG=""
+      for _arg in "${@:2}"; do
+        [[ "${_arg}" == --verbose || "${_arg}" == -v ]] && continue
+        PROJECT_ARG="${_arg}"; break
+      done
       if [[ -z "${PROJECT_ARG}" ]]; then
-        echo "Usage: user.sh local-shell <project>" >&2
+        echo "Usage: user.sh local-shell <project> [--verbose]" >&2
         exit 1
       fi
 
@@ -1184,6 +1197,14 @@ INLINE_DOCKERFILE
       )
       if [[ ${#_extra_mounts[@]} -gt 0 ]]; then
         CONNECT_ARGS+=("${_extra_mounts[@]}")
+      fi
+
+      if [[ "${LOCAL_SHELL_VERBOSE}" == true ]]; then
+        echo "docker run \\" >&2
+        for _a in "${CONNECT_ARGS[@]}"; do printf '  %q \\\n' "${_a}" >&2; done
+        printf '  %q \\\n' "${IMAGE_NAME}" >&2
+        echo "  bash --rcfile /workspace/scripts/local-shell-init.sh" >&2
+        echo "" >&2
       fi
 
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" \
