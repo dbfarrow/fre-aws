@@ -254,6 +254,24 @@ When a project needs to run locally (local files, local APIs, local credentials 
 
 **Base image** (`fre-run-base:latest`): built from `Dockerfile.run` on first run if not present; Python 3 + Node.js + common tools. **Project image** (`<image>-run:latest`): built from `.fre-run.dockerfile` if present; otherwise base used directly.
 
+### Interactive local shell (`./user.sh local-shell`)
+
+For power users who want to run programs interactively without the `run` round-trip overhead. Drops into a persistent Docker container scoped to a single project, with two short commands:
+
+- **`csync`** — rsync from EC2 `~/repos/<project>/` into a visible local dir (`${LOCAL_SYNC_DIR}/<project>/`, default `~/claude/<project>/`). The local dir is bind-mounted into the container so files are immediately accessible on the Mac.
+- **`cpush [file]`** — upload a local file to EC2 `~/uploads/<project>/run-output.txt` (default: `output.txt` in cwd). Tell Claude "done" after cpush completes.
+
+**Architecture:** Same tooling container as `run`, but no DooD — the container is long-lived (interactive shell) rather than ephemeral. The project dir is mounted from the host at `/projects/<project>/`, so files synced by `csync` are visible on the Mac's filesystem immediately.
+
+**Configuration variables** (in `user.env`):
+- `LOCAL_SYNC_DIR` — base dir on host where projects land (default: `~/claude`). Project lands at `${LOCAL_SYNC_DIR}/<project>/`.
+- `LOCAL_MOUNTS_<project>` — extra host:container mount pairs for the shell (hyphens in project name become underscores in variable name).
+
+**Scripts:**
+- `scripts/local-shell-init.sh` — bash `--rcfile` sourced inside the container; sets prompt, defines `csync`/`cpush` functions, `cd`s to project dir
+- `scripts/csync.sh` — rsync implementation (same SSH/SSM pattern as `scripts/run.sh`)
+- `scripts/cpush.sh` — upload implementation (same SSH/SSM pattern as `scripts/run-upload.sh`)
+
 ---
 
 ## Key Technologies

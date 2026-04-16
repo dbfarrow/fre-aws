@@ -159,6 +159,11 @@ file sharing:
                         Docker, and upload the output back to EC2 as
                         ~/uploads/<project>/run-output.txt. Requires Docker
                         to be running. Tell Claude "done" after it completes.
+  local-shell <project> Drop into a persistent local shell scoped to a
+                        project. csync pulls the current state from EC2;
+                        cpush uploads output back for Claude to read.
+                        Config: LOCAL_SYNC_DIR (default: ~/claude)
+                                LOCAL_MOUNTS_<project>=host:container ...
 
 maintenance:
   update                Download and apply the latest scripts from S3
@@ -299,8 +304,8 @@ if [[ "${MODE}" == "user" ]]; then
     CONFIG_ARG=""
   fi
 
-  # upload and run use $2 as command arguments, not a config override
-  [[ "${COMMAND}" == "upload" || "${COMMAND}" == "run" ]] && CONFIG_ARG=""
+  # upload, run, and local-shell use $2 as command arguments, not a config override
+  [[ "${COMMAND}" == "upload" || "${COMMAND}" == "run" || "${COMMAND}" == "local-shell" ]] && CONFIG_ARG=""
 
   if [[ -n "${CONFIG_ARG}" ]]; then
     DEV_CONFIG="${CONFIG_ARG}"
@@ -1133,6 +1138,56 @@ INLINE_DOCKERFILE
           exit "${_run_exit}"
         fi
       fi
+      ;;
+    local-shell)
+      PROJECT_ARG="${2:-}"
+      if [[ -z "${PROJECT_ARG}" ]]; then
+        echo "Usage: user.sh local-shell <project>" >&2
+        exit 1
+      fi
+
+      # Refuse if already inside a Docker container
+      if [[ -f /.dockerenv ]]; then
+        echo "ERROR: Already inside a Docker container." >&2
+        echo "       Use csync and cpush directly instead of ./user.sh local-shell." >&2
+        exit 1
+      fi
+
+      # Resolve LOCAL_SYNC_DIR (from user.env or default ~/claude)
+      _local_sync_dir="${LOCAL_SYNC_DIR:-${HOME}/claude}"
+      _local_sync_dir="${_local_sync_dir/#\~/${HOME}}"
+      _local_proj_dir="${_local_sync_dir}/${PROJECT_ARG}"
+      mkdir -p "${_local_proj_dir}"
+
+      # Container project path
+      _container_proj_dir="/projects/${PROJECT_ARG}"
+
+      # Per-project extra mounts: LOCAL_MOUNTS_<slug> (hyphens→underscores)
+      _proj_slug="${PROJECT_ARG//-/_}"
+      _mounts_var="LOCAL_MOUNTS_${_proj_slug}"
+      _extra_mounts=()
+      if [[ -n "${!_mounts_var:-}" ]]; then
+        for _mount_pair in ${!_mounts_var}; do
+          _host_path="${_mount_pair%%:*}"
+          _host_path="${_host_path/#\~/${HOME}}"
+          _cont_path="${_mount_pair#*:}"
+          _extra_mounts+=("--volume" "${_host_path}:${_cont_path}")
+        done
+      fi
+
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      _setup_user_ssh_auth
+      CONNECT_ARGS+=(
+        "--volume" "${_local_proj_dir}:${_container_proj_dir}"
+        "--env" "FRE_PROJECT=${PROJECT_ARG}"
+        "--env" "FRE_LOCAL_DIR=/projects"
+      )
+      if [[ ${#_extra_mounts[@]} -gt 0 ]]; then
+        CONNECT_ARGS+=("${_extra_mounts[@]}")
+      fi
+
+      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" \
+        bash --rcfile /workspace/scripts/local-shell-init.sh
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \

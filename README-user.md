@@ -235,6 +235,38 @@ Output is streamed to your terminal and saved to `~/uploads/<project>/run-output
 
 **Project-specific dependencies:** If your project needs Python packages or Node modules beyond the defaults, Claude will create a `.fre-run.dockerfile` in your project root that adds them. This file is built automatically the first time you run.
 
+### Local shell (power users)
+
+If you want to run programs interactively — editing files, running commands, checking output — without the full `run` round-trip, use `local-shell`. It drops you into a persistent Docker container scoped to a project, with two short commands available: `csync` to pull the latest code from EC2, and `cpush` to push output back to Claude.
+
+```bash
+~/fre-aws/user.sh local-shell <project>
+```
+
+Inside the shell:
+
+```bash
+csync                                 # pull latest project state from EC2
+python scripts/analyze.py             # run directly — output goes to terminal
+python scripts/analyze.py > output.txt && cpush   # capture and push to Claude
+```
+
+After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-output.txt`.
+
+**Configuration (in `config/user.env`):**
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_SYNC_DIR` | Where projects are synced locally (default: `~/claude`). Projects land at `${LOCAL_SYNC_DIR}/<project>/`. |
+| `LOCAL_MOUNTS_<project>` | Extra host paths to mount into the shell. Use the project name with hyphens replaced by underscores. Space-separated `host:container` pairs. |
+
+Example `user.env` additions:
+
+```bash
+LOCAL_SYNC_DIR=~/myprojects
+LOCAL_MOUNTS_sqrt_analysis=~/.sqrt:~/.sqrt
+```
+
 ---
 
 ## Keeping your tools up to date
