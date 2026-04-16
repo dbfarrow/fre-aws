@@ -1205,7 +1205,7 @@ INLINE_DOCKERFILE
       if [[ "${_shell_cmd}" == "zsh" ]]; then
         [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.zshrc:ro")
         # Inject our init via /etc/zsh/zshrc — sourced before ~/.zshrc in all zsh sessions
-        _dotfile_mounts+=("--volume" "/workspace/scripts/local-shell-init.sh:/etc/zsh/zshrc:ro")
+        _dotfile_mounts+=("--volume" "${USER_SCRIPT_DIR}/scripts/local-shell-init.sh:/etc/zsh/zshrc:ro")
       else
         [[ -f "${HOME}/.bashrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
       fi
