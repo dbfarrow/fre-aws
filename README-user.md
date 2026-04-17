@@ -147,7 +147,7 @@ Choose [1]:
 ~/fre-aws/user.sh stop       # stop your instance manually (optional — see below)
 ```
 
-**Instances stop automatically when idle.** When you exit Claude and close your tmux session, the instance detects no active sessions and shuts itself down after about 10 minutes. A stopped instance doesn't incur compute charges, but your files are preserved on disk. You can also stop it manually at any time with `./user.sh stop`.
+**Instances stop automatically when idle.** When you exit Claude and close your tmux session, the instance detects no active sessions and shuts itself down after the idle period (30 minutes by default). A stopped instance doesn't incur compute charges, but your files are preserved on disk. You can also stop it manually at any time with `./user.sh stop`.
 
 ---
 
@@ -227,17 +227,19 @@ Examples:
 |--------|-------------|
 | `--mount local:container` | Mount a local path into the container (repeat for multiple mounts) |
 | `--env-file <file>` | Load environment variables from a local `.env` file (KEY=VALUE format) |
+| `--local` | Run without uploading output to EC2 — useful for testing |
+| `--tty` | Allocate a TTY for interactive or TUI programs (output is not captured or uploaded) |
 | `--` | Everything after `--` is passed as arguments to your script |
 
 The runner is detected automatically from the file extension: `.py` → `python3`, `.js` → `node`, `.ts` → `npx ts-node`, `.sh` → `bash`. Other extensions are executed directly (requires a shebang line).
 
 Output is streamed to your terminal and saved to `~/uploads/<project>/run-output.txt` on your instance. When Claude asks you to run something, it will tell you the exact command. After running, just say **"done"** — Claude will check the output file automatically.
 
-**Project-specific dependencies:** If your project needs Python packages or Node modules beyond the defaults, Claude will create a `.fre-run.dockerfile` in your project root that adds them. This file is built automatically the first time you run.
+**Python and Node dependencies** are installed automatically from `requirements.txt`, `uv.lock`, `pyproject.toml`, or `package.json` — nothing extra needed. If your project requires additional system packages (compiled libraries, native extensions), Claude will create a `.fre-run.dockerfile` that adds them via `apt-get`.
 
 ### Local shell (power users)
 
-If you want to run programs interactively — editing files, running commands, checking output — without the full `run` round-trip, use `local-shell`. It drops you into a persistent Docker container scoped to a project, with two short commands available: `csync` to pull the latest code from EC2, and `cpush` to push output back to Claude.
+If you want to run programs interactively — editing files, running commands, inspecting output — without the full `run` round-trip, use `local-shell`. It drops you into a persistent Docker container that feels like your normal terminal: your shell (`$SHELL`), your dotfiles (`.zshrc`/`.bashrc`, `.vimrc`, `.vim/`, `.tmux.conf`), and your tools (`vim`, `tmux`, `uv`, `pip`, `node`, `npm`) are all there. Two short commands let you sync code and push results back to Claude.
 
 ```bash
 ~/fre-aws/user.sh local-shell <project>
@@ -246,14 +248,14 @@ If you want to run programs interactively — editing files, running commands, c
 Inside the shell:
 
 ```bash
-csync                                 # pull latest project state from EC2 + install deps
+csync                                 # pull latest project state from EC2
 python scripts/analyze.py             # run directly — output goes to terminal
 python scripts/analyze.py > output.txt && cpush   # capture and push to Claude
 ```
 
-`csync` automatically installs project dependencies after syncing — it detects `uv.lock`, `pyproject.toml`, `requirements.txt`, or `package.json` and runs the appropriate tool (`uv sync`, `uv pip install`, `pip install`, or `npm install`). The venv lives in the project directory on your Mac and persists between sessions.
-
 After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-output.txt`.
+
+**Dependency installation:** `csync` can install project dependencies automatically after syncing (`uv.lock`, `pyproject.toml`, `requirements.txt`, `package.json` — whichever is present). This is opt-in: set `LOCAL_SHELL_AUTO_INSTALL=true` in `user.env` to enable. The venv lives in the project directory on your Mac and is activated automatically the next time you enter the shell.
 
 **Configuration (in `config/user.env`):**
 
