@@ -10,6 +10,24 @@ Your AWS development environment is already set up — your admin has provisione
 
 ---
 
+## Two ways to interact
+
+**Via `user.sh` (default):** Every command runs inside a Docker container — AWS CLI, the SSM plugin, rsync, and all scripts are packaged in the image. The only local requirement is Docker. This is the default and works for everyone out of the box.
+
+**Directly:** If you already have the required tools installed locally (AWS CLI v2, SSM Session Manager plugin, SSH client), you can call the scripts in `~/fre-aws/scripts/` without going through Docker. Same config files, same behaviour, less overhead.
+
+```bash
+# Docker-wrapped
+~/fre-aws/user.sh connect
+
+# Direct (requires local AWS CLI + SSM plugin)
+~/fre-aws/scripts/connect.sh
+```
+
+Both approaches read from `config/user.env` — no config changes needed when switching between them.
+
+---
+
 ## What You Need
 
 | Requirement | Notes |
