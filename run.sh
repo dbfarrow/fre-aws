@@ -154,6 +154,18 @@ file sharing:
                         on your EC2 instance. Directories are synced with
                         rsync — only changed files are transferred. If
                         project is omitted, a menu of your repos is shown.
+  run <project> <script> [--mount local:container] [--env-file file] [-- args...]
+                        Download a project from EC2, run it locally in
+                        Docker, and upload the output back to EC2 as
+                        ~/uploads/<project>/run-output.txt. Requires Docker
+                        to be running. Tell Claude "done" after it completes.
+  local-shell <project> [--verbose]
+                        Drop into a persistent local shell scoped to a
+                        project. csync pulls the current state from EC2;
+                        cpush uploads output back for Claude to read.
+                        --verbose prints the full docker command before launch.
+                        Config: LOCAL_SYNC_DIR (default: ~/claude)
+                                LOCAL_MOUNTS_<project>=host:container ...
 
 maintenance:
   update                Download and apply the latest scripts from S3
@@ -294,8 +306,8 @@ if [[ "${MODE}" == "user" ]]; then
     CONFIG_ARG=""
   fi
 
-  # upload uses $2 as the file/directory to transfer, not a config override
-  [[ "${COMMAND}" == "upload" ]] && CONFIG_ARG=""
+  # upload, run, and local-shell use $2 as command arguments, not a config override
+  [[ "${COMMAND}" == "upload" || "${COMMAND}" == "run" || "${COMMAND}" == "local-shell" ]] && CONFIG_ARG=""
 
   if [[ -n "${CONFIG_ARG}" ]]; then
     DEV_CONFIG="${CONFIG_ARG}"
@@ -303,6 +315,10 @@ if [[ "${MODE}" == "user" ]]; then
     [[ "${DEV_CONFIG}" != /* ]] && DEV_CONFIG="$(pwd)/${CONFIG_ARG}"
   else
     DEV_CONFIG="${USER_SCRIPT_DIR}/config/user.env"
+    # Fall back to admin.env when user.env doesn't exist (admin testing user commands)
+    if [[ ! -f "${DEV_CONFIG}" && -f "${USER_SCRIPT_DIR}/config/admin.env" ]]; then
+      DEV_CONFIG="${USER_SCRIPT_DIR}/config/admin.env"
+    fi
   fi
 
   if [[ ! -f "${DEV_CONFIG}" ]]; then
@@ -855,6 +871,373 @@ if [[ "${MODE}" == "user" ]]; then
         "--env" "UPLOAD_PROJECT=${3:-}"
       )
       docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/upload.sh
+      ;;
+    run)
+      RUN_PROJECT="${2:-}"
+      RUN_SCRIPT="${3:-}"
+      [[ -z "${RUN_PROJECT}" || -z "${RUN_SCRIPT}" ]] && {
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [--tty] [-- args...]" >&2
+        exit 1
+      }
+      [[ "${RUN_SCRIPT}" == --* ]] && {
+        echo "ERROR: <script-path> is required before options (got '${RUN_SCRIPT}')" >&2
+        echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file <file>] [--local] [--tty] [-- args...]" >&2
+        exit 1
+      }
+      if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: Docker not found." >&2
+        echo "       Ensure Docker Desktop (or OrbStack/Rancher) is running." >&2
+        exit 1
+      fi
+      RUN_MOUNT_ARGS=(); RUN_ENV_FILE_HOST=""; RUN_SCRIPT_ARGS=(); RUN_LOCAL=false; RUN_TTY=false
+      _rarg_state="opts"
+      for _rarg in "${@:4}"; do
+        if [[ "${_rarg_state}" == "past_doubledash" ]]; then
+          RUN_SCRIPT_ARGS+=("${_rarg}"); continue
+        fi
+        if [[ -n "${_rarg_state}" && "${_rarg_state}" != "opts" ]]; then
+          case "${_rarg_state}" in
+            mount)
+              _h="${_rarg%%:*}"; _h="${_h/#\~/${HOME}}"; _c="${_rarg#*:}"
+              RUN_MOUNT_ARGS+=("${_h}:${_c}") ;;
+            env-file)
+              _ep="${_rarg/#\~/${HOME}}"; [[ "${_ep}" != /* ]] && _ep="$(pwd)/${_ep}"
+              [[ ! -f "${_ep}" ]] && { echo "ERROR: env-file not found: ${_rarg}" >&2; exit 1; }
+              RUN_ENV_FILE_HOST="${_ep}" ;;
+          esac
+          _rarg_state="opts"; continue
+        fi
+        case "${_rarg}" in
+          --) _rarg_state="past_doubledash" ;;
+          --mount) _rarg_state="mount" ;;
+          --env-file) _rarg_state="env-file" ;;
+          --mount=*)
+            _v="${_rarg#--mount=}"; _h="${_v%%:*}"; _h="${_h/#\~/${HOME}}"
+            RUN_MOUNT_ARGS+=("${_h}:${_v#*:}") ;;
+          --env-file=*)
+            _v="${_rarg#--env-file=}"; _v="${_v/#\~/${HOME}}"
+            [[ "${_v}" != /* ]] && _v="$(pwd)/${_v}"; RUN_ENV_FILE_HOST="${_v}" ;;
+          --local) RUN_LOCAL=true ;;
+          --tty)   RUN_TTY=true ;;
+          *)
+            echo "ERROR: Unknown option: ${_rarg}" >&2
+            echo "Usage: user.sh run <project> <script-path> [--mount local:container] [--env-file file] [--local] [--tty] [-- args...]" >&2
+            exit 1 ;;
+        esac
+      done
+      # Stable per-project cache dir — rsync only transfers changes on repeat runs
+      RUN_CACHE_DIR="${HOME}/.fre-run-cache/${RUN_PROJECT}"
+      if [[ "${RUN_LOCAL}" == true && ! -d "${RUN_CACHE_DIR}" ]]; then
+        echo "ERROR: No local cache found for '${RUN_PROJECT}'." >&2
+        echo "       Run without --local first to download the project from EC2." >&2
+        exit 1
+      fi
+      mkdir -p "${RUN_CACHE_DIR}"
+      # Temp dir holds output.txt for this run only; cleaned up on exit
+      RUN_TEMP_DIR=$(mktemp -d /tmp/fre-run-XXXXXX)
+      trap 'rm -rf "${RUN_TEMP_DIR}"' EXIT
+
+      # Base args shared by both tooling container calls (download + upload)
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      if [[ "${RUN_LOCAL}" == false ]]; then
+        _setup_user_ssh_auth
+        CONNECT_ARGS+=("--env" "RUN_PROJECT=${RUN_PROJECT}")
+      fi
+
+      # Phase 1: Download project from EC2 into persistent cache (skipped with --local)
+      if [[ "${RUN_LOCAL}" == false ]]; then
+        docker run "${CONNECT_ARGS[@]}" \
+          "--volume" "${RUN_CACHE_DIR}:/run-workspace/project/${RUN_PROJECT}" \
+          "${IMAGE_NAME}" /workspace/scripts/run.sh
+      else
+        echo "Skipping download (--local)."
+      fi
+
+      # Phase 2: Build base image — rebuild if absent or if Dockerfile content changed.
+      # Hash is stored in ~/.fre-run-cache/.fre-base-hash; any change to Dockerfile.run
+      # (or bump of the inline version string) triggers an automatic rebuild.
+      mkdir -p "${HOME}/.fre-run-cache"
+      _base_hash_file="${HOME}/.fre-run-cache/.fre-base-hash"
+      if [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]]; then
+        _base_hash=$(cksum "${USER_SCRIPT_DIR}/Dockerfile.run" | awk '{print $1}')
+      else
+        _base_hash="inline-v3"  # bump this string whenever the inline Dockerfile below changes
+      fi
+      _stored_base_hash=$(cat "${_base_hash_file}" 2>/dev/null || echo "")
+
+      if ! docker image inspect fre-run-base:latest >/dev/null 2>&1 || \
+          [[ "${_base_hash}" != "${_stored_base_hash}" ]]; then
+        echo "Building base run image (fre-run-base:latest)..."
+        if [[ -f "${USER_SCRIPT_DIR}/Dockerfile.run" ]]; then
+          docker build -t fre-run-base:latest - < "${USER_SCRIPT_DIR}/Dockerfile.run"
+        else
+          docker build -t fre-run-base:latest - <<'INLINE_DOCKERFILE'
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    locales nodejs npm curl wget jq git ca-certificates build-essential \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV UV_BREAK_SYSTEM_PACKAGES=1
+RUN pip install --quiet uv
+WORKDIR /app
+INLINE_DOCKERFILE
+        fi
+        echo "${_base_hash}" > "${_base_hash_file}"
+      fi
+
+      # Phase 3: Build system image if .fre-run.dockerfile exists.
+      # .fre-run.dockerfile is for SYSTEM packages (apt-get) only — no pip/uv/npm installs.
+      # Project deps are installed into the mounted cache dir in Phase 3.5 and persist
+      # between runs without any Docker image rebuild.
+      # Hash check: only rebuild when .fre-run.dockerfile content changes or image is absent.
+      RUN_ACTIVE_IMAGE="fre-run-base:latest"
+      RUN_PROJECT_DOCKERFILE="${RUN_CACHE_DIR}/.fre-run.dockerfile"
+      if [[ -f "${RUN_PROJECT_DOCKERFILE}" ]]; then
+        _proj_hash_file="${RUN_CACHE_DIR}/.fre-proj-hash"
+        _proj_hash=$(cksum "${RUN_PROJECT_DOCKERFILE}" | awk '{print $1}')
+        _stored_proj_hash=$(cat "${_proj_hash_file}" 2>/dev/null || echo "")
+        if ! docker image inspect "${IMAGE_NAME}-run:latest" >/dev/null 2>&1 || \
+            [[ "${_proj_hash}" != "${_stored_proj_hash}" ]]; then
+          echo "Building project system image (${IMAGE_NAME}-run:latest)..."
+          docker build -t "${IMAGE_NAME}-run:latest" \
+            -f "${RUN_PROJECT_DOCKERFILE}" \
+            "${RUN_CACHE_DIR}/"
+          echo "${_proj_hash}" > "${_proj_hash_file}"
+        fi
+        RUN_ACTIVE_IMAGE="${IMAGE_NAME}-run:latest"
+      fi
+
+      # Phase 3.5: Install project dependencies into the cache dir.
+      # The venv / node_modules live in ~/.fre-run-cache/<project>/ on the host and
+      # survive between runs. A stamp file tracks the mtime of the dep file; install
+      # only runs when the dep file is newer than the stamp (i.e. changed on EC2).
+      _dep_type=""
+      _dep_src=""
+      if [[ -f "${RUN_CACHE_DIR}/uv.lock" ]]; then
+        _dep_type="uv-lock"; _dep_src="${RUN_CACHE_DIR}/uv.lock"
+      elif [[ -f "${RUN_CACHE_DIR}/pyproject.toml" ]]; then
+        _dep_type="uv";      _dep_src="${RUN_CACHE_DIR}/pyproject.toml"
+      elif [[ -f "${RUN_CACHE_DIR}/requirements.txt" ]]; then
+        _dep_type="pip";     _dep_src="${RUN_CACHE_DIR}/requirements.txt"
+      elif [[ -f "${RUN_CACHE_DIR}/package.json" ]]; then
+        _dep_type="npm"
+        if [[ -f "${RUN_CACHE_DIR}/package-lock.json" ]]; then
+          _dep_src="${RUN_CACHE_DIR}/package-lock.json"
+        else
+          _dep_src="${RUN_CACHE_DIR}/package.json"
+        fi
+      fi
+
+      _dep_stamp="${RUN_CACHE_DIR}/.fre-dep-installed"
+      _needs_install=true
+      if [[ -n "${_dep_src}" && -f "${_dep_stamp}" && "${_dep_src}" -ot "${_dep_stamp}" ]]; then
+        _needs_install=false
+      fi
+
+      if [[ "${_needs_install}" == true && -n "${_dep_type}" ]]; then
+        case "${_dep_type}" in
+          uv-lock)
+            echo "Syncing Python dependencies (uv sync)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" uv sync ;;
+          uv)
+            echo "Installing Python dependencies (uv)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" bash -c "uv venv --quiet 2>/dev/null || true; uv pip install -e . --quiet" ;;
+          pip)
+            echo "Installing Python dependencies (pip)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" \
+              bash -c "python3 -m venv .venv 2>/dev/null || true && .venv/bin/pip install -q -r requirements.txt" ;;
+          npm)
+            echo "Installing Node.js dependencies (npm)..."
+            docker run --rm \
+              "--volume" "${RUN_CACHE_DIR}:/app" "--workdir" "/app" \
+              "${RUN_ACTIVE_IMAGE}" npm install --silent ;;
+        esac
+        touch "${_dep_stamp}"
+      elif [[ "${_needs_install}" == false ]]; then
+        echo "Dependencies up to date."
+      elif [[ -z "${_dep_type}" ]]; then
+        echo ""
+        echo "⚠  No dependency file found (uv.lock, pyproject.toml, requirements.txt, package.json)."
+        echo "   Running with no project deps installed."
+        echo ""
+      fi
+
+      # Phase 4: Run program on host.
+      # All Python package managers (uv, pip) create .venv in the project dir.
+      # Activate it via VIRTUAL_ENV + PATH — no dependency on uv being in the container.
+      # __main__.py runs as `python3 -m <pkg>` so relative imports resolve.
+      # Length check on RUN_SCRIPT_ARGS avoids bash 3.2 set -u empty-array bug.
+      case "${RUN_SCRIPT}" in
+        */__main__.py|__main__.py)
+          _pkg="${RUN_SCRIPT%/__main__.py}"; _pkg="${_pkg##*/}"
+          _run_cmd=(python3 -m "${_pkg}") ;;
+        *.py) _run_cmd=(python3 "${RUN_SCRIPT}") ;;
+        *.js) _run_cmd=(node "${RUN_SCRIPT}") ;;
+        *.ts) _run_cmd=(npx ts-node "${RUN_SCRIPT}") ;;
+        *.sh) _run_cmd=(bash "${RUN_SCRIPT}") ;;
+        *)    _run_cmd=("${RUN_SCRIPT}") ;;
+      esac
+      [[ ${#RUN_SCRIPT_ARGS[@]} -gt 0 ]] && _run_cmd+=("${RUN_SCRIPT_ARGS[@]}")
+
+      RUN_PROGRAM_ARGS=(
+        "--rm"
+        "--volume" "${RUN_CACHE_DIR}:/app"
+        "--workdir" "/app"
+      )
+      if [[ "${_dep_type}" == "uv-lock" || "${_dep_type}" == "uv" || "${_dep_type}" == "pip" ]]; then
+        RUN_PROGRAM_ARGS+=(
+          "--env" "VIRTUAL_ENV=/app/.venv"
+          "--env" "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+        )
+      fi
+      for _mount in "${RUN_MOUNT_ARGS[@]}"; do
+        RUN_PROGRAM_ARGS+=("--volume" "${_mount}")
+      done
+      if [[ -n "${RUN_ENV_FILE_HOST}" ]]; then
+        while IFS= read -r _line || [[ -n "${_line}" ]]; do
+          [[ -z "${_line}" || "${_line}" =~ ^# ]] && continue
+          RUN_PROGRAM_ARGS+=("--env" "${_line}")
+        done < "${RUN_ENV_FILE_HOST}"
+      fi
+      echo ""
+      echo "Running ${RUN_SCRIPT} in ${RUN_ACTIVE_IMAGE}..."
+      echo "─────────────────────────────────────────"
+      _run_exit=0
+      if [[ "${RUN_TTY}" == true ]]; then
+        # TTY mode: allocate pseudo-TTY for interactive/TUI programs.
+        # Cannot pipe through tee — output is not captured or uploaded.
+        docker run --interactive --tty "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
+          "${_run_cmd[@]}" || _run_exit=$?
+      else
+        docker run "${RUN_PROGRAM_ARGS[@]}" "${RUN_ACTIVE_IMAGE}" \
+          "${_run_cmd[@]}" 2>&1 \
+          | tee "${RUN_TEMP_DIR}/output.txt" || _run_exit=$?
+      fi
+      echo "─────────────────────────────────────────"
+
+      # Phase 5: Upload output back to EC2 (skipped with --local or --tty)
+      if [[ "${RUN_LOCAL}" == false && "${RUN_TTY}" == false ]]; then
+        docker run "${CONNECT_ARGS[@]}" \
+          "--volume" "${RUN_TEMP_DIR}:/run-workspace" \
+          "${IMAGE_NAME}" /workspace/scripts/run-upload.sh
+        if [[ "${_run_exit}" -ne 0 ]]; then
+          echo "⚠  Program exited with code ${_run_exit} — output uploaded for Claude to diagnose."
+          exit "${_run_exit}"
+        fi
+      else
+        if [[ "${_run_exit}" -ne 0 ]]; then
+          echo "⚠  Program exited with code ${_run_exit}."
+          exit "${_run_exit}"
+        fi
+      fi
+      ;;
+    local-shell)
+      PROJECT_ARG="${2:-}"
+      LOCAL_SHELL_VERBOSE=false
+      for _arg in "${@:2}"; do
+        [[ "${_arg}" == "--verbose" || "${_arg}" == "-v" ]] && LOCAL_SHELL_VERBOSE=true
+        [[ "${_arg}" != -* ]] && [[ -z "${PROJECT_ARG}" || "${_arg}" == "${PROJECT_ARG}" ]] && PROJECT_ARG="${_arg}"
+      done
+      # Re-extract project as the first non-flag arg
+      PROJECT_ARG=""
+      for _arg in "${@:2}"; do
+        [[ "${_arg}" == --verbose || "${_arg}" == -v ]] && continue
+        PROJECT_ARG="${_arg}"; break
+      done
+      if [[ -z "${PROJECT_ARG}" ]]; then
+        echo "Usage: user.sh local-shell <project> [--verbose]" >&2
+        exit 1
+      fi
+
+      # Refuse if already inside a Docker container
+      if [[ -f /.dockerenv ]]; then
+        echo "ERROR: Already inside a Docker container." >&2
+        echo "       Use csync and cpush directly instead of ./user.sh local-shell." >&2
+        exit 1
+      fi
+
+      # Resolve LOCAL_SYNC_DIR (from user.env or default ~/claude)
+      _local_sync_dir="${LOCAL_SYNC_DIR:-${HOME}/claude}"
+      _local_sync_dir="${_local_sync_dir/#\~/${HOME}}"
+      _local_proj_dir="${_local_sync_dir}/${PROJECT_ARG}"
+      mkdir -p "${_local_proj_dir}"
+
+      # Container project path
+      _container_proj_dir="/projects/${PROJECT_ARG}"
+
+      # Per-project extra mounts: LOCAL_MOUNTS_<slug> (hyphens→underscores)
+      _proj_slug="${PROJECT_ARG//-/_}"
+      _mounts_var="LOCAL_MOUNTS_${_proj_slug}"
+      _extra_mounts=()
+      if [[ -n "${!_mounts_var:-}" ]]; then
+        for _mount_pair in ${!_mounts_var}; do
+          _host_path="${_mount_pair%%:*}"
+          _host_path="${_host_path/#\~/${HOME}}"
+          _cont_path="${_mount_pair#*:}"
+          _extra_mounts+=("--volume" "${_host_path}:${_cont_path}")
+        done
+      fi
+
+      # Detect shell from host $SHELL; fall back to bash for anything not supported
+      _host_shell="$(basename "${SHELL:-bash}")"
+      _shell_cmd="bash"
+      _shell_launch_args=(--rcfile /workspace/scripts/local-shell-init.sh)
+      if [[ "${_host_shell}" == "zsh" ]]; then
+        _shell_cmd="zsh"
+        _shell_launch_args=()
+      fi
+
+      # Mount dotfiles that exist on the host (skip missing)
+      _dotfile_mounts=()
+      [[ -f "${HOME}/.vimrc" ]]     && _dotfile_mounts+=("--volume" "${HOME}/.vimrc:/root/.vimrc:ro")
+      [[ -d "${HOME}/.vim" ]]       && _dotfile_mounts+=("--volume" "${HOME}/.vim:/root/.vim")
+      [[ -f "${HOME}/.tmux.conf" ]] && _dotfile_mounts+=("--volume" "${HOME}/.tmux.conf:/root/.tmux.conf:ro")
+      [[ -d "${HOME}/.ssh" ]]       && _dotfile_mounts+=("--volume" "${HOME}/.ssh:/root/.ssh:ro")
+      if [[ "${_shell_cmd}" == "zsh" ]]; then
+        [[ -f "${HOME}/.zshrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.zshrc:/root/.zshrc:ro")
+        # Inject our init via /etc/zsh/zshrc — sourced before ~/.zshrc in all zsh sessions
+        _dotfile_mounts+=("--volume" "${USER_SCRIPT_DIR}/scripts/local-shell-init.sh:/etc/zsh/zshrc:ro")
+      else
+        [[ -f "${HOME}/.bashrc" ]] && _dotfile_mounts+=("--volume" "${HOME}/.bashrc:/root/.user.bashrc:ro")
+      fi
+
+      CONNECT_ARGS=("${DOCKER_ARGS[@]}")
+      _setup_user_ssh_auth
+      CONNECT_ARGS+=(
+        "--volume" "${_local_proj_dir}:${_container_proj_dir}"
+        "--env" "FRE_PROJECT=${PROJECT_ARG}"
+        "--env" "FRE_LOCAL_DIR=/projects"
+      )
+      CONNECT_ARGS+=("--env" "SHELL=/bin/${_shell_cmd}")
+      if [[ ${#_dotfile_mounts[@]} -gt 0 ]]; then
+        CONNECT_ARGS+=("${_dotfile_mounts[@]}")
+      fi
+      if [[ ${#_extra_mounts[@]} -gt 0 ]]; then
+        CONNECT_ARGS+=("${_extra_mounts[@]}")
+      fi
+
+      if [[ "${LOCAL_SHELL_VERBOSE}" == true ]]; then
+        echo "docker run \\" >&2
+        for _a in "${CONNECT_ARGS[@]}"; do printf '  %q \\\n' "${_a}" >&2; done
+        printf '  %q \\\n' "${IMAGE_NAME}" >&2
+        printf '  %q' "${_shell_cmd}" >&2
+        for _a in "${_shell_launch_args[@]}"; do printf ' %q' "${_a}" >&2; done
+        echo "" >&2
+        echo "" >&2
+      fi
+
+      docker run "${CONNECT_ARGS[@]}" "${IMAGE_NAME}" \
+        "${_shell_cmd}" "${_shell_launch_args[@]}"
       ;;
     update)
       docker run "${DOCKER_ARGS[@]}" \

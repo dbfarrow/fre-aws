@@ -10,6 +10,24 @@ Your AWS development environment is already set up — your admin has provisione
 
 ---
 
+## Two ways to interact
+
+**Via `user.sh` (default):** Every command runs inside a Docker container — AWS CLI, the SSM plugin, rsync, and all scripts are packaged in the image. The only local requirement is Docker. This is the default and works for everyone out of the box.
+
+**Directly:** If you already have the required tools installed locally (AWS CLI v2, SSM Session Manager plugin, SSH client), you can call the scripts in `~/fre-aws/scripts/` without going through Docker. Same config files, same behaviour, less overhead.
+
+```bash
+# Docker-wrapped
+~/fre-aws/user.sh connect
+
+# Direct (requires local AWS CLI + SSM plugin)
+~/fre-aws/scripts/connect.sh
+```
+
+Both approaches read from `config/user.env` — no config changes needed when switching between them.
+
+---
+
 ## What You Need
 
 | Requirement | Notes |
@@ -147,7 +165,7 @@ Choose [1]:
 ~/fre-aws/user.sh stop       # stop your instance manually (optional — see below)
 ```
 
-**Instances stop automatically when idle.** When you exit Claude and close your tmux session, the instance detects no active sessions and shuts itself down after about 10 minutes. A stopped instance doesn't incur compute charges, but your files are preserved on disk. You can also stop it manually at any time with `./user.sh stop`.
+**Instances stop automatically when idle.** When you exit Claude and close your tmux session, the instance detects no active sessions and shuts itself down after the idle period (30 minutes by default). A stopped instance doesn't incur compute charges, but your files are preserved on disk. You can also stop it manually at any time with `./user.sh stop`.
 
 ---
 
@@ -202,6 +220,75 @@ If you have multiple projects, you'll see a numbered menu to pick which one. Or 
 ```
 
 Files land in `~/uploads/<project>/` on your instance. Directories are synced with rsync — re-uploading the same directory only transfers what changed. Everything uploaded is also browseable at `http://localhost:8080/<project>/uploads/`. Once uploaded, tell Claude "I uploaded a file" — it will check that directory.
+
+### Running programs locally
+
+Some programs need to run on your Mac — to reach local files, local services, or local credentials that EC2 can't access. The `run` command handles this: it downloads the project from EC2, runs the script in a Docker container on your machine, and uploads the output back to EC2 for Claude to read.
+
+```bash
+~/fre-aws/user.sh run <project> <script-path> [options] [-- script-args...]
+```
+
+Examples:
+
+```bash
+~/fre-aws/user.sh run myproject scripts/analyze.py
+~/fre-aws/user.sh run myproject scripts/fetch.py --mount ~/Documents/data:/data
+~/fre-aws/user.sh run myproject scripts/process.py --env-file ~/.secrets/myproject.env
+~/fre-aws/user.sh run myproject scripts/analyze.py --mount ~/Downloads/input:/input -- --verbose
+~/fre-aws/user.sh run myproject app.js --mount ~/Desktop/output:/output
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--mount local:container` | Mount a local path into the container (repeat for multiple mounts) |
+| `--env-file <file>` | Load environment variables from a local `.env` file (KEY=VALUE format) |
+| `--local` | Run without uploading output to EC2 — useful for testing |
+| `--tty` | Allocate a TTY for interactive or TUI programs (output is not captured or uploaded) |
+| `--` | Everything after `--` is passed as arguments to your script |
+
+The runner is detected automatically from the file extension: `.py` → `python3`, `.js` → `node`, `.ts` → `npx ts-node`, `.sh` → `bash`. Other extensions are executed directly (requires a shebang line).
+
+Output is streamed to your terminal and saved to `~/uploads/<project>/run-output.txt` on your instance. When Claude asks you to run something, it will tell you the exact command. After running, just say **"done"** — Claude will check the output file automatically.
+
+**Python and Node dependencies** are installed automatically from `requirements.txt`, `uv.lock`, `pyproject.toml`, or `package.json` — nothing extra needed. If your project requires additional system packages (compiled libraries, native extensions), Claude will create a `.fre-run.dockerfile` that adds them via `apt-get`.
+
+### Local shell (power users)
+
+If you want to run programs interactively — editing files, running commands, inspecting output — without the full `run` round-trip, use `local-shell`. It drops you into a persistent Docker container that feels like your normal terminal: your shell (`$SHELL`), your dotfiles (`.zshrc`/`.bashrc`, `.vimrc`, `.vim/`, `.tmux.conf`), and your tools (`vim`, `tmux`, `uv`, `pip`, `node`, `npm`) are all there. Two short commands let you sync code and push results back to Claude.
+
+```bash
+~/fre-aws/user.sh local-shell <project>
+```
+
+Inside the shell:
+
+```bash
+csync                                 # pull latest project state from EC2
+python scripts/analyze.py             # run directly — output goes to terminal
+python scripts/analyze.py > output.txt && cpush   # capture and push to Claude
+```
+
+After `cpush`, tell Claude **"done"** — it will read `~/uploads/<project>/run-output.txt`.
+
+**Dependency installation:** `csync` can install project dependencies automatically after syncing (`uv.lock`, `pyproject.toml`, `requirements.txt`, `package.json` — whichever is present). This is opt-in: set `LOCAL_SHELL_AUTO_INSTALL=true` in `user.env` to enable. The venv lives in the project directory on your Mac and is activated automatically the next time you enter the shell.
+
+**Configuration (in `config/user.env`):**
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_SYNC_DIR` | Where projects are synced locally (default: `~/claude`). Projects land at `${LOCAL_SYNC_DIR}/<project>/`. |
+| `LOCAL_SHELL_AUTO_INSTALL` | Set to `true` to automatically install dependencies after `csync` (default: `false`). |
+| `LOCAL_MOUNTS_<project>` | Extra host paths to mount into the shell. Use the project name with hyphens replaced by underscores. Space-separated `host:container` pairs. |
+
+Example `user.env` additions:
+
+```bash
+LOCAL_SYNC_DIR=~/myprojects
+LOCAL_MOUNTS_sqrt_analysis=~/.sqrt:~/.sqrt
+```
 
 ---
 

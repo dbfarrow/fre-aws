@@ -120,7 +120,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 
 ```
 .
-├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, scripts
+├── Dockerfile                   # Self-contained image: terraform, aws-cli, SSM plugin, docker.io, scripts
+├── Dockerfile.run               # Base image for local program execution (Python 3 + Node.js)
 ├── scripts/entrypoint.sh        # Docker ENTRYPOINT: appends corporate CA cert to OS bundle (if mounted), then exec's command
 ├── docker-compose.yml           # Convenience wrapper for docker run
 ├── run.sh                       # Host-side entry point; dispatches all commands into Docker
@@ -155,6 +156,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── remove-user.sh           # Destroy EC2 instance + remove from registry (and optionally Identity Center in managed mode)
 │   ├── pull-user.sh             # Download registry entry for a user to config/users/<username>.env
 │   ├── update-user.sh           # Merge edited .env file back into S3 registry (no IC/instance changes)
+│   ├── run.sh                   # Local execution: SCP project from EC2, build images via DooD, run, upload output
 │   └── users-s3.sh              # Library: S3 user registry read/write functions
 ├── config/
 │   ├── admin.env                # Admin config: region, profile, project name (gitignored)
@@ -228,6 +230,48 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 
 **`./admin.sh push-config`** pushes personal dotfiles (`~/.tmux.conf`, `~/.bashrc`, `~/.zshrc`, `~/.vimrc`) from the host to the EC2 instance. Files missing on the host are skipped. `config/tmux.conf.example` is a reference config users can copy to `~/.tmux.conf` and push with this command.
 
+### Local program execution (`./user.sh run`)
+
+When a project needs to run locally (local files, local APIs, local credentials EC2 can't reach), use `./user.sh run`. It downloads the project from EC2, runs it in a Docker container on the user's Mac, and uploads the output to `~/uploads/<project>/run-output.txt` on EC2.
+
+**When building a project that will use `./user.sh run`, Claude should:**
+
+1. Create `.fre-run.dockerfile` in the project root extending `fre-run-base:latest`:
+   ```dockerfile
+   FROM fre-run-base:latest
+   RUN pip install requests pandas
+   ```
+2. Add `.fre-run.dockerfile` to the project's own `.gitignore`
+3. Give the user a single copy-pasteable `run` command with no placeholders — exact project name, exact relative script path, full absolute Mac paths for every `--mount`
+4. After the user says "done": `cat ~/uploads/<project>/run-output.txt`
+
+**Example Claude message:**
+> Run it locally with:
+> `~/fre-aws/user.sh run myproject scripts/analyze.py --mount ~/Documents/sales:/data -- --year 2025`
+> Then tell me **done**.
+
+**Architecture:** Docker-out-of-Docker (DooD) — the tooling container mounts the host's `/var/run/docker.sock` and runs the program container directly against the host daemon. A temp dir created on the host (`/tmp/fre-run-XXXXXX`) is mounted into the tooling container at `/run-workspace` and passed as `HOST_TEMP_DIR`; the program container volume path is resolved by the host daemon using the host path.
+
+**Base image** (`fre-run-base:latest`): built from `Dockerfile.run` on first run if not present; Python 3 + Node.js + common tools. **Project image** (`<image>-run:latest`): built from `.fre-run.dockerfile` if present; otherwise base used directly.
+
+### Interactive local shell (`./user.sh local-shell`)
+
+For power users who want to run programs interactively without the `run` round-trip overhead. Drops into a persistent Docker container scoped to a single project, with two short commands:
+
+- **`csync`** — rsync from EC2 `~/repos/<project>/` into a visible local dir (`${LOCAL_SYNC_DIR}/<project>/`, default `~/claude/<project>/`). After sync, auto-detects and installs project dependencies (`uv.lock` → `uv sync`, `pyproject.toml` → `uv pip install`, `requirements.txt` → `pip install`, `package.json` → `npm install`). The venv lives in the project dir on the host and persists between sessions. Set `LOCAL_SHELL_AUTO_INSTALL=true` to enable.
+- **`cpush [file]`** — upload a local file to EC2 `~/uploads/<project>/run-output.txt` (default: `output.txt` in cwd). Tell Claude "done" after cpush completes.
+
+**Architecture:** Same tooling container as `run`, but no DooD — the container is long-lived (interactive shell) rather than ephemeral. The project dir is mounted from the host at `/projects/<project>/`, so files synced by `csync` are visible on the Mac's filesystem immediately.
+
+**Configuration variables** (in `user.env`):
+- `LOCAL_SYNC_DIR` — base dir on host where projects land (default: `~/claude`). Project lands at `${LOCAL_SYNC_DIR}/<project>/`.
+- `LOCAL_MOUNTS_<project>` — extra host:container mount pairs for the shell (hyphens in project name become underscores in variable name).
+
+**Scripts:**
+- `scripts/local-shell-init.sh` — bash `--rcfile` sourced inside the container; sets prompt, defines `csync`/`cpush` functions, `cd`s to project dir
+- `scripts/csync.sh` — rsync implementation (same SSH/SSM pattern as `scripts/run.sh`)
+- `scripts/cpush.sh` — upload implementation (same SSH/SSM pattern as `scripts/run-upload.sh`)
+
 ---
 
 ## Key Technologies
@@ -250,6 +294,7 @@ This means: deliberately exiting Claude → `exit` the bash shell → tmux sessi
 - Base image: `debian:bookworm-slim`
 - Includes: terraform, aws-cli v2, SSM session-manager-plugin, bats, openssh-client, python3, **tzdata**
 - `tzdata` is required for Python `zoneinfo` to resolve named timezones (e.g. `America/Los_Angeles`)
+- `python3-pip`, `python3-venv`, `nodejs`, `npm`, and `uv` (via pip) are included for `local-shell` auto-install support
 - `run.sh` detects the host timezone and passes it as `TZ` env var into all containers
 - Nothing sensitive is baked in — AWS credentials and config are mounted at runtime
 - `ENTRYPOINT` is `scripts/entrypoint.sh`: appends a corporate CA cert mounted at `/certs/corp-ca.crt` directly to the OS CA bundle before exec'ing the actual command — no rebuild needed, near-zero overhead. Transparent when no cert is mounted. Set `CORP_CA_CERT_FILE` in `config/admin.env` to enable (see README-admin.md).

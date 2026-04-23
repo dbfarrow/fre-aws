@@ -1,0 +1,28 @@
+# Dockerfile.run — Base image for running user programs locally via ./user.sh run
+# Python 3.12 + Node.js + uv + common tools.
+# Extend with .fre-run.dockerfile in your project root for SYSTEM packages only (apt-get).
+# Project deps (pip/uv/npm) are installed automatically into the mounted project dir.
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    locales \
+    nodejs \
+    npm \
+    curl \
+    wget \
+    jq \
+    git \
+    ca-certificates \
+    build-essential \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV UV_BREAK_SYSTEM_PACKAGES=1
+
+RUN pip install --quiet uv
+
+WORKDIR /app

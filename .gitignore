@@ -57,6 +57,9 @@ config/users/
 # Docker
 .docker/
 
+# Per-project run container Dockerfile — created by Claude, not for version control
+.fre-run.dockerfile
+
 # Claude Code local settings
 .claude/
 

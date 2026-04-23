@@ -27,6 +27,24 @@ This guide covers everything an admin needs to set up and manage the fre-aws env
 
 ---
 
+## Two ways to interact
+
+**Via `admin.sh` (default):** Every command runs inside a Docker container — Terraform, AWS CLI, the SSM plugin, and all scripts are packaged in the image. The only local requirement is Docker. This is the default and works for everyone out of the box.
+
+**Directly:** If you already have the required tools installed locally (Terraform, AWS CLI v2, SSM Session Manager plugin, SSH client), you can call the scripts in `scripts/` without going through Docker. Same config files, same behaviour, more transparency and less overhead.
+
+```bash
+# Docker-wrapped
+./admin.sh connect alice
+
+# Direct (requires local Terraform + AWS CLI + SSM plugin)
+./scripts/connect.sh alice
+```
+
+Both approaches read from `config/admin.env` — no config changes needed when switching between them.
+
+---
+
 ## What You Need
 
 ### On your machine
