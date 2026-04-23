@@ -191,7 +191,8 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
                 title = html_module.escape(os.path.basename(path))
                 body = markdown.markdown(
                     source,
-                    extensions=['fenced_code', 'tables', 'toc']
+                    extensions=['fenced_code', 'tables', 'toc'],
+                    tab_length=2
                 )
                 page = (
                     f'<!DOCTYPE html><html><head>'
