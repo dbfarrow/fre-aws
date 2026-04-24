@@ -215,7 +215,7 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir('/home/developer/www')
-    httpd = http.server.HTTPServer(('127.0.0.1', 8080), PreviewHandler)
+    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 8080), PreviewHandler)
     httpd.serve_forever()
 PREVIEW_SERVER
 chmod +x /usr/local/bin/fre-web-preview
