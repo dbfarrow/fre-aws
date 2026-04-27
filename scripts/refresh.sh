@@ -180,6 +180,7 @@ import http.server
 import io
 import os
 import html as html_module
+from urllib.parse import urlparse, parse_qs
 
 try:
     import markdown
@@ -187,8 +188,9 @@ try:
 except ImportError:
     HAS_MARKDOWN = False
 
+# CONTENT_WIDTH is replaced per-request based on ?width=N or ?page= query params
 CSS = """<style>
-body{max-width:800px;margin:40px auto;padding:0 20px;
+body{max-width:CONTENT_WIDTH;margin:40px auto;padding:0 20px;
      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
      line-height:1.6;color:#24292e}
 pre{background:#f6f8fa;padding:16px;border-radius:6px;overflow-x:auto}
@@ -203,9 +205,25 @@ th{background:#f6f8fa}
 img{max-width:100%}
 </style>"""
 
+# ?page or ?page=letter → US Letter content width; ?page=a4 → A4
+PAGE_WIDTHS = {'letter': '6.5in', 'a4': '170mm'}
+
 
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
     def send_head(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        if 'page' in params:
+            size = (params['page'] or ['letter'])[0].lower()
+            width = PAGE_WIDTHS.get(size, PAGE_WIDTHS['letter'])
+        elif 'width' in params:
+            try:
+                pct = max(10, min(100, int(params['width'][0])))
+                width = f'{pct}%'
+            except (ValueError, IndexError):
+                width = '800px'
+        else:
+            width = '800px'
         path = self.translate_path(self.path)
         if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
             try:
@@ -217,10 +235,11 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
                     extensions=['fenced_code', 'tables', 'toc'],
                     tab_length=2
                 )
+                css = CSS.replace('CONTENT_WIDTH', width)
                 page = (
                     f'<!DOCTYPE html><html><head>'
                     f'<meta charset="utf-8"><title>{title}</title>'
-                    f'{CSS}</head><body>{body}</body></html>'
+                    f'{css}</head><body>{body}</body></html>'
                 )
                 encoded = page.encode('utf-8')
                 self.send_response(200)
