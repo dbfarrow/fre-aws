@@ -66,6 +66,44 @@ fi
 [[ -n "${GIT_USER_NAME:-}"  ]] && git config --global user.name  "${GIT_USER_NAME}"
 [[ -n "${GIT_USER_EMAIL:-}" ]] && git config --global user.email "${GIT_USER_EMAIL}"
 
+# ---------------------------------------------------------------------------
+# settings.json guard — backup/restore + atomic LiteLLM merge
+# Claude Code writes settings non-atomically; a kill mid-write leaves a 0-byte
+# file. Keep a .bak and restore from it automatically at session start.
+# ---------------------------------------------------------------------------
+_ensure_settings_json() {
+  local settings="${HOME}/.claude/settings.json"
+  local backup="${HOME}/.claude/settings.json.bak"
+  mkdir -p "${HOME}/.claude"
+
+  # Restore from backup if the file was truncated to 0 bytes
+  if [[ -f "${settings}" && ! -s "${settings}" ]]; then
+    if [[ -f "${backup}" && -s "${backup}" ]]; then
+      echo "  (settings.json was empty — restored from backup)"
+      cp "${backup}" "${settings}"
+    else
+      echo "  (settings.json was empty — removing for fresh start)"
+      rm -f "${settings}"
+    fi
+  fi
+
+  # LiteLLM: merge hasCompletedOnboarding using temp file + atomic rename
+  # so our own write can't leave a 0-byte file if the process is killed
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    local tmp
+    tmp=$(mktemp "${HOME}/.claude/settings.json.XXXXXX")
+    (jq '.hasCompletedOnboarding = true' "${settings}" 2>/dev/null \
+      || echo '{"hasCompletedOnboarding": true}') > "${tmp}" \
+      && mv "${tmp}" "${settings}" \
+      || rm -f "${tmp}"
+  fi
+
+  # Update the backup from the current valid file
+  if [[ -f "${settings}" && -s "${settings}" ]] && jq empty "${settings}" 2>/dev/null; then
+    cp "${settings}" "${backup}"
+  fi
+}
+
 REPOS_DIR="${HOME}/repos"
 mkdir -p "${REPOS_DIR}"
 
@@ -134,15 +172,8 @@ launch_in_repo() {
   # Ensure per-project web root and upload directories exist, with uploads linked into web root
   mkdir -p ~/www/"${name}" ~/uploads/"${name}"
   ln -sf ~/uploads/"${name}" ~/www/"${name}"/uploads
-  # When routing through LiteLLM, skip the first-run onboarding wizard so Claude
-  # starts connected immediately (the wizard prompts for an Anthropic key we've
-  # already injected via ANTHROPIC_API_KEY).
-  if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
-    mkdir -p ~/.claude
-    (jq '.hasCompletedOnboarding = true' ~/.claude/settings.json 2>/dev/null \
-      || echo '{"hasCompletedOnboarding": true}') \
-      | tee ~/.claude/settings.json > /dev/null 2>&1 || true
-  fi
+  # Guard settings.json against truncation and merge LiteLLM flag if needed
+  _ensure_settings_json
   if tmux has-session -t "${name}" 2>/dev/null; then
     echo "Reattaching to existing '${name}' session..."
     exec tmux attach-session -t "${name}"

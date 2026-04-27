@@ -143,20 +143,92 @@ systemctl enable --now autoshutdown.timer
 echo "Autoshutdown timer enabled."
 
 # ---------------------------------------------------------------------------
-# Web preview — static server for ~/www/; accessible from host via SSH tunnel
+# Web preview — markdown-rendering server for ~/www/
 # ---------------------------------------------------------------------------
 mkdir -p /home/developer/www /home/developer/uploads
 chown developer:developer /home/developer/www /home/developer/uploads
 
+pip3 install --quiet markdown
+
+cat > /usr/local/bin/fre-web-preview << 'PREVIEW_SERVER'
+#!/usr/bin/env python3
+"""fre-web-preview — markdown-rendering HTTP server for Claude Code output preview."""
+import http.server
+import io
+import os
+import html as html_module
+
+try:
+    import markdown
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
+
+CSS = """<style>
+body{max-width:800px;margin:40px auto;padding:0 20px;
+     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     line-height:1.6;color:#24292e}
+pre{background:#f6f8fa;padding:16px;border-radius:6px;overflow-x:auto}
+code{background:#f6f8fa;padding:2px 4px;border-radius:3px;font-size:90%}
+pre code{background:none;padding:0}
+a{color:#0366d6}
+h1,h2,h3{border-bottom:1px solid #eaecef;padding-bottom:.3em}
+blockquote{border-left:4px solid #dfe2e5;margin:0;padding:0 16px;color:#6a737d}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #dfe2e5;padding:8px 12px}
+th{background:#f6f8fa}
+img{max-width:100%}
+</style>"""
+
+
+class PreviewHandler(http.server.SimpleHTTPRequestHandler):
+    def send_head(self):
+        path = self.translate_path(self.path)
+        if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    source = f.read()
+                title = html_module.escape(os.path.basename(path))
+                body = markdown.markdown(
+                    source,
+                    extensions=['fenced_code', 'tables', 'toc'],
+                    tab_length=2
+                )
+                page = (
+                    f'<!DOCTYPE html><html><head>'
+                    f'<meta charset="utf-8"><title>{title}</title>'
+                    f'{CSS}</head><body>{body}</body></html>'
+                )
+                encoded = page.encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(encoded)))
+                self.end_headers()
+                return io.BytesIO(encoded)
+            except Exception:
+                pass  # fall through to default handler
+        return super().send_head()
+
+    def log_message(self, fmt, *args):
+        pass  # suppress access logs
+
+
+if __name__ == '__main__':
+    os.chdir('/home/developer/www')
+    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 8080), PreviewHandler)
+    httpd.serve_forever()
+PREVIEW_SERVER
+chmod +x /usr/local/bin/fre-web-preview
+
 cat > /etc/systemd/system/web-preview.service << 'EOF'
 [Unit]
-Description=Static web server for Claude Code output preview
+Description=Web preview server for Claude Code output (renders .md as HTML)
 After=network.target
 
 [Service]
 Type=simple
 User=developer
-ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /home/developer/www
+ExecStart=/usr/local/bin/fre-web-preview
 Restart=always
 RestartSec=5
 
@@ -167,7 +239,7 @@ EOF
 systemctl daemon-reload
 systemctl enable web-preview.service
 systemctl start web-preview.service
-echo "Web preview server enabled on port 8080."
+echo "Web preview server enabled on port 8080 (markdown rendering active)."
 
 # ---------------------------------------------------------------------------
 # Global Claude Code instructions for all sessions on this instance
