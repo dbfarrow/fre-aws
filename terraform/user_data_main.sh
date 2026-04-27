@@ -164,8 +164,9 @@ try:
 except ImportError:
     HAS_MARKDOWN = False
 
+# CONTENT_WIDTH is replaced per-request from ~/.fre-preview-width
 CSS = """<style>
-body{max-width:800px;margin:40px auto;padding:0 20px;
+body{max-width:CONTENT_WIDTH;margin:40px auto;padding:0 20px;
      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
      line-height:1.6;color:#24292e}
 pre{background:#f6f8fa;padding:16px;border-radius:6px;overflow-x:auto}
@@ -180,9 +181,25 @@ th{background:#f6f8fa}
 img{max-width:100%}
 </style>"""
 
+PAGE_WIDTHS = {'letter': '6.5in', 'a4': '170mm'}
+
+
+def _read_width_config():
+    """Read content width from ~/.fre-preview-width.
+    Values: a number 10-100 (viewport %), 'letter', 'a4', or missing for default 800px."""
+    try:
+        with open(os.path.expanduser('~/.fre-preview-width')) as f:
+            val = f.read().strip().lower()
+        if val in PAGE_WIDTHS:
+            return PAGE_WIDTHS[val]
+        return f'{max(10, min(100, int(val)))}%'
+    except Exception:
+        return '800px'
+
 
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
     def send_head(self):
+        width = _read_width_config()
         path = self.translate_path(self.path)
         if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
             try:
@@ -194,10 +211,11 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
                     extensions=['fenced_code', 'tables', 'toc'],
                     tab_length=2
                 )
+                css = CSS.replace('CONTENT_WIDTH', width)
                 page = (
                     f'<!DOCTYPE html><html><head>'
                     f'<meta charset="utf-8"><title>{title}</title>'
-                    f'{CSS}</head><body>{body}</body></html>'
+                    f'{css}</head><body>{body}</body></html>'
                 )
                 encoded = page.encode('utf-8')
                 self.send_response(200)
