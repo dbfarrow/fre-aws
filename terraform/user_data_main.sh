@@ -157,7 +157,6 @@ import http.server
 import io
 import os
 import html as html_module
-from urllib.parse import urlparse, parse_qs
 
 try:
     import markdown
@@ -165,7 +164,7 @@ try:
 except ImportError:
     HAS_MARKDOWN = False
 
-# CONTENT_WIDTH is replaced per-request based on ?width=N or ?page= query params
+# CONTENT_WIDTH is replaced per-request from ~/.fre-preview-width
 CSS = """<style>
 body{max-width:CONTENT_WIDTH;margin:40px auto;padding:0 20px;
      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -182,25 +181,25 @@ th{background:#f6f8fa}
 img{max-width:100%}
 </style>"""
 
-# ?page or ?page=letter → US Letter content width; ?page=a4 → A4
 PAGE_WIDTHS = {'letter': '6.5in', 'a4': '170mm'}
+
+
+def _read_width_config():
+    """Read content width from ~/.fre-preview-width.
+    Values: a number 10-100 (viewport %), 'letter', 'a4', or missing for default 800px."""
+    try:
+        with open(os.path.expanduser('~/.fre-preview-width')) as f:
+            val = f.read().strip().lower()
+        if val in PAGE_WIDTHS:
+            return PAGE_WIDTHS[val]
+        return f'{max(10, min(100, int(val)))}%'
+    except Exception:
+        return '800px'
 
 
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
     def send_head(self):
-        parsed = urlparse(self.path)
-        params = parse_qs(parsed.query)
-        if 'page' in params:
-            size = (params['page'] or ['letter'])[0].lower()
-            width = PAGE_WIDTHS.get(size, PAGE_WIDTHS['letter'])
-        elif 'width' in params:
-            try:
-                pct = max(10, min(100, int(params['width'][0])))
-                width = f'{pct}%'
-            except (ValueError, IndexError):
-                width = '800px'
-        else:
-            width = '800px'
+        width = _read_width_config()
         path = self.translate_path(self.path)
         if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
             try:
