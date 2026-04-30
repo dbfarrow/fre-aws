@@ -167,6 +167,20 @@ echo "--- ensuring rsync is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo dnf install -y rsync -q && echo '  rsync ready'"
 
+echo "--- ensuring fzf is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" 'sudo bash -s' << 'INSTALL_FZF'
+if command -v fzf &>/dev/null; then echo "  fzf already installed ($(fzf --version))"; exit 0; fi
+FZF_ARCH=$(uname -m)
+[[ "${FZF_ARCH}" == "aarch64" ]] && FZF_ARCH="arm64" || FZF_ARCH="amd64"
+FZF_VER=$(curl -sf https://api.github.com/repos/junegunn/fzf/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))" 2>/dev/null || true)
+if [[ -n "${FZF_VER}" ]]; then
+  curl -sL "https://github.com/junegunn/fzf/releases/download/v${FZF_VER}/fzf-${FZF_VER}-linux_${FZF_ARCH}.tar.gz" | tar -xz -C /usr/local/bin fzf
+  echo "  fzf ${FZF_VER} ready"
+else
+  echo "  WARNING: Could not fetch fzf release info — skipping. Repo picker will fall back to numbered list."
+fi
+INSTALL_FZF
+
 echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo dnf install -y -q python3-pip && sudo python3 -m pip install --quiet markdown && echo '  python-markdown installed'"

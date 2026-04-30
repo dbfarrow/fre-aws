@@ -7,6 +7,20 @@ dnf update -y
 dnf install -y git tmux vim htop openssh-server rsync
 
 # ---------------------------------------------------------------------------
+# fzf — fuzzy finder for session_start.sh repo/clone selection
+# Not in AL2023 dnf repos; install latest binary from GitHub releases
+# ---------------------------------------------------------------------------
+_FZF_ARCH=$(uname -m)
+[[ "${_FZF_ARCH}" == "aarch64" ]] && _FZF_ARCH="arm64" || _FZF_ARCH="amd64"
+_FZF_VER=$(curl -sf https://api.github.com/repos/junegunn/fzf/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))" 2>/dev/null || true)
+if [[ -n "${_FZF_VER}" ]]; then
+  curl -sL "https://github.com/junegunn/fzf/releases/download/v${_FZF_VER}/fzf-${_FZF_VER}-linux_${_FZF_ARCH}.tar.gz" | tar -xz -C /usr/local/bin fzf
+  echo "fzf ${_FZF_VER} installed."
+else
+  echo "WARNING: Could not fetch fzf release info — skipping fzf install. Repo picker will fall back to numbered list."
+fi
+
+# ---------------------------------------------------------------------------
 # GitHub CLI (gh) — used for authenticated repo browsing and cloning
 # ---------------------------------------------------------------------------
 dnf install -y 'dnf-command(config-manager)'
@@ -143,7 +157,7 @@ systemctl enable --now autoshutdown.timer
 echo "Autoshutdown timer enabled."
 
 # ---------------------------------------------------------------------------
-# Web preview — markdown-rendering server for ~/www/
+# Web preview — markdown, JSON, YAML rendering server for ~/www/
 # ---------------------------------------------------------------------------
 mkdir -p /home/developer/www /home/developer/uploads
 chown developer:developer /home/developer/www /home/developer/uploads
@@ -153,9 +167,11 @@ python3 -m pip install --quiet markdown
 
 cat > /usr/local/bin/fre-web-preview << 'PREVIEW_SERVER'
 #!/usr/bin/env python3
-"""fre-web-preview — markdown-rendering HTTP server for Claude Code output preview."""
+"""fre-web-preview — markdown, JSON, and YAML rendering HTTP server for Claude Code output preview."""
+import datetime
 import http.server
 import io
+import json
 import os
 import html as html_module
 
@@ -172,13 +188,15 @@ body{max-width:CONTENT_WIDTH;margin:40px auto;padding:0 20px;
      line-height:1.6;color:#24292e}
 pre{background:#f6f8fa;padding:16px;border-radius:6px;overflow-x:auto}
 code{background:#f6f8fa;padding:2px 4px;border-radius:3px;font-size:90%}
-pre code{background:none;padding:0}
+pre code{background:none;padding:0;font-size:87%}
 a{color:#0366d6}
 h1,h2,h3{border-bottom:1px solid #eaecef;padding-bottom:.3em}
 blockquote{border-left:4px solid #dfe2e5;margin:0;padding:0 16px;color:#6a737d}
 table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #dfe2e5;padding:8px 12px}
-th{background:#f6f8fa}
+th,td{border:1px solid #dfe2e5;padding:6px 12px}
+th{background:#f6f8fa;text-align:left}
+td.size{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.date{white-space:nowrap;color:#586069}
 img{max-width:100%}
 </style>"""
 
@@ -198,10 +216,104 @@ def _read_width_config():
         return '800px'
 
 
+def _human_size(b):
+    """Return human-readable file size (e.g. 1.2 M, 34 K, 512 B)."""
+    if b < 1024:
+        return f'{b} B'
+    for unit in ('K', 'M', 'G', 'T'):
+        b /= 1024
+        if b < 1024:
+            return f'{b:.1f} {unit}'
+    return f'{b:.1f} T'
+
+
+def _code_page(title, content, width):
+    """Wrap pre-formatted text in a styled HTML page (used for JSON and YAML)."""
+    css = CSS.replace('CONTENT_WIDTH', width)
+    body = f'<pre><code>{html_module.escape(content)}</code></pre>'
+    return (
+        f'<!DOCTYPE html><html><head>'
+        f'<meta charset="utf-8"><title>{html_module.escape(title)}</title>'
+        f'{css}</head><body>{body}</body></html>'
+    ).encode('utf-8')
+
+
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
+    def list_directory(self, path):
+        """Override directory listing with a sortable ls -l style table."""
+        try:
+            entries = list(os.scandir(path))
+        except PermissionError:
+            self.send_error(403, 'Permission denied')
+            return None
+
+        # Directories first, then files; each group sorted case-insensitively
+        entries.sort(key=lambda e: (not e.is_dir(), e.name.lower()))
+
+        width = _read_width_config()
+        css = CSS.replace('CONTENT_WIDTH', width)
+        display_path = html_module.escape(self.path)
+
+        rows = []
+        if self.path != '/':
+            rows.append(
+                '<tr>'
+                '<td><a href="../">../</a></td>'
+                '<td class="size">—</td>'
+                '<td class="date">—</td>'
+                '</tr>'
+            )
+
+        for entry in entries:
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            is_dir = entry.is_dir()
+            name = html_module.escape(entry.name)
+            href = name + ('/' if is_dir else '')
+            label = name + ('/' if is_dir else '')
+            size = '—' if is_dir else _human_size(stat.st_size)
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+            rows.append(
+                f'<tr>'
+                f'<td><a href="{href}">{label}</a></td>'
+                f'<td class="size">{size}</td>'
+                f'<td class="date">{mtime}</td>'
+                f'</tr>'
+            )
+
+        table = (
+            '<table>'
+            '<thead><tr>'
+            '<th>Name</th>'
+            '<th style="text-align:right">Size</th>'
+            '<th>Modified</th>'
+            '</tr></thead>'
+            '<tbody>' + ''.join(rows) + '</tbody>'
+            '</table>'
+        )
+
+        page = (
+            f'<!DOCTYPE html><html><head>'
+            f'<meta charset="utf-8"><title>Index of {display_path}</title>'
+            f'{css}</head><body>'
+            f'<h2>Index of {display_path}</h2>'
+            f'{table}'
+            f'</body></html>'
+        ).encode('utf-8')
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(page)))
+        self.end_headers()
+        return io.BytesIO(page)
+
     def send_head(self):
         width = _read_width_config()
         path = self.translate_path(self.path)
+
+        # Markdown — rendered to HTML
         if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -226,6 +338,37 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
                 return io.BytesIO(encoded)
             except Exception:
                 pass  # fall through to default handler
+
+        # JSON — parsed and pretty-printed (stdlib json, no extra packages needed)
+        if os.path.isfile(path) and path.endswith('.json'):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                pretty = json.dumps(data, indent=2, ensure_ascii=False)
+                encoded = _code_page(os.path.basename(path), pretty, width)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(encoded)))
+                self.end_headers()
+                return io.BytesIO(encoded)
+            except Exception:
+                pass  # fall through to default handler (invalid JSON served raw)
+
+        # YAML — displayed as-is in a styled code block (raw YAML is already readable;
+        # re-serializing with pyyaml would change formatting in unexpected ways)
+        if os.path.isfile(path) and path.endswith(('.yaml', '.yml')):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    source = f.read()
+                encoded = _code_page(os.path.basename(path), source, width)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(encoded)))
+                self.end_headers()
+                return io.BytesIO(encoded)
+            except Exception:
+                pass  # fall through to default handler
+
         return super().send_head()
 
     def log_message(self, fmt, *args):
