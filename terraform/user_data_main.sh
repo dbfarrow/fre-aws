@@ -157,7 +157,7 @@ systemctl enable --now autoshutdown.timer
 echo "Autoshutdown timer enabled."
 
 # ---------------------------------------------------------------------------
-# Web preview — markdown-rendering server for ~/www/
+# Web preview — markdown, JSON, YAML rendering server for ~/www/
 # ---------------------------------------------------------------------------
 mkdir -p /home/developer/www /home/developer/uploads
 chown developer:developer /home/developer/www /home/developer/uploads
@@ -168,6 +168,7 @@ python3 -m pip install --quiet markdown
 cat > /usr/local/bin/fre-web-preview << 'PREVIEW_SERVER'
 #!/usr/bin/env python3
 """fre-web-preview — markdown, JSON, and YAML rendering HTTP server for Claude Code output preview."""
+import datetime
 import http.server
 import io
 import json
@@ -192,8 +193,10 @@ a{color:#0366d6}
 h1,h2,h3{border-bottom:1px solid #eaecef;padding-bottom:.3em}
 blockquote{border-left:4px solid #dfe2e5;margin:0;padding:0 16px;color:#6a737d}
 table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #dfe2e5;padding:8px 12px}
-th{background:#f6f8fa}
+th,td{border:1px solid #dfe2e5;padding:6px 12px}
+th{background:#f6f8fa;text-align:left}
+td.size{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.date{white-space:nowrap;color:#586069}
 img{max-width:100%}
 </style>"""
 
@@ -213,6 +216,17 @@ def _read_width_config():
         return '800px'
 
 
+def _human_size(b):
+    """Return human-readable file size (e.g. 1.2 M, 34 K, 512 B)."""
+    if b < 1024:
+        return f'{b} B'
+    for unit in ('K', 'M', 'G', 'T'):
+        b /= 1024
+        if b < 1024:
+            return f'{b:.1f} {unit}'
+    return f'{b:.1f} T'
+
+
 def _code_page(title, content, width):
     """Wrap pre-formatted text in a styled HTML page (used for JSON and YAML)."""
     css = CSS.replace('CONTENT_WIDTH', width)
@@ -225,6 +239,76 @@ def _code_page(title, content, width):
 
 
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
+    def list_directory(self, path):
+        """Override directory listing with a sortable ls -l style table."""
+        try:
+            entries = list(os.scandir(path))
+        except PermissionError:
+            self.send_error(403, 'Permission denied')
+            return None
+
+        # Directories first, then files; each group sorted case-insensitively
+        entries.sort(key=lambda e: (not e.is_dir(), e.name.lower()))
+
+        width = _read_width_config()
+        css = CSS.replace('CONTENT_WIDTH', width)
+        display_path = html_module.escape(self.path)
+
+        rows = []
+        if self.path != '/':
+            rows.append(
+                '<tr>'
+                '<td><a href="../">../</a></td>'
+                '<td class="size">—</td>'
+                '<td class="date">—</td>'
+                '</tr>'
+            )
+
+        for entry in entries:
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            is_dir = entry.is_dir()
+            name = html_module.escape(entry.name)
+            href = name + ('/' if is_dir else '')
+            label = name + ('/' if is_dir else '')
+            size = '—' if is_dir else _human_size(stat.st_size)
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+            rows.append(
+                f'<tr>'
+                f'<td><a href="{href}">{label}</a></td>'
+                f'<td class="size">{size}</td>'
+                f'<td class="date">{mtime}</td>'
+                f'</tr>'
+            )
+
+        table = (
+            '<table>'
+            '<thead><tr>'
+            '<th>Name</th>'
+            '<th style="text-align:right">Size</th>'
+            '<th>Modified</th>'
+            '</tr></thead>'
+            '<tbody>' + ''.join(rows) + '</tbody>'
+            '</table>'
+        )
+
+        page = (
+            f'<!DOCTYPE html><html><head>'
+            f'<meta charset="utf-8"><title>Index of {display_path}</title>'
+            f'{css}</head><body>'
+            f'<h2>Index of {display_path}</h2>'
+            f'{table}'
+            f'</body></html>'
+        ).encode('utf-8')
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(page)))
+        self.end_headers()
+        return io.BytesIO(page)
+
     def send_head(self):
         width = _read_width_config()
         path = self.translate_path(self.path)
