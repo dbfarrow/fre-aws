@@ -148,7 +148,7 @@ echo "Autoshutdown timer enabled."
 mkdir -p /home/developer/www /home/developer/uploads
 chown developer:developer /home/developer/www /home/developer/uploads
 
-pip3 install --quiet markdown
+python3 -m pip install --quiet markdown
 
 cat > /usr/local/bin/fre-web-preview << 'PREVIEW_SERVER'
 #!/usr/bin/env python3

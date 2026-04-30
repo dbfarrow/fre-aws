@@ -169,7 +169,7 @@ ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
 
 echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
-  "sudo pip3 install --quiet markdown && echo '  python-markdown installed'"
+  "sudo python3 -m pip install --quiet markdown && echo '  python-markdown installed'"
 
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo tee /usr/local/bin/fre-web-preview > /dev/null && sudo chmod +x /usr/local/bin/fre-web-preview" \
