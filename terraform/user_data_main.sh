@@ -167,9 +167,10 @@ python3 -m pip install --quiet markdown
 
 cat > /usr/local/bin/fre-web-preview << 'PREVIEW_SERVER'
 #!/usr/bin/env python3
-"""fre-web-preview — markdown-rendering HTTP server for Claude Code output preview."""
+"""fre-web-preview — markdown, JSON, and YAML rendering HTTP server for Claude Code output preview."""
 import http.server
 import io
+import json
 import os
 import html as html_module
 
@@ -186,7 +187,7 @@ body{max-width:CONTENT_WIDTH;margin:40px auto;padding:0 20px;
      line-height:1.6;color:#24292e}
 pre{background:#f6f8fa;padding:16px;border-radius:6px;overflow-x:auto}
 code{background:#f6f8fa;padding:2px 4px;border-radius:3px;font-size:90%}
-pre code{background:none;padding:0}
+pre code{background:none;padding:0;font-size:87%}
 a{color:#0366d6}
 h1,h2,h3{border-bottom:1px solid #eaecef;padding-bottom:.3em}
 blockquote{border-left:4px solid #dfe2e5;margin:0;padding:0 16px;color:#6a737d}
@@ -212,10 +213,23 @@ def _read_width_config():
         return '800px'
 
 
+def _code_page(title, content, width):
+    """Wrap pre-formatted text in a styled HTML page (used for JSON and YAML)."""
+    css = CSS.replace('CONTENT_WIDTH', width)
+    body = f'<pre><code>{html_module.escape(content)}</code></pre>'
+    return (
+        f'<!DOCTYPE html><html><head>'
+        f'<meta charset="utf-8"><title>{html_module.escape(title)}</title>'
+        f'{css}</head><body>{body}</body></html>'
+    ).encode('utf-8')
+
+
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
     def send_head(self):
         width = _read_width_config()
         path = self.translate_path(self.path)
+
+        # Markdown — rendered to HTML
         if HAS_MARKDOWN and os.path.isfile(path) and path.endswith('.md'):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -240,6 +254,37 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
                 return io.BytesIO(encoded)
             except Exception:
                 pass  # fall through to default handler
+
+        # JSON — parsed and pretty-printed (stdlib json, no extra packages needed)
+        if os.path.isfile(path) and path.endswith('.json'):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                pretty = json.dumps(data, indent=2, ensure_ascii=False)
+                encoded = _code_page(os.path.basename(path), pretty, width)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(encoded)))
+                self.end_headers()
+                return io.BytesIO(encoded)
+            except Exception:
+                pass  # fall through to default handler (invalid JSON served raw)
+
+        # YAML — displayed as-is in a styled code block (raw YAML is already readable;
+        # re-serializing with pyyaml would change formatting in unexpected ways)
+        if os.path.isfile(path) and path.endswith(('.yaml', '.yml')):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    source = f.read()
+                encoded = _code_page(os.path.basename(path), source, width)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(encoded)))
+                self.end_headers()
+                return io.BytesIO(encoded)
+            except Exception:
+                pass  # fall through to default handler
+
         return super().send_head()
 
     def log_message(self, fmt, *args):
