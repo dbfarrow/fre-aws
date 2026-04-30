@@ -4,7 +4,21 @@ echo "Region: ${REGION}  Project: ${PROJECT_NAME}  User: ${DEV_USERNAME}"
 # System updates and tools
 # ---------------------------------------------------------------------------
 dnf update -y
-dnf install -y git tmux vim htop openssh-server rsync fzf
+dnf install -y git tmux vim htop openssh-server rsync
+
+# ---------------------------------------------------------------------------
+# fzf — fuzzy finder for session_start.sh repo/clone selection
+# Not in AL2023 dnf repos; install latest binary from GitHub releases
+# ---------------------------------------------------------------------------
+_FZF_ARCH=$(uname -m)
+[[ "${_FZF_ARCH}" == "aarch64" ]] && _FZF_ARCH="arm64" || _FZF_ARCH="amd64"
+_FZF_VER=$(curl -sf https://api.github.com/repos/junegunn/fzf/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))" 2>/dev/null || true)
+if [[ -n "${_FZF_VER}" ]]; then
+  curl -sL "https://github.com/junegunn/fzf/releases/download/v${_FZF_VER}/fzf-${_FZF_VER}-linux_${_FZF_ARCH}.tar.gz" | tar -xz -C /usr/local/bin fzf
+  echo "fzf ${_FZF_VER} installed."
+else
+  echo "WARNING: Could not fetch fzf release info — skipping fzf install. Repo picker will fall back to numbered list."
+fi
 
 # ---------------------------------------------------------------------------
 # GitHub CLI (gh) — used for authenticated repo browsing and cloning
