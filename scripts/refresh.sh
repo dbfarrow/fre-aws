@@ -167,6 +167,10 @@ echo "--- ensuring rsync is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo dnf install -y rsync -q && echo '  rsync ready'"
 
+echo "--- ensuring fzf is installed on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
+ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
+  "sudo dnf install -y -q fzf && echo '  fzf ready'"
+
 echo "--- installing web-preview service on ${INSTANCE_ID} (${DEV_USERNAME}) ---"
 ssh "${SSH_OPTS[@]}" developer@"${INSTANCE_ID}" \
   "sudo dnf install -y -q python3-pip && sudo python3 -m pip install --quiet markdown && echo '  python-markdown installed'"

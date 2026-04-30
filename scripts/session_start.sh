@@ -114,55 +114,6 @@ echo "╚═══════════════════════�
 echo ""
 
 # ---------------------------------------------------------------------------
-# Build menu from locally-cloned repos
-# ---------------------------------------------------------------------------
-OPTIONS=()
-IDX=1
-
-echo "  Projects"
-while IFS= read -r -d '' dir; do
-  REPO_NAME=$(basename "${dir}")
-  printf "   %d) %s\n" "${IDX}" "${REPO_NAME}"
-  OPTIONS+=("${dir}")
-  (( IDX++ ))
-done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
-           -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
-
-if [[ ${#OPTIONS[@]} -eq 0 ]]; then
-  echo "   (none)"
-fi
-
-echo ""
-echo "  Actions"
-echo "   c) Clone a GitHub repo"
-echo "   n) New project"
-echo "   s) Shell"
-if [[ -n "${_LITELLM_URL}" ]]; then
-  if [[ -z "${_LITELLM_KEY}" ]]; then
-    echo ""
-    echo "  No LiteLLM API key found."
-  fi
-  if [[ -n "${_LITELLM_KEY}" ]]; then
-    echo "   k) Update LiteLLM API key"
-  else
-    echo "   k) Set LiteLLM API key"
-  fi
-fi
-echo ""
-echo "   q) Quit"
-echo ""
-
-# Default: first repo if any exist, otherwise clone
-if [[ ${#OPTIONS[@]} -gt 0 ]]; then
-  DEFAULT="1"
-else
-  DEFAULT="c"
-fi
-
-read -r -p "Choose [${DEFAULT}]: " CHOICE
-CHOICE="${CHOICE:-${DEFAULT}}"
-
-# ---------------------------------------------------------------------------
 # Helper: launch Claude in a named tmux session for the given directory.
 # Reattaches if a session with that name already exists.
 # ---------------------------------------------------------------------------
@@ -183,6 +134,74 @@ launch_in_repo() {
     exec tmux new-session -s "${name}" 'claude --continue 2>/dev/null || claude; exec bash'
   fi
 }
+
+# ---------------------------------------------------------------------------
+# Build menu from locally-cloned repos
+# ---------------------------------------------------------------------------
+OPTIONS=()
+
+while IFS= read -r -d '' dir; do
+  OPTIONS+=("${dir}")
+done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prune -o \
+           -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
+
+CHOICE=""
+
+# fzf repo picker — only when fzf is available and repos exist
+if command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  SELECTED=$(printf '%s\n' "${OPTIONS[@]}" | xargs -I{} basename {} | \
+    fzf --prompt="▸ " \
+        --header="type to filter · ↑↓ navigate · Enter to open · Esc for actions" \
+        --height=~40% \
+        --layout=reverse \
+        --border=rounded \
+        --no-info 2>/dev/null) || true
+  if [[ -n "${SELECTED}" ]]; then
+    launch_in_repo "${REPOS_DIR}/${SELECTED}"
+  fi
+  echo ""
+fi
+
+# Fallback numbered list (only if fzf not available)
+if ! command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  echo "  Projects"
+  IDX=1
+  for dir in "${OPTIONS[@]}"; do
+    printf "   %d) %s\n" "${IDX}" "$(basename "${dir}")"
+    (( IDX++ ))
+  done
+  echo ""
+fi
+
+[[ ${#OPTIONS[@]} -eq 0 ]] && echo "  No projects yet." && echo ""
+
+echo "  Actions"
+echo "   c) Clone a GitHub repo"
+echo "   n) New project"
+echo "   s) Shell"
+if [[ -n "${_LITELLM_URL}" ]]; then
+  if [[ -z "${_LITELLM_KEY}" ]]; then
+    echo ""
+    echo "  No LiteLLM API key found."
+  fi
+  if [[ -n "${_LITELLM_KEY}" ]]; then
+    echo "   k) Update LiteLLM API key"
+  else
+    echo "   k) Set LiteLLM API key"
+  fi
+fi
+echo "   q) Quit"
+echo ""
+
+# Default: fzf was shown (repos exist) → default c; no fzf → first repo; no repos → c
+if ! command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  DEFAULT="1"
+else
+  DEFAULT="c"
+fi
+
+read -r -p "Choose [${DEFAULT}]: " CHOICE
+CHOICE="${CHOICE:-${DEFAULT}}"
 
 # ---------------------------------------------------------------------------
 # Shell option
@@ -258,7 +277,19 @@ if [[ "${CHOICE}" == "c" ]]; then
   if [[ -z "${REPO_LIST}" ]]; then
     # Fallback: manual entry
     read -r -p "GitHub repo (owner/repo): " REPO_SLUG
+  elif command -v fzf &>/dev/null; then
+    REPO_SLUG=$(echo "${REPO_LIST}" | \
+      fzf --prompt="repo ▸ " \
+          --header="type to filter · ↑↓ navigate · Enter to clone · Esc to enter manually" \
+          --height=~50% \
+          --layout=reverse \
+          --border=rounded \
+          --no-info 2>/dev/null) || true
+    if [[ -z "${REPO_SLUG}" ]]; then
+      read -r -p "GitHub repo (owner/repo): " REPO_SLUG
+    fi
   else
+    # fzf not available — numbered list fallback
     REPO_OPTIONS=()
     RIDX=1
     echo ""
