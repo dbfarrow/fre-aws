@@ -147,22 +147,7 @@ done < <(find "${REPOS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*.git" -prun
 
 CHOICE=""
 
-# fzf repo picker — only when fzf is available and repos exist
-if command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
-  SELECTED=$(printf '%s\n' "${OPTIONS[@]}" | xargs -I{} basename {} | \
-    fzf --prompt="▸ " \
-        --header="type to filter · ↑↓ navigate · Enter to open · Esc for actions" \
-        --height=~40% \
-        --layout=reverse \
-        --border=rounded \
-        --no-info 2>/dev/null) || true
-  if [[ -n "${SELECTED}" ]]; then
-    launch_in_repo "${REPOS_DIR}/${SELECTED}"
-  fi
-  echo ""
-fi
-
-# Fallback numbered list (only if fzf not available)
+# Without fzf: show the numbered list so users can pick by number directly
 if ! command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
   echo "  Projects"
   IDX=1
@@ -176,6 +161,9 @@ fi
 [[ ${#OPTIONS[@]} -eq 0 ]] && echo "  No projects yet." && echo ""
 
 echo "  Actions"
+if command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  echo "   r) Open a repo"
+fi
 echo "   c) Clone a GitHub repo"
 echo "   n) New project"
 echo "   s) Shell"
@@ -193,8 +181,10 @@ fi
 echo "   q) Quit"
 echo ""
 
-# Default: fzf was shown (repos exist) → default c; no fzf → first repo; no repos → c
-if ! command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+# Default: repos + fzf → r; repos + no fzf → 1; no repos → c
+if command -v fzf &>/dev/null && [[ ${#OPTIONS[@]} -gt 0 ]]; then
+  DEFAULT="r"
+elif [[ ${#OPTIONS[@]} -gt 0 ]]; then
   DEFAULT="1"
 else
   DEFAULT="c"
@@ -218,6 +208,21 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${CHOICE}" == "q" ]]; then
   exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Open a repo with fzf fuzzy search
+# ---------------------------------------------------------------------------
+if [[ "${CHOICE}" == "r" ]]; then
+  SELECTED=$(printf '%s\n' "${OPTIONS[@]}" | xargs -I{} basename {} | \
+    fzf --prompt="▸ " \
+        --header="type to filter · ↑↓ navigate · Enter to open · Esc to cancel" \
+        --height=~40% \
+        --layout=reverse \
+        --border=rounded \
+        --no-info 2>/dev/null) || true
+  [[ -n "${SELECTED}" ]] && launch_in_repo "${REPOS_DIR}/${SELECTED}"
+  exec /home/developer/session_start.sh
 fi
 
 # ---------------------------------------------------------------------------
