@@ -198,6 +198,17 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${MODE}" == "admin" ]]; then
   USERNAME="${2:-}"
+  # Parse --port PORT flags from args after the username (repeatable; used by connect)
+  EXTRA_FORWARD_PORTS=()
+  _scan=3
+  while [[ ${_scan} -le $# ]]; do
+    if [[ "${!_scan}" == "--port" ]]; then
+      _next=$((_scan + 1))
+      [[ ${_next} -le $# ]] && EXTRA_FORWARD_PORTS+=("${!_next}")
+    fi
+    _scan=$((_scan + 1))
+  done
+  unset _scan _next
   AWS_PROFILE="claude-code"
 
   if [[ -f "$(pwd)/config/admin.env" ]]; then
@@ -298,6 +309,20 @@ fi
 if [[ "${MODE}" == "user" ]]; then
   USER_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   CONFIG_ARG="${2:-}"
+
+  # Parse --port PORT flags from all args after the command (repeatable; used by connect)
+  EXTRA_FORWARD_PORTS=()
+  _scan=2
+  while [[ ${_scan} -le $# ]]; do
+    if [[ "${!_scan}" == "--port" ]]; then
+      _next=$((_scan + 1))
+      [[ ${_next} -le $# ]] && EXTRA_FORWARD_PORTS+=("${!_next}")
+    fi
+    _scan=$((_scan + 1))
+  done
+  unset _scan _next
+  # --port is a connect flag, not a config path
+  [[ "${CONFIG_ARG}" == "--port" ]] && CONFIG_ARG=""
 
   # Detect --fresh flag before treating CONFIG_ARG as a file path
   FRESH_CREDS=false
@@ -645,13 +670,20 @@ if [[ "${MODE}" == "admin" ]]; then
           echo ""
         fi
       fi
+      _EXTRA_PORT_ARGS=()
+      for _p in "${EXTRA_FORWARD_PORTS[@]+"${EXTRA_FORWARD_PORTS[@]}"}"; do
+        _EXTRA_PORT_ARGS+=("--publish" "${_p}:${_p}")
+      done
+      _EXTRA_PORTS_ENV="${EXTRA_FORWARD_PORTS[*]+"${EXTRA_FORWARD_PORTS[*]}"}"
       if [[ -n "${AGENT_SOCK}" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
         docker run "${DOCKER_ARGS[@]}" \
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
+          "${_EXTRA_PORT_ARGS[@]}" \
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
+          --env "EXTRA_FORWARD_PORTS=${_EXTRA_PORTS_ENV}" \
           "${_CONNECT_PROFILE_ARG[@]}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       else
@@ -666,8 +698,10 @@ if [[ "${MODE}" == "admin" ]]; then
         CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
         docker run "${DOCKER_ARGS[@]}" \
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
+          "${_EXTRA_PORT_ARGS[@]}" \
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
+          --env "EXTRA_FORWARD_PORTS=${_EXTRA_PORTS_ENV}" \
           "${_CONNECT_PROFILE_ARG[@]}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
@@ -826,6 +860,10 @@ if [[ "${MODE}" == "user" ]]; then
       [[ -n "${GIT_USER_NAME:-}"  ]] && CONNECT_ARGS+=("--env" "GIT_USER_NAME=${GIT_USER_NAME}")
       [[ -n "${GIT_USER_EMAIL:-}" ]] && CONNECT_ARGS+=("--env" "GIT_USER_EMAIL=${GIT_USER_EMAIL}")
       CONNECT_ARGS+=("--publish" "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}")
+      for _p in "${EXTRA_FORWARD_PORTS[@]+"${EXTRA_FORWARD_PORTS[@]}"}"; do
+        CONNECT_ARGS+=("--publish" "${_p}:${_p}")
+      done
+      CONNECT_ARGS+=("--env" "EXTRA_FORWARD_PORTS=${EXTRA_FORWARD_PORTS[*]+"${EXTRA_FORWARD_PORTS[*]}"}")
       _stale_push_check "${MY_USERNAME}" "${USER_SCRIPT_DIR}/config"
       if [[ "${_DO_PUSH}" == true ]]; then
         _PUSH_CFG_ARGS=()
