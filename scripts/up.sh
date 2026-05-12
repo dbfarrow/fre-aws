@@ -115,6 +115,8 @@ if _CANONICAL=$(aws --region "${TF_BACKEND_REGION}" \
   _chk "web_app_url"                   "${WEB_APP_URL:-}"
   _chk "app_domain"                    "${APP_DOMAIN:-}"
   _chk "route53_zone_id"               "${ROUTE53_ZONE_ID:-}"
+  _chk "enable_slack_bot"              "${ENABLE_SLACK_BOT:-false}"
+  _chk "slack_command_name"            "${SLACK_COMMAND_NAME:-fre}"
   if [[ "${_drift}" == "true" ]]; then
     echo ""
     echo "  Your admin.env differs from the canonical settings stored in S3."
@@ -260,6 +262,10 @@ terraform -chdir="${TF_BASE_DIR}" plan \
   -var="enable_web_app=${ENABLE_WEB_APP:-false}" \
   -var="app_domain=${APP_DOMAIN:-}" \
   -var="route53_zone_id=${ROUTE53_ZONE_ID:-}" \
+  -var="enable_slack_bot=${ENABLE_SLACK_BOT:-false}" \
+  -var="slack_command_name=${SLACK_COMMAND_NAME:-fre}" \
+  -var="tf_backend_bucket=${TF_BACKEND_BUCKET}" \
+  -var="tf_backend_region=${TF_BACKEND_REGION}" \
   -out="${TF_BASE_DIR}/.tfplan_base"
 echo ""
 

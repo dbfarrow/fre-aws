@@ -418,6 +418,8 @@ _settings_row "web_app_url"                   "${WEB_APP_URL:-}"
 _settings_row "app_domain"                    "${APP_DOMAIN:-}"
 _settings_row "route53_zone_id"               "${ROUTE53_ZONE_ID:-}"
 _settings_row "bucket_policy_principal_arn"   "${BUCKET_POLICY_PRINCIPAL_ARN:-}"
+_settings_row "enable_slack_bot"              "${ENABLE_SLACK_BOT:-false}"
+_settings_row "slack_command_name"            "${SLACK_COMMAND_NAME:-fre}"
 unset -f _settings_row
 printf "  %-24s %-36s %s\n" "LiteLLM gateway" \
   "${LITELLM_BASE_URL:-(not configured)}" \
@@ -633,6 +635,29 @@ if [[ -n "${LITELLM_BASE_URL:-}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Slack signing secret (optional) — write to Secrets Manager
+# ---------------------------------------------------------------------------
+if [[ "${ENABLE_SLACK_BOT:-false}" == "true" && -n "${SLACK_SIGNING_SECRET:-}" ]]; then
+  echo "Slack signing secret..."
+  SECRET_NAME="${PROJECT_NAME}/slack/signing-secret"
+  if aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" \
+      secretsmanager describe-secret --secret-id "${SECRET_NAME}" &>/dev/null; then
+    aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" \
+      secretsmanager put-secret-value \
+      --secret-id "${SECRET_NAME}" --secret-string "${SLACK_SIGNING_SECRET}" >/dev/null
+    echo "  Slack signing secret updated (${SECRET_NAME})"
+  else
+    aws --region "${AWS_REGION}" "${PROFILE_ARGS[@]}" \
+      secretsmanager create-secret \
+      --name "${SECRET_NAME}" \
+      --description "Slack signing secret for ${PROJECT_NAME} slash command bot" \
+      --secret-string "${SLACK_SIGNING_SECRET}" >/dev/null
+    echo "  Slack signing secret created (${SECRET_NAME})"
+  fi
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
 # Canonical settings — always overwrite so second admins get current values
 # ---------------------------------------------------------------------------
 echo "Canonical settings..."
@@ -663,6 +688,8 @@ jq -n \
   --arg app_domain                     "${APP_DOMAIN:-}" \
   --arg route53_zone_id                "${ROUTE53_ZONE_ID:-}" \
   --arg bucket_policy_principal_arn    "${BUCKET_POLICY_PRINCIPAL_ARN:-}" \
+  --arg enable_slack_bot               "${ENABLE_SLACK_BOT:-false}" \
+  --arg slack_command_name             "${SLACK_COMMAND_NAME:-fre}" \
   '$ARGS.named' \
   | $AWS s3 cp - "s3://${BUCKET_NAME}/${SETTINGS_KEY}" >/dev/null
 unset _CORP_CA_REQUIRED
