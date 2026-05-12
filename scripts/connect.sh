@@ -180,7 +180,7 @@ SSH_OPTS+=("-L" "0.0.0.0:${WEB_PREVIEW_PORT:-8080}:localhost:8080")
 
 # Forward any additional ports requested by the caller (e.g. OAuth callback receivers)
 for _port in ${EXTRA_FORWARD_PORTS:-}; do
-  SSH_OPTS+=("-L" "${_port}:localhost:${_port}")
+  SSH_OPTS+=("-L" "0.0.0.0:${_port}:localhost:${_port}")
 done
 unset _port
 
