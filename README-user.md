@@ -161,7 +161,9 @@ Choose [1]:
 
 ```bash
 ~/fre-aws/user.sh sso-login  # log in to AWS (once per day, when your session expires)
-~/fre-aws/user.sh connect    # connect to your instance (offers to start it if stopped)
+~/fre-aws/user.sh connect              # connect to your instance (offers to start it if stopped)
+~/fre-aws/user.sh connect --port PORT  # also forward PORT from EC2 to your Mac (repeatable)
+                                       # useful for OAuth callbacks or local web servers on EC2
 ~/fre-aws/user.sh stop       # stop your instance manually (optional — see below)
 ```
 

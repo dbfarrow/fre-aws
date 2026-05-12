@@ -915,6 +915,9 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
                                         # stopped instances: prompts to start before connecting
                                         # pending instances: waits for running state automatically
                                         # stale dotfiles: prompts to push if MY_USERNAME matches
+./admin.sh connect     <username> --port PORT  # forward an extra port from EC2 to Mac (repeatable)
+                                        # use case: OAuth callback receivers, local web servers
+                                        # example: ./admin.sh connect dave --port 8081 --port 3000
 ./admin.sh refresh     <username>       # push system config (session_start.sh, autoshutdown, profile guard)
 ./admin.sh push-config <username>       # push personal dotfiles (~/.tmux.conf, ~/.bashrc, ~/.zshrc, ~/.vimrc, ~/.fre-aws)
 ./admin.sh ssm         <username>       # direct SSM shell (fallback when SSH isn't working)
