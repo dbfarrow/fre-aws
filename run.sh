@@ -77,7 +77,8 @@ infrastructure:
                         Run this after the super-admin has bootstrapped the project.
                         --fix-drift  Apply canonical values back to local admin.env
                                      (shows a diff and prompts for confirmation first).
-  up [user]             Create / update base infrastructure + all users (or just one user)
+  up [--base-only] [user]  Create / update base infrastructure + all users (or just one user);
+                        --base-only skips per-user instances
   down <user>           Destroy one user's instance (base infrastructure preserved)
   down --all            Destroy all users + base infrastructure (full teardown)
   repair-state [--dry-run] [user]
@@ -529,7 +530,7 @@ if [[ "${MODE}" == "admin" ]]; then
       docker run "${DOCKER_ARGS[@]}" \
         --env "BOOTSTRAP_PROFILE_OVERRIDE=${BOOTSTRAP_PROFILE}" \
         --env "BOOTSTRAP_REGION_OVERRIDE=${BOOTSTRAP_REGION}" \
-        "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]}"
+        "${IMAGE_NAME}" /workspace/scripts/bootstrap.sh "${BOOTSTRAP_ARGS[@]+"${BOOTSTRAP_ARGS[@]}"}"
       ;;
     configure)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/configure.sh "${@:2}"

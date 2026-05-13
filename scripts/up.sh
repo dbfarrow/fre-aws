@@ -4,8 +4,9 @@
 # Phase 1: Apply base module (VPC, KMS, security groups, billing, web app).
 # Phase 2: For each user (or the single target user), apply the user module.
 #
-# Usage: up.sh [username]
-#   No username: provision base + all registered users.
+# Usage: up.sh [--base-only] [username]
+#   No args:       provision base + all registered users.
+#   --base-only:   provision base only; skip per-user instances.
 #   With username: provision base (fast no-op if converged) + that user only.
 set -euo pipefail
 
@@ -38,7 +39,13 @@ source "${SCRIPT_DIR}/users-s3.sh"
 : "${PROJECT_NAME:?}" "${AWS_REGION:?}"
 : "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
-TARGET_USER="${1:-}"
+BASE_ONLY=false
+if [[ "${1:-}" == "--base-only" ]]; then
+  BASE_ONLY=true
+  TARGET_USER=""
+else
+  TARGET_USER="${1:-}"
+fi
 BASE_KEY="${PROJECT_NAME}/base/terraform.tfstate"
 
 # ---------------------------------------------------------------------------
@@ -297,6 +304,12 @@ fi
 # ---------------------------------------------------------------------------
 # Phase 2: Per-user EC2 instances
 # ---------------------------------------------------------------------------
+if [[ "${BASE_ONLY}" == "true" ]]; then
+  echo "=== Base infrastructure ready ==="
+  echo "${BASE_OUTPUTS}" | jq -r '"  Network mode:    \(.network_mode.value)", "", .billing_alerts.value'
+  exit 0
+fi
+
 if [[ ${#APPLY_USERS[@]} -eq 0 ]]; then
   echo "No users registered. Run './admin.sh add-user' first."
   echo ""
