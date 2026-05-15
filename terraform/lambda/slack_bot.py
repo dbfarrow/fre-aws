@@ -42,6 +42,7 @@ _ec2_client = None
 _lambda_client = None
 _sm_client = None
 _s3_client = None
+_signing_secret = None
 
 
 def _ec2():
@@ -126,11 +127,14 @@ def _verify_slack_signature(event: dict, secret: bytes) -> bool:
 
 
 def _get_signing_secret() -> bytes:
-    """Read Slack signing secret from Secrets Manager (not cached)."""
-    project = os.environ["PROJECT_NAME"]
-    secret_id = f"{project}/slack/signing-secret"
-    value = _sm().get_secret_value(SecretId=secret_id)["SecretString"]
-    return value.encode()
+    """Read Slack signing secret from Secrets Manager (cached per container)."""
+    global _signing_secret
+    if _signing_secret is None:
+        project = os.environ["PROJECT_NAME"]
+        secret_id = f"{project}/slack/signing-secret"
+        value = _sm().get_secret_value(SecretId=secret_id)["SecretString"]
+        _signing_secret = value.encode()
+    return _signing_secret
 
 
 def _get_user_registry() -> dict:
