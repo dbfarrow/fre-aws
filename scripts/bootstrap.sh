@@ -119,6 +119,10 @@ echo "  Account ID: ${ACCOUNT_ID}"
 echo ""
 
 BUCKET_NAME="${PROJECT_NAME}-${ACCOUNT_ID}-tfstate"
+# Honor an existing TF_BACKEND_BUCKET in admin.env — allows environments where the
+# state bucket was created with a different name to keep using it without migration.
+[[ -n "${TF_BACKEND_BUCKET:-}" && "${TF_BACKEND_BUCKET}" != "${BUCKET_NAME}" ]] && \
+  BUCKET_NAME="${TF_BACKEND_BUCKET}"
 echo "  Bucket:   ${BUCKET_NAME}"
 echo ""
 
