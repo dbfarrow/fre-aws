@@ -3,7 +3,7 @@ slack_bot.py — Slack slash command bot for EC2 lifecycle management.
 
 Entry points:
   handle_command(event, context)  — sync handler for Slack slash command (POST /slack)
-  handle_notify(event, context)   — async notifier (waits for EC2 state change, POSTs result)
+  handle_notify(event, context)   — async worker: auth + command execution + Slack notification
 
 Commands (via /fre <subcommand>):
   list            — list all project EC2 instances with state
@@ -13,17 +13,26 @@ Commands (via /fre <subcommand>):
 Auth: caller's Slack user_id is looked up in the S3 user registry (users.json).
       Only users with role=="admin" are authorised.
 
+Architecture:
+  handle_command  — verify HMAC-SHA256 → parse body → invoke handle_notify async → return 200 ack
+  handle_notify   — auth check (S3) → EC2 command → POST result to response_url
+
+  The signing secret is loaded eagerly at module init so the Secrets Manager
+  latency is absorbed by the Lambda Init phase rather than counting against
+  Slack's 3-second response deadline.
+
 Environment variables (handle_command):
   PROJECT_NAME          — used to filter EC2 instances by ProjectName tag
   SLACK_COMMAND_NAME    — slash command name shown in usage text (e.g. "fre")
+  NOTIFIER_FUNCTION_NAME — Lambda function name to invoke for async work
+
+Environment variables (handle_notify):
+  PROJECT_NAME          — used to find EC2 instances
   TF_BACKEND_BUCKET     — S3 bucket containing the user registry
   TF_BACKEND_REGION     — AWS region of the S3 bucket (may differ from Lambda region)
-  NOTIFIER_FUNCTION_NAME — Lambda function name to invoke for async notifications
-
-Environment variables (handle_notify — shares PROJECT_NAME):
-  PROJECT_NAME          — used to find the EC2 instance
 """
 
+import base64
 import hashlib
 import hmac
 import json
@@ -40,9 +49,7 @@ from botocore.exceptions import WaiterError
 # ---------------------------------------------------------------------------
 _ec2_client = None
 _lambda_client = None
-_sm_client = None
 _s3_client = None
-_signing_secret = None
 
 
 def _ec2():
@@ -59,13 +66,6 @@ def _lam():
     return _lambda_client
 
 
-def _sm():
-    global _sm_client
-    if _sm_client is None:
-        _sm_client = boto3.client("secretsmanager")
-    return _sm_client
-
-
 def _s3(region: str):
     """S3 client targeting the backend region (may differ from Lambda region)."""
     global _s3_client
@@ -75,8 +75,39 @@ def _s3(region: str):
 
 
 # ---------------------------------------------------------------------------
+# Signing secret — loaded eagerly at module init so the Secrets Manager
+# latency is absorbed during the Lambda Init phase, before Slack's 3-second
+# response clock starts.
+# ---------------------------------------------------------------------------
+
+def _load_signing_secret() -> bytes | None:
+    """Read Slack signing secret from Secrets Manager at module load time."""
+    try:
+        project = os.environ.get("PROJECT_NAME", "")
+        if not project:
+            return None
+        return boto3.client("secretsmanager").get_secret_value(
+            SecretId=f"{project}/slack/signing-secret"
+        )["SecretString"].encode()
+    except Exception as exc:
+        print(f"ERROR: module init: could not load signing secret: {exc}")
+        return None
+
+
+_signing_secret: bytes | None = _load_signing_secret()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _decode_body(event: dict) -> str:
+    """Return the request body, base64-decoding it when API Gateway sets isBase64Encoded=True."""
+    body = event.get("body", "") or ""
+    if event.get("isBase64Encoded", False) and body:
+        body = base64.b64decode(body).decode("utf-8")
+    return body
+
 
 def _ephemeral(text: str) -> dict:
     """Return an ephemeral Slack response (visible only to the caller)."""
@@ -109,7 +140,7 @@ def _verify_slack_signature(event: dict, secret: bytes) -> bool:
     # API Gateway v2 lowercases header names
     timestamp = headers.get("x-slack-request-timestamp", "")
     sig_header = headers.get("x-slack-signature", "")
-    raw_body = event.get("body", "") or ""
+    raw_body = _decode_body(event)
 
     if not timestamp or not sig_header:
         return False
@@ -124,17 +155,6 @@ def _verify_slack_signature(event: dict, secret: bytes) -> bool:
     base = f"v0:{timestamp}:{raw_body}"
     expected = "v0=" + hmac.new(secret, base.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, sig_header)
-
-
-def _get_signing_secret() -> bytes:
-    """Read Slack signing secret from Secrets Manager (cached per container)."""
-    global _signing_secret
-    if _signing_secret is None:
-        project = os.environ["PROJECT_NAME"]
-        secret_id = f"{project}/slack/signing-secret"
-        value = _sm().get_secret_value(SecretId=secret_id)["SecretString"]
-        _signing_secret = value.encode()
-    return _signing_secret
 
 
 def _get_user_registry() -> dict:
@@ -197,7 +217,7 @@ def _find_instance_for_user(username: str):
 
 
 # ---------------------------------------------------------------------------
-# Command handlers
+# Command formatting
 # ---------------------------------------------------------------------------
 
 _STATE_ICON = {
@@ -221,55 +241,6 @@ def _cmd_list() -> str:
     return "\n".join(lines)
 
 
-def _cmd_start(target_user: str, response_url: str) -> str:
-    instance_id, state = _find_instance_for_user(target_user)
-    if not instance_id:
-        return f"No instance found for user *{target_user}*."
-    if state != "stopped":
-        return f"*{target_user}*'s instance is *{state}* — can only start a stopped instance."
-
-    _ec2().start_instances(InstanceIds=[instance_id])
-
-    # Fire-and-forget async notifier
-    notifier = os.environ["NOTIFIER_FUNCTION_NAME"]
-    payload = json.dumps({
-        "action": "start",
-        "username": target_user,
-        "instance_id": instance_id,
-        "response_url": response_url,
-    })
-    _lam().invoke(
-        FunctionName=notifier,
-        InvocationType="Event",
-        Payload=payload.encode(),
-    )
-    return f"Starting *{target_user}*'s instance (`{instance_id}`)… I'll let you know when it's up."
-
-
-def _cmd_stop(target_user: str, response_url: str) -> str:
-    instance_id, state = _find_instance_for_user(target_user)
-    if not instance_id:
-        return f"No instance found for user *{target_user}*."
-    if state != "running":
-        return f"*{target_user}*'s instance is *{state}* — can only stop a running instance."
-
-    _ec2().stop_instances(InstanceIds=[instance_id])
-
-    notifier = os.environ["NOTIFIER_FUNCTION_NAME"]
-    payload = json.dumps({
-        "action": "stop",
-        "username": target_user,
-        "instance_id": instance_id,
-        "response_url": response_url,
-    })
-    _lam().invoke(
-        FunctionName=notifier,
-        InvocationType="Event",
-        Payload=payload.encode(),
-    )
-    return f"Stopping *{target_user}*'s instance (`{instance_id}`)… I'll let you know when it's stopped."
-
-
 def _usage() -> str:
     cmd = os.environ.get("SLACK_COMMAND_NAME", "fre")
     return (
@@ -286,101 +257,150 @@ def _usage() -> str:
 
 def handle_command(event, context):
     """
-    Sync handler: verify Slack signature → auth → dispatch → return ephemeral reply.
-    Must return within 3 seconds (Slack requirement).
+    Sync handler: verify Slack signature → parse → invoke notifier async → return 200 ack.
+
+    All auth and command execution are delegated to handle_notify so this handler
+    always returns within Slack's 3-second deadline. The signing secret is loaded at
+    module init time so even cold starts complete well under 3 seconds.
     """
-    try:
-        signing_secret = _get_signing_secret()
-    except Exception as exc:
-        print(f"ERROR: could not fetch signing secret: {exc}")
+    if _signing_secret is None:
+        print("ERROR: signing secret not loaded at module init")
         return {"statusCode": 500, "body": "configuration error"}
 
-    if not _verify_slack_signature(event, signing_secret):
+    if not _verify_slack_signature(event, _signing_secret):
         return {"statusCode": 401, "body": "invalid signature"}
 
     # Parse URL-encoded body from Slack
-    raw_body = event.get("body", "") or ""
+    raw_body = _decode_body(event)
     params = dict(urllib.parse.parse_qsl(raw_body))
     slack_user_id = params.get("user_id", "")
     text = params.get("text", "").strip()
     response_url = params.get("response_url", "")
+
+    # Validate subcommand before invoking notifier
+    parts = text.split(None, 1)
+    subcommand = parts[0].lower() if parts else ""
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if subcommand not in ("list", "start", "stop"):
+        return _ephemeral(_usage())
+    if subcommand in ("start", "stop") and not arg:
+        return _ephemeral(_usage())
+
+    # Fire-and-forget: notifier does auth + EC2 work + posts result to Slack
+    notifier = os.environ["NOTIFIER_FUNCTION_NAME"]
+    payload = json.dumps({
+        "slack_user_id": slack_user_id,
+        "subcommand": subcommand,
+        "arg": arg,
+        "response_url": response_url,
+    })
+    _lam().invoke(
+        FunctionName=notifier,
+        InvocationType="Event",
+        Payload=payload.encode(),
+    )
+
+    ack = {
+        "list": "Checking instances...",
+        "start": f"Starting *{arg}*'s instance... I'll let you know when it's up.",
+        "stop": f"Stopping *{arg}*'s instance... I'll let you know when it's stopped.",
+    }
+    return _ephemeral(ack[subcommand])
+
+
+def handle_notify(event, context):
+    """
+    Async worker: auth check → execute command → POST result to Slack response_url.
+    Receives: {slack_user_id, subcommand, arg, response_url}
+    """
+    slack_user_id = event.get("slack_user_id", "")
+    subcommand = event.get("subcommand", "")
+    arg = event.get("arg", "")
+    response_url = event.get("response_url", "")
+
+    if not response_url:
+        print(f"ERROR: missing response_url in event: {event}")
+        return
 
     # Auth check
     try:
         registry = _get_user_registry()
     except Exception as exc:
         print(f"ERROR: could not read user registry: {exc}")
-        return _ephemeral("Internal error — could not read user registry.")
+        _post_to_slack(response_url, "Internal error — could not read user registry.")
+        return
 
     caller = _find_admin_by_slack_id(registry, slack_user_id)
     if not caller:
-        return _ephemeral("You are not authorised to use this command. Ask an admin to add your Slack user ID to the registry.")
-
-    # Dispatch
-    parts = text.split(None, 1)
-    subcommand = parts[0].lower() if parts else ""
-    arg = parts[1].strip() if len(parts) > 1 else ""
-
-    try:
-        if subcommand == "list":
-            msg = _cmd_list()
-        elif subcommand == "start":
-            if not arg:
-                return _ephemeral(_usage())
-            msg = _cmd_start(arg, response_url)
-        elif subcommand == "stop":
-            if not arg:
-                return _ephemeral(_usage())
-            msg = _cmd_stop(arg, response_url)
-        else:
-            return _ephemeral(_usage())
-    except Exception as exc:
-        print(f"ERROR dispatching '{subcommand}': {exc}")
-        return _ephemeral(f"Error: {exc}")
-
-    return _ephemeral(msg)
-
-
-def handle_notify(event, context):
-    """
-    Async notifier: waits for EC2 waiter, then POSTs result to Slack response_url.
-    Receives: {action, username, instance_id, response_url}
-    """
-    action = event.get("action", "")
-    username = event.get("username", "unknown")
-    instance_id = event.get("instance_id", "")
-    response_url = event.get("response_url", "")
-
-    if not instance_id or not response_url:
-        print(f"ERROR: missing instance_id or response_url in event: {event}")
+        _post_to_slack(
+            response_url,
+            "You are not authorised to use this command. Ask an admin to add your Slack user ID to the registry.",
+        )
         return
 
+    # Dispatch
     try:
-        if action == "start":
+        if subcommand == "list":
+            _post_to_slack(response_url, _cmd_list())
+
+        elif subcommand == "start":
+            instance_id, state = _find_instance_for_user(arg)
+            if not instance_id:
+                _post_to_slack(response_url, f"No instance found for user *{arg}*.")
+                return
+            if state != "stopped":
+                _post_to_slack(
+                    response_url,
+                    f"*{arg}*'s instance is *{state}* — can only start a stopped instance.",
+                )
+                return
+            _ec2().start_instances(InstanceIds=[instance_id])
             waiter = _ec2().get_waiter("instance_running")
             waiter.wait(
                 InstanceIds=[instance_id],
                 WaiterConfig={"MaxAttempts": 7, "Delay": 15},
             )
-            _post_to_slack(response_url, f":large_green_circle: *{username}*'s instance is running (`{instance_id}`).")
-        elif action == "stop":
+            _post_to_slack(
+                response_url,
+                f":large_green_circle: *{arg}*'s instance is running (`{instance_id}`).",
+            )
+
+        elif subcommand == "stop":
+            instance_id, state = _find_instance_for_user(arg)
+            if not instance_id:
+                _post_to_slack(response_url, f"No instance found for user *{arg}*.")
+                return
+            if state != "running":
+                _post_to_slack(
+                    response_url,
+                    f"*{arg}*'s instance is *{state}* — can only stop a running instance.",
+                )
+                return
+            _ec2().stop_instances(InstanceIds=[instance_id])
             waiter = _ec2().get_waiter("instance_stopped")
             waiter.wait(
                 InstanceIds=[instance_id],
                 WaiterConfig={"MaxAttempts": 7, "Delay": 15},
             )
-            _post_to_slack(response_url, f":red_circle: *{username}*'s instance has stopped (`{instance_id}`).")
+            _post_to_slack(
+                response_url,
+                f":red_circle: *{arg}*'s instance has stopped (`{instance_id}`).",
+            )
+
         else:
-            print(f"ERROR: unknown action '{action}'")
+            print(f"ERROR: unknown subcommand '{subcommand}'")
+            _post_to_slack(response_url, f":warning: Unknown command: {subcommand}")
+
     except WaiterError as exc:
-        print(f"ERROR: waiter timed out for {action}/{instance_id}: {exc}")
+        print(f"ERROR: waiter timed out for {subcommand}/{arg}: {exc}")
         _post_to_slack(
             response_url,
-            f":warning: Timed out waiting for *{username}*'s instance to {action}. Check the AWS console.",
+            f":warning: Timed out waiting for *{arg}*'s instance to {subcommand}. Check the AWS console.",
         )
     except Exception as exc:
-        print(f"ERROR: handle_notify failed: {exc}")
+        print(f"ERROR: handle_notify failed for {subcommand}: {exc}")
         _post_to_slack(
             response_url,
-            f":warning: Error while {action}ing *{username}*'s instance: {exc}",
+            f":warning: Error while executing {subcommand}: {exc}",
         )

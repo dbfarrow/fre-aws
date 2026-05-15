@@ -5,13 +5,14 @@
 # Architecture:
 #   Slack → API Gateway POST /slack
 #        → slack-handler Lambda (sync, 10s timeout)
+#             signing secret loaded at module init (absorbed by Lambda Init phase)
 #             verify HMAC-SHA256 signature
-#             auth: S3 user registry slack_user_id + role==admin
-#             dispatch: list / start / stop
+#             parse body + validate subcommand
 #             invoke slack-notifier async (fire-and-forget)
-#             return ephemeral ACK to Slack (< 3s)
+#             return ephemeral ACK to Slack (< 3s, even on cold start)
 #        → slack-notifier Lambda (async, 120s timeout)
-#             wait for EC2 state change
+#             auth: S3 user registry slack_user_id + role==admin
+#             dispatch: list / start / stop (with EC2 waiters for start/stop)
 #             POST result to Slack response_url
 #
 # Signing secret lives in Secrets Manager ({project}/slack/signing-secret).
@@ -80,15 +81,45 @@ resource "aws_iam_role_policy_attachment" "slack_notifier_logs" {
 
 resource "aws_iam_role_policy" "slack_notifier_ec2" {
   count = local.slack_enabled ? 1 : 0
-  name  = "ec2-describe"
+  name  = "ec2-lifecycle"
+  role  = aws_iam_role.slack_notifier[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ec2:DescribeInstances"
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:StartInstances",
+          "ec2:StopInstances",
+        ]
+        Resource = "arn:aws:ec2:${var.aws_region}:*:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/ProjectName" = var.project_name
+          }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "slack_notifier_s3" {
+  count = local.slack_enabled ? 1 : 0
+  name  = "s3-user-registry"
   role  = aws_iam_role.slack_notifier[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = "ec2:DescribeInstances"
-      Resource = "*"
+      Action   = "s3:GetObject"
+      Resource = "arn:aws:s3:::${var.tf_backend_bucket}/${var.project_name}/users.json"
     }]
   })
 }
@@ -105,7 +136,9 @@ resource "aws_lambda_function" "slack_notifier" {
 
   environment {
     variables = {
-      PROJECT_NAME = var.project_name
+      PROJECT_NAME      = var.project_name
+      TF_BACKEND_BUCKET = var.tf_backend_bucket
+      TF_BACKEND_REGION = var.tf_backend_region
     }
   }
 
