@@ -877,7 +877,7 @@ The Slack slash command bot lets admins list, start, and stop EC2 instances dire
 /fre stop <user>      — stop a user's running instance
 ```
 
-All responses are ephemeral (only visible to you). `start` and `stop` return an immediate acknowledgement and then send a follow-up when the instance reaches the target state (or times out after ~105 seconds).
+All responses are ephemeral (only visible to you). Every command returns an immediate acknowledgement and then sends a follow-up with the result. `start` and `stop` wait for the instance to reach the target state before posting the follow-up (up to ~105 seconds).
 
 ### How it works
 
@@ -888,16 +888,16 @@ Phone → Slack: /fre start dave
             POST /slack
                     ↓
         Lambda: slack-handler (sync, 10s)
-         - verify HMAC-SHA256 signature
-         - read users.json from S3, find entry with matching slack_user_id
-         - check role == "admin"
-         - call ec2:StartInstances
+         - verify HMAC-SHA256 signature (signing secret cached at init)
+         - validate subcommand
          - invoke notifier Lambda async (fire-and-forget)
-         - return ephemeral ACK to Slack (< 3s)
-                    ↓
+         - return ephemeral ACK to Slack (< 3s, even on cold start)
+                    ↓ InvocationType=Event
         Lambda: slack-notifier (async, 120s)
-         - wait for instance_running state
-         - POST follow-up to Slack response_url
+         - read users.json from S3, verify slack_user_id + role==admin
+         - execute command (describe / start / stop instances)
+         - for start/stop: wait for target EC2 state (waiter, up to 105s)
+         - POST result to Slack response_url
 ```
 
 EC2 `StartInstances`/`StopInstances` are scoped by `ProjectName` tag — the Lambda can only affect instances belonging to this project.
@@ -941,7 +941,7 @@ Auth uses the existing S3 user registry: the bot looks up the Slack caller's `us
    SLACK_SIGNING_SECRET=abc123...
    ```
 
-2. Run `./admin.sh bootstrap` — this writes the secret to Secrets Manager at `{project}/slack/signing-secret`. The Lambda reads it fresh on every invocation.
+2. Run `./admin.sh bootstrap` — this writes the secret to Secrets Manager at `{project}/slack/signing-secret`. The handler Lambda caches it in memory at startup so the fetch doesn't count against Slack's 3-second response deadline.
 
 3. Install the app to your workspace: **Basic Information** → **Install App** → **Install to Workspace**
 
