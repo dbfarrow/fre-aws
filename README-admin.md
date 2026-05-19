@@ -867,6 +867,129 @@ After every `./admin.sh up`, the CloudFront cache is invalidated automatically s
 
 ---
 
+## Slack Bot (Optional)
+
+The Slack slash command bot lets admins list, start, and stop EC2 instances directly from Slack — useful when you're away from your machine or want to start an instance from your phone before connecting via the Claude app.
+
+```
+/fre list             — list all instances with current state
+/fre start <user>     — start a user's stopped instance
+/fre stop <user>      — stop a user's running instance
+```
+
+All responses are ephemeral (only visible to you). Every command returns an immediate acknowledgement and then sends a follow-up with the result. `start` and `stop` wait for the instance to reach the target state before posting the follow-up (up to ~105 seconds).
+
+### How it works
+
+```
+Phone → Slack: /fre start dave
+                    ↓
+            API Gateway (HTTP API)
+            POST /slack
+                    ↓
+        Lambda: slack-handler (sync, 10s)
+         - verify HMAC-SHA256 signature (signing secret cached at init)
+         - validate subcommand
+         - invoke notifier Lambda async (fire-and-forget)
+         - return ephemeral ACK to Slack (< 3s, even on cold start)
+                    ↓ InvocationType=Event
+        Lambda: slack-notifier (async, 120s)
+         - read users.json from S3, verify slack_user_id + role==admin
+         - execute command (describe / start / stop instances)
+         - for start/stop: wait for target EC2 state (waiter, up to 105s)
+         - POST result to Slack response_url
+```
+
+EC2 `StartInstances`/`StopInstances` are scoped by `ProjectName` tag — the Lambda can only affect instances belonging to this project.
+
+Auth uses the existing S3 user registry: the bot looks up the Slack caller's `user_id` in `users.json` and checks `role == "admin"`. No separate admin list to maintain.
+
+### Setup
+
+#### Step 1: Deploy the infrastructure
+
+1. Add to `config/admin.env`:
+   ```bash
+   ENABLE_SLACK_BOT=true
+   SLACK_COMMAND_NAME=fre     # or whatever command name you'll use in Slack
+   SLACK_SIGNING_SECRET=      # leave blank for now — fill in after creating the Slack App
+   ```
+
+2. Run `./admin.sh up` — this provisions the API Gateway and both Lambda functions.
+
+3. Capture the endpoint URL:
+   ```bash
+   terraform -chdir=terraform output -raw slack_endpoint_url
+   ```
+   Save this URL — you'll paste it into the Slack App config.
+
+#### Step 2: Create the Slack App
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. Give it a name (e.g. `fre-bot`) and select your workspace
+3. Under **Slash Commands** → **Create New Command**:
+   - Command: `/fre` (or whatever you set as `SLACK_COMMAND_NAME`)
+   - Request URL: paste the endpoint URL from step 1
+   - Short description: `Manage EC2 instances`
+   - Save
+4. Under **Basic Information** → **App Credentials**, copy the **Signing Secret**
+
+#### Step 3: Store the signing secret and redeploy
+
+1. Add the signing secret to `config/admin.env`:
+   ```bash
+   SLACK_SIGNING_SECRET=abc123...
+   ```
+
+2. Run `./admin.sh bootstrap` — this writes the secret to Secrets Manager at `{project}/slack/signing-secret`. The handler Lambda caches it in memory at startup so the fetch doesn't count against Slack's 3-second response deadline.
+
+3. Install the app to your workspace: **Basic Information** → **Install App** → **Install to Workspace**
+
+#### Step 4: Authorise yourself as admin
+
+The bot authenticates callers by their Slack user ID against the S3 user registry.
+
+1. Find your Slack user ID: click your name in Slack → **View full profile** → three-dot menu → **Copy member ID**. Format: `U012AB3CD`.
+
+2. Add it to your registry entry:
+   ```bash
+   ./admin.sh pull-user <your-username>
+   # edit config/users/<your-username>.env: add SLACK_USER_ID=U012AB3CD
+   ./admin.sh update-user config/users/<your-username>.env
+   ```
+
+3. Test: type `/fre list` in any Slack channel.
+
+### `admin.env` reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ENABLE_SLACK_BOT` | Yes | `true` to deploy the bot infrastructure |
+| `SLACK_COMMAND_NAME` | No | Slash command name without `/` (default: `fre`) |
+| `SLACK_SIGNING_SECRET` | Yes | From Slack App Basic Information — never committed; stored in Secrets Manager by bootstrap |
+
+### Verification and troubleshooting
+
+```bash
+# Confirm signing secret was stored
+aws secretsmanager get-secret-value --secret-id <project>/slack/signing-secret --query 'SecretString' --output text
+
+# Confirm endpoint URL
+terraform -chdir=terraform output -raw slack_endpoint_url
+
+# Check handler Lambda logs (last 20 lines)
+aws logs tail /aws/lambda/<project>-slack-handler --since 1h
+
+# Check notifier Lambda logs
+aws logs tail /aws/lambda/<project>-slack-notifier --since 1h
+```
+
+**"You are not authorised"**: your Slack user ID is not in the registry or your role is not `admin`. Follow Step 4 above.
+
+**No response from the bot**: check the handler Lambda logs for errors. Common causes: signing secret not yet stored (run bootstrap), or the Lambda can't read `users.json` (check `TF_BACKEND_BUCKET` in `admin.env`).
+
+---
+
 ## Command Reference
 
 ### User management

@@ -680,7 +680,7 @@ if [[ "${MODE}" == "admin" ]]; then
         # Agent forwarding: mount host ssh-agent socket into container — no key file or passphrase needed.
         docker run "${DOCKER_ARGS[@]}" \
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
-          "${_EXTRA_PORT_ARGS[@]}" \
+          "${_EXTRA_PORT_ARGS[@]+"${_EXTRA_PORT_ARGS[@]}"}" \
           --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
@@ -699,7 +699,7 @@ if [[ "${MODE}" == "admin" ]]; then
         CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
         docker run "${DOCKER_ARGS[@]}" \
           --publish "${WEB_PREVIEW_PORT:-8080}:${WEB_PREVIEW_PORT:-8080}" \
-          "${_EXTRA_PORT_ARGS[@]}" \
+          "${_EXTRA_PORT_ARGS[@]+"${_EXTRA_PORT_ARGS[@]}"}" \
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "EXTRA_FORWARD_PORTS=${_EXTRA_PORTS_ENV}" \

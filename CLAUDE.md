@@ -133,6 +133,8 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── versions.tf              # Terraform and provider version pins
 │   ├── user_data_main.sh        # EC2 bootstrap: installs Claude, tmux, autoshutdown timer
 │   ├── user_data_tail.sh        # EC2 bootstrap tail: .bash_profile session launcher hook
+│   ├── slack_bot.tf             # Slack slash command bot: API Gateway + two Lambdas (conditional on enable_slack_bot)
+│   ├── lambda/slack_bot.py      # Slack bot Lambda: handle_command (sync) + handle_notify (async)
 │   ├── user/                    # Per-user module (called once per user by up.sh / down.sh)
 │   │   ├── main.tf              # EC2 instance, IAM role/profile, tags
 │   │   ├── variables.tf         # username, ssh_public_key, base outputs as inputs
@@ -329,9 +331,9 @@ For power users who want to run programs interactively without the `run` round-t
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Canonical Configuration (Multi-Admin Synchronization)
-- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores 26 fields: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, `sso_region`, `sso_start_url`, `sender_email`, `logo_url`, `billing_alert_email`, `monthly_budget_usd`, `budget_alert_threshold_percent`, `anomaly_threshold_usd`, `enable_anomaly_detection`, `enable_scheduled_stop`, `enable_web_app`, `web_app_url`, `app_domain`, `route53_zone_id`, `corp_ca_cert_required`, `bucket_policy_principal_arn`.
+- Bootstrap writes `${PROJECT_NAME}/settings.json` to S3 after every run (idempotent). Stores 28 fields: `aws_region`, `network_mode`, `use_spot`, `ebs_volume_size_gb`, `identity_mode`, `existing_vpc_id`, `existing_subnet_id`, `litellm_base_url`, `instance_type`, `autoshutdown_idle_minutes`, `sso_region`, `sso_start_url`, `sender_email`, `logo_url`, `billing_alert_email`, `monthly_budget_usd`, `budget_alert_threshold_percent`, `anomaly_threshold_usd`, `enable_anomaly_detection`, `enable_scheduled_stop`, `enable_web_app`, `web_app_url`, `app_domain`, `route53_zone_id`, `corp_ca_cert_required`, `bucket_policy_principal_arn`, `enable_slack_bot`, `slack_command_name`.
 - `up.sh` fetches `settings.json` and compares it against local `admin.env`. If drift is found, it prints each mismatch and prompts `Continue anyway? [y/N]` before proceeding. Silently skipped when `settings.json` is absent (projects bootstrapped before this feature).
-- **Non-canonical fields** (legitimately per-admin, not stored): `AWS_PROFILE`, `CONNECT_PROFILE`, `SSH_KEY_FILE`, `SSO_PROFILE`, `OWNER_EMAIL`, `WEB_PREVIEW_PORT`, `REPO_URL`, `MY_USERNAME`, `PROJECT_NAME`.
+- **Non-canonical fields** (legitimately per-admin, not stored): `AWS_PROFILE`, `CONNECT_PROFILE`, `SSH_KEY_FILE`, `SSO_PROFILE`, `OWNER_EMAIL`, `WEB_PREVIEW_PORT`, `REPO_URL`, `MY_USERNAME`, `PROJECT_NAME`, `SLACK_SIGNING_SECRET`.
 - Second admins use `./admin.sh configure` to validate their local `admin.env`, check for drift, and regenerate `config/backend.env` — without running `bootstrap` themselves.
 - `SSO_PROFILE` in `admin.env` allows IC API calls (`sso-admin`, `identitystore`) to use a different AWS profile than `AWS_PROFILE` for cross-account Identity Center setups.
 

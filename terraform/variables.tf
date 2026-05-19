@@ -105,3 +105,29 @@ variable "route53_zone_id" {
   type        = string
   default     = ""
 }
+
+# ---- Slack bot -------------------------------------------------------------
+
+variable "enable_slack_bot" {
+  description = "Deploy the admin Slack slash command bot (API Gateway + two Lambda functions). Requires SLACK_SIGNING_SECRET to be stored in Secrets Manager by bootstrap before Lambdas will work."
+  type        = bool
+  default     = false
+}
+
+variable "slack_command_name" {
+  description = "Slash command name shown in usage text (without leading /). Must match the command name configured in the Slack App."
+  type        = string
+  default     = "fre"
+}
+
+variable "tf_backend_bucket" {
+  description = "S3 bucket name for Terraform state — used by the Slack bot Lambda to read the user registry. Must match TF_BACKEND_BUCKET in config/backend.env."
+  type        = string
+  default     = ""
+}
+
+variable "tf_backend_region" {
+  description = "AWS region of the Terraform state S3 bucket — used by the Slack bot Lambda for cross-region S3 access. Often us-east-1 (where bootstrap ran)."
+  type        = string
+  default     = "us-east-1"
+}

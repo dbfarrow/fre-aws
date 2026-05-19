@@ -4,7 +4,7 @@
 #
 # Usage: ./admin.sh update-user <file>
 #   Recognised fields: NEW_USERNAME, USER_EMAIL, ROLE, GIT_USER_NAME,
-#     GIT_USER_EMAIL, SSH_PUBLIC_KEY, PREFERRED_SHELL
+#     GIT_USER_EMAIL, SSH_PUBLIC_KEY, PREFERRED_SHELL, SLACK_USER_ID
 #
 # To apply changes to a running instance: ./admin.sh refresh <username>
 # For SSH key changes: also run ./admin.sh update-user-key <username>
@@ -92,21 +92,23 @@ echo ""
 # empty values are left unchanged in the registry).
 # ---------------------------------------------------------------------------
 jq \
-  --arg user       "${TARGET_USERNAME}" \
-  --arg user_email "${USER_EMAIL:-}" \
-  --arg role       "${ROLE:-}" \
-  --arg git_name   "${GIT_USER_NAME:-}" \
-  --arg git_email  "${GIT_USER_EMAIL:-}" \
-  --arg ssh_key    "${SSH_PUBLIC_KEY:-}" \
-  --arg shell      "${PREFERRED_SHELL:-}" \
+  --arg user          "${TARGET_USERNAME}" \
+  --arg user_email    "${USER_EMAIL:-}" \
+  --arg role          "${ROLE:-}" \
+  --arg git_name      "${GIT_USER_NAME:-}" \
+  --arg git_email     "${GIT_USER_EMAIL:-}" \
+  --arg ssh_key       "${SSH_PUBLIC_KEY:-}" \
+  --arg shell         "${PREFERRED_SHELL:-}" \
+  --arg slack_user_id "${SLACK_USER_ID:-}" \
   '
   .[$user] *=
-    (if $user_email != "" then {user_email:      $user_email} else {} end) +
-    (if $role       != "" then {role:            $role}       else {} end) +
-    (if $git_name   != "" then {git_user_name:   $git_name}   else {} end) +
-    (if $git_email  != "" then {git_user_email:  $git_email}  else {} end) +
-    (if $ssh_key    != "" then {ssh_public_key:  $ssh_key}    else {} end) +
-    (if $shell      != "" then {preferred_shell: $shell}      else {} end)
+    (if $user_email    != "" then {user_email:      $user_email}    else {} end) +
+    (if $role          != "" then {role:            $role}          else {} end) +
+    (if $git_name      != "" then {git_user_name:   $git_name}      else {} end) +
+    (if $git_email     != "" then {git_user_email:  $git_email}     else {} end) +
+    (if $ssh_key       != "" then {ssh_public_key:  $ssh_key}       else {} end) +
+    (if $shell         != "" then {preferred_shell: $shell}         else {} end) +
+    (if $slack_user_id != "" then {slack_user_id:   $slack_user_id} else {} end)
   ' \
   "${USERS_JSON}" > "${USERS_JSON}.tmp"
 mv "${USERS_JSON}.tmp" "${USERS_JSON}"

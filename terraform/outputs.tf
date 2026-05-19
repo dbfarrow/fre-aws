@@ -41,6 +41,11 @@ output "app_api_url" {
   value       = try(aws_apigatewayv2_stage.app_api[0].invoke_url, null)
 }
 
+output "slack_endpoint_url" {
+  description = "API Gateway endpoint URL for the Slack slash command bot — paste into Slack App slash command config. Null if enable_slack_bot=false."
+  value       = local.slack_enabled ? "${aws_apigatewayv2_stage.slack[0].invoke_url}/slack" : null
+}
+
 output "billing_alerts" {
   description = "Summary of active billing alert configuration."
   value = local.billing_enabled ? join("\n", [
