@@ -150,6 +150,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── start.sh                 # Start a stopped EC2 instance
 │   ├── stop.sh                  # Stop a running EC2 instance
 │   ├── connect.sh               # SSH over SSM tunnel → session_start.sh menu
+│   ├── migrate.sh               # Blue-green instance migration: vault creds, backup home, provision spare, promote
 │   ├── refresh.sh               # Push config to running instance without rebuild
 │   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
 │   ├── stat.sh                  # Full environment status: identity, billing, instances (skips IC enumeration in external mode)

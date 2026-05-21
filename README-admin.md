@@ -1032,6 +1032,42 @@ aws logs tail /aws/lambda/<project>-slack-notifier --since 1h
 ./admin.sh stop  [username]             # stop an instance  (omit username to stop all)
 ```
 
+### Instance migration
+
+Blue-green migration for configuration changes that require a new EC2 instance (e.g. enabling
+hibernation). Provisions a spare instance pre-loaded with the user's home dir and credentials,
+lets the operator validate it, then optionally promotes it to replace the original.
+
+```bash
+./admin.sh migrate <username>           # test run: provision spare, restore data, leave spare running
+./admin.sh migrate <username> --live    # live run: promote spare → primary (or full cycle if no spare)
+./admin.sh down <username>-spare        # abandon a spare without promoting
+```
+
+**What gets migrated:**
+- Home directory (excluding `~/repos/` — re-cloneable — and credential dirs)
+- Credentials: `~/.claude/`, `~/.config/gh/`, Atlassian CLI configs — extracted to a local vault on
+  the admin host (`~/.fre/<project>/vault/<username>/`, chmod 700) and restored to the spare.
+  Credentials never touch S3.
+- `~/.gitconfig` from the admin host
+
+**Test run flow:**
+1. Checks `~/repos/*` for uncommitted/unpushed changes — warns and prompts to continue if dirty
+2. Extracts credential dirs to local vault (non-destructive, originals stay on the running instance)
+3. Streams a tar of the home dir to S3 (excluding repos and credentials)
+4. Provisions `<username>-spare` with the new instance configuration
+5. Restores home backup and credentials to the spare
+6. Exits — spare is running, original is untouched
+
+**Live run flow:**
+- If `<username>-spare` already exists: shows its provisioned timestamp and prompts to promote
+- If no spare exists: runs the full provision sequence above, then waits for confirmation before promoting
+
+**Promotion (`--live`):**
+Destroys the original instance, moves the spare's Terraform state to the original's state path, and
+runs `terraform apply` with the original username to rename IAM resources and tags. The EC2 instance
+stays running throughout — only IAM role names are recreated.
+
 ### Connecting
 ```bash
 ./admin.sh connect     <username>       # SSH into an instance (uses {project}-developer-access)

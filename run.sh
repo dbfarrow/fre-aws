@@ -88,6 +88,12 @@ infrastructure:
 instance lifecycle:
   start [user]          Start an EC2 instance (omit user to start all)
   stop [user]           Stop an EC2 instance (omit user to stop all)
+  migrate <user>        Blue-green instance migration: backup home dir + credentials,
+                        provision a spare instance (<user>-spare), restore, and leave
+                        spare running for validation.
+                        --live  promote spare to primary (or provision+promote in one shot
+                                if no spare exists yet). 'admin.sh down <user>-spare'
+                                to abandon a spare without promoting.
 
 connection:
   connect <user>        Open a shell on a user's EC2 instance (SSH over SSM)
@@ -733,6 +739,46 @@ if [[ "${MODE}" == "admin" ]]; then
           --env "AWS_PROFILE=${AWS_PROFILE}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/refresh.sh
+      fi
+      ;;
+    migrate)
+      require_username
+      MIGRATE_LIVE=""
+      [[ "${3:-}" == "--live" ]] && MIGRATE_LIVE="true"
+      AGENT_SOCK=$(_detect_ssh_agent_sock)
+      # Vault dir: host-side at ~/.fre/<project>/vault, mounted into container at /vault
+      _VAULT_DIR="${HOME}/.fre/${PROJECT_NAME:-fre-aws}/vault"
+      mkdir -p "${_VAULT_DIR}"
+      chmod 700 "${_VAULT_DIR}"
+      _MIGRATE_ARGS=(
+        "--env"    "DEV_USERNAME=${USERNAME}"
+        "--env"    "MIGRATE_LIVE=${MIGRATE_LIVE}"
+        "--env"    "AWS_PROFILE=${AWS_PROFILE}"
+        "--env"    "VAULT_HOST_DIR=/vault"
+        "--volume" "${_VAULT_DIR}:/vault"
+      )
+      [[ -f "${HOME}/.gitconfig" ]] && \
+        _MIGRATE_ARGS+=("--volume" "${HOME}/.gitconfig:/host-gitconfig:ro" "--env" "GIT_CONFIG_FILE=/host-gitconfig")
+      if [[ -n "${AGENT_SOCK}" ]]; then
+        docker run "${DOCKER_ARGS[@]}" \
+          "${_MIGRATE_ARGS[@]}" \
+          --volume "${AGENT_SOCK}:/tmp/ssh-agent.sock" \
+          --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
+          "${IMAGE_NAME}" /workspace/scripts/migrate.sh
+      else
+        HOST_SSH_KEY=$(_detect_admin_ssh_key)
+        if [[ -z "${HOST_SSH_KEY}" || ! -f "${HOST_SSH_KEY}" ]]; then
+          echo "ERROR: No SSH key found and no SSH agent running." >&2
+          echo "       Load your key first: ssh-add ~/.ssh/id_ed25519" >&2
+          echo "       Or create a key:     ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519" >&2
+          exit 1
+        fi
+        CONTAINER_SSH_KEY="/root/.ssh/$(basename "${HOST_SSH_KEY}")"
+        docker run "${DOCKER_ARGS[@]}" \
+          "${_MIGRATE_ARGS[@]}" \
+          --volume "${HOME}/.ssh:/root/.ssh:ro" \
+          --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
+          "${IMAGE_NAME}" /workspace/scripts/migrate.sh
       fi
       ;;
     push-config)
