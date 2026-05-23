@@ -13,6 +13,7 @@ CONFIG_FILE="${SCRIPT_DIR}/../config/admin.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
 TF_BASE_DIR="${SCRIPT_DIR}/../terraform"
 TF_USER_DIR="${SCRIPT_DIR}/../terraform/user"
+TF_USER_DATA_DIR="${SCRIPT_DIR}/../terraform/user-data"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "ERROR: config/admin.env not found." >&2
@@ -35,6 +36,7 @@ source "${SCRIPT_DIR}/users-s3.sh"
 : "${TF_BACKEND_BUCKET:?}" "${TF_BACKEND_REGION:?}"
 
 TARGET_USER="${1:-}"
+DELETE_DATA="${2:-}"  # "--delete-data" flag
 BASE_KEY="${PROJECT_NAME}/base/terraform.tfstate"
 
 # ---------------------------------------------------------------------------
@@ -65,8 +67,12 @@ if [[ "${SKIP_DOWN_CONFIRM:-}" != "true" ]]; then
 
   if [[ -n "${TARGET_USER}" ]]; then
     echo "WARNING: This will DESTROY ${TARGET_USER}'s EC2 instance and all associated resources."
-    echo "         The user's EBS data will be permanently deleted."
     echo "         Base infrastructure (VPC, KMS, security groups) will be preserved."
+    if [[ "${DELETE_DATA}" == "--delete-data" ]]; then
+      echo "         The user's data EBS volume will also be PERMANENTLY DELETED (--delete-data)."
+    else
+      echo "         Any data EBS volume will be PRESERVED (separate state)."
+    fi
     echo ""
     echo "  User:    ${TARGET_USER}"
     echo "  Project: ${PROJECT_NAME}"
@@ -76,6 +82,14 @@ if [[ "${SKIP_DOWN_CONFIRM:-}" != "true" ]]; then
     if [[ "${CONFIRM}" != "${TARGET_USER}" ]]; then
       echo "Confirmation did not match. Aborted."
       exit 0
+    fi
+    if [[ "${DELETE_DATA}" == "--delete-data" ]]; then
+      echo ""
+      read -r -p "Type 'delete data for ${TARGET_USER}' to confirm data volume deletion: " DATA_CONFIRM
+      if [[ "${DATA_CONFIRM}" != "delete data for ${TARGET_USER}" ]]; then
+        echo "Confirmation did not match. Aborted."
+        exit 0
+      fi
     fi
   else
     echo "WARNING: This will DESTROY all user EC2 instances AND all base AWS resources."
@@ -131,6 +145,17 @@ if [[ ${#DESTROY_USERS[@]} -gt 0 ]]; then
     GIT_USER_NAME=$(jq -r --arg u "${username}"  '.[$u].git_user_name  // "placeholder"'        "${USERS_JSON}")
     GIT_USER_EMAIL=$(jq -r --arg u "${username}" '.[$u].git_user_email // "placeholder@example.com"' "${USERS_JSON}")
 
+    # Check for data volume (separate state — not destroyed unless --delete-data)
+    USER_DATA_VOLUME_ID=$(aws ec2 describe-volumes \
+      --filters \
+        "Name=tag:Username,Values=${username}" \
+        "Name=tag:ProjectName,Values=${PROJECT_NAME}" \
+        "Name=tag:DataVolume,Values=true" \
+      --query 'Volumes[0].VolumeId' \
+      --region "${AWS_REGION}" \
+      --output text 2>/dev/null || echo "")
+    [[ "${USER_DATA_VOLUME_ID}" == "None" ]] && USER_DATA_VOLUME_ID=""
+
     echo "--- ${username}: terraform init ---"
     terraform -chdir="${TF_USER_DIR}" init \
       -backend-config="bucket=${TF_BACKEND_BUCKET}" \
@@ -154,8 +179,37 @@ if [[ ${#DESTROY_USERS[@]} -gt 0 ]]; then
       -var="subnet_id=${SUBNET_ID}" \
       -var="associate_public_ip=${ASSOC_PUBLIC_IP}" \
       -var="security_group_id=${SECURITY_GROUP_ID}" \
+      -var="data_volume_id=${USER_DATA_VOLUME_ID}" \
+      -var="hibernation=false" \
       -auto-approve
     echo ""
+
+    # Handle data volume
+    if [[ -n "${USER_DATA_VOLUME_ID}" ]]; then
+      if [[ "${DELETE_DATA}" == "--delete-data" ]]; then
+        echo "--- ${username}: destroying data volume ${USER_DATA_VOLUME_ID} ---"
+        DATA_KEY="${PROJECT_NAME}/users/${username}/data.tfstate"
+        terraform -chdir="${TF_USER_DATA_DIR}" init \
+          -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+          -backend-config="key=${DATA_KEY}" \
+          -backend-config="region=${TF_BACKEND_REGION}" \
+          -reconfigure > /dev/null 2>&1
+        # Temporarily override prevent_destroy by removing state and deleting directly
+        # (Terraform lifecycle prevent_destroy cannot be overridden at apply time)
+        terraform -chdir="${TF_USER_DATA_DIR}" state rm aws_ebs_volume.data > /dev/null 2>&1 || true
+        aws ec2 delete-volume \
+          --volume-id "${USER_DATA_VOLUME_ID}" \
+          --region "${AWS_REGION}"
+        aws s3 rm \
+          "s3://${TF_BACKEND_BUCKET}/${DATA_KEY}" \
+          --region "${TF_BACKEND_REGION}" 2>/dev/null || true
+        echo "  Data volume deleted."
+      else
+        echo "  Data volume ${USER_DATA_VOLUME_ID} preserved."
+        echo "  To delete: admin.sh down ${username} --delete-data"
+      fi
+      echo ""
+    fi
   done
 fi
 

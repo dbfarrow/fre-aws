@@ -691,6 +691,29 @@ To inspect or update a user's attributes (email, role, git config, preferred she
 
 Neither command touches IAM Identity Center, installer bundles, or running instances. To apply changes (e.g. updated shell preference) to a running instance: `./admin.sh refresh <username>`.
 
+**Per-user compute overrides**
+
+The `.env` file produced by `pull-user` includes three optional compute fields that override the project-wide defaults in `admin.env`:
+
+| Field | Description |
+|-------|-------------|
+| `INSTANCE_TYPE` | EC2 instance type (e.g. `t3.medium`) |
+| `USE_SPOT` | `true`/`false` — spot saves cost but can't hibernate |
+| `HIBERNATION` | `true`/`false` — hibernate instead of stop; requires `USE_SPOT=false` |
+
+Leave any field empty to fall back to the project-wide default. Compute changes require a new instance — apply them with `admin.sh migrate <username>` rather than `refresh`.
+
+**Volume sizing**
+
+There are two EBS volumes per user when data volumes are enabled:
+
+- **Root volume** (`EBS_VOLUME_SIZE_GB` in `admin.env`) — project-wide default only, not per-user. Contains the OS and toolchain. Resizing it requires a new instance (use `migrate`), but there is rarely a reason to do so.
+- **Data volume** (`EBS_DATA_VOLUME_SIZE_GB` in `admin.env`) — stores `/home/developer/`. Can be expanded in-place without stopping the instance: update the value in `admin.env`, run `admin.sh up <username>`, then resize the filesystem on the instance:
+  ```
+  sudo resize2fs /dev/disk/by-label/fre-user-data
+  ```
+  EBS volumes can only be expanded, never shrunk. No migration needed for data volume resizing.
+
 For SSH key updates specifically, use `./admin.sh update-user-key <username>` — it handles the instance push and installer bundle regeneration that `update-user` doesn't do.
 
 ### Removing a user
@@ -1035,38 +1058,60 @@ aws logs tail /aws/lambda/<project>-slack-notifier --since 1h
 ### Instance migration
 
 Blue-green migration for configuration changes that require a new EC2 instance (e.g. enabling
-hibernation). Provisions a spare instance pre-loaded with the user's home dir and credentials,
-lets the operator validate it, then optionally promotes it to replace the original.
+hibernation, changing instance type, or adopting a new AMI). The user's data lives on a persistent
+EBS data volume that travels with them across instance replacements — no data is copied to S3 or to
+the admin host.
 
 ```bash
-./admin.sh migrate <username>           # test run: provision spare, restore data, leave spare running
+./admin.sh migrate <username>           # test run: provision spare with data volume, leave spare running
 ./admin.sh migrate <username> --live    # live run: promote spare → primary (or full cycle if no spare)
 ./admin.sh down <username>-spare        # abandon a spare without promoting
+./admin.sh down <username> --delete-data  # destroy instance AND data volume (requires typed confirmation)
 ```
 
-**What gets migrated:**
-- Home directory (excluding `~/repos/` — re-cloneable — and credential dirs)
-- Credentials: `~/.claude/`, `~/.config/gh/`, Atlassian CLI configs — extracted to a local vault on
-  the admin host (`~/.fre/<project>/vault/<username>/`, chmod 700) and restored to the spare.
-  Credentials never touch S3.
-- `~/.gitconfig` from the admin host
+**Architecture: persistent EBS data volume**
 
-**Test run flow:**
+Each user has two independent Terraform states:
+- `<project>/users/<username>/terraform.tfstate` — EC2 instance, IAM role, volume attachment (disposable)
+- `<project>/users/<username>/data.tfstate` — EBS data volume at `/home/developer/` (permanent, `prevent_destroy = true`)
+
+The data volume mounts at `/home/developer/` via `fstab` on every boot. The root EBS volume contains
+only the OS and toolchain. Instance replacement is zero-copy: detach volume from old instance → provision
+new instance → volume attaches and mounts automatically on boot.
+
+**Enabling data volumes for new users**
+
+Set `ENABLE_DATA_VOLUMES=true` in `config/admin.env` before running `admin.sh up <username>`. The data
+volume is provisioned as a separate Terraform apply (state: `data.tfstate`) before the EC2 instance.
+
+**Two migration flows**
+
+_Initial adoption (existing user, no data volume yet):_
+1. Original instance stays running throughout — it is your fallback at every step
+2. Creates a new blank EBS data volume in the same AZ
+3. Attaches it temporarily, SSHes in to format and rsync `/home/developer/` onto it, detaches
+4. Provisions `<username>-spare` with the data volume attached; boots with all data intact
+5. Operator validates — original is untouched
+
+_Steady-state migration (data volume already exists):_
 1. Checks `~/repos/*` for uncommitted/unpushed changes — warns and prompts to continue if dirty
-2. Extracts credential dirs to local vault (non-destructive, originals stay on the running instance)
-3. Streams a tar of the home dir to S3 (excluding repos and credentials)
-4. Provisions `<username>-spare` with the new instance configuration
-5. Restores home backup and credentials to the spare
-6. Exits — spare is running, original is untouched
+2. Stops the original instance
+3. Detaches the data volume
+4. Provisions `<username>-spare` with the data volume attached; boots with all data intact
+5. Operator validates
 
-**Live run flow:**
+**Live run:**
 - If `<username>-spare` already exists: shows its provisioned timestamp and prompts to promote
-- If no spare exists: runs the full provision sequence above, then waits for confirmation before promoting
+- If no spare exists: runs the appropriate provision flow above, then waits for confirmation before promoting
 
 **Promotion (`--live`):**
-Destroys the original instance, moves the spare's Terraform state to the original's state path, and
-runs `terraform apply` with the original username to rename IAM resources and tags. The EC2 instance
-stays running throughout — only IAM role names are recreated.
+Destroys the original instance (EC2 + IAM state only — data volume is in a separate state and is
+unaffected), moves the spare's Terraform state to the original's state path, and runs `terraform apply`
+with the original username to rename IAM resources and tags. The EC2 instance stays running throughout.
+
+**AZ constraint:** A data volume is locked to the availability zone it was created in. If the subnet
+ever changes to a different AZ, migration would require a snapshot-and-restore. Document any AZ-pinned
+subnets when using `EXISTING_SUBNET_ID`.
 
 ### Connecting
 ```bash

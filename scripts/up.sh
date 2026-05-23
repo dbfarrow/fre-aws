@@ -15,6 +15,7 @@ CONFIG_FILE="${SCRIPT_DIR}/../config/admin.env"
 BACKEND_CONFIG_FILE="${SCRIPT_DIR}/../config/backend.env"
 TF_BASE_DIR="${SCRIPT_DIR}/../terraform"
 TF_USER_DIR="${SCRIPT_DIR}/../terraform/user"
+TF_USER_DATA_DIR="${SCRIPT_DIR}/../terraform/user-data"
 
 # ---------------------------------------------------------------------------
 # Load config
@@ -335,6 +336,47 @@ for username in "${APPLY_USERS[@]}"; do
   GIT_USER_EMAIL=$(jq -r --arg u "${username}" '.[$u].git_user_email' "${USERS_JSON}")
   PREFERRED_SHELL=$(jq -r --arg u "${username}" '.[$u].preferred_shell // "bash"' "${USERS_JSON}")
 
+  # Per-user compute overrides (registry value → global admin.env fallback)
+  # Root EBS size is not per-user — it is fixed at the project-wide EBS_VOLUME_SIZE_GB.
+  EFF_INSTANCE_TYPE=$(jq -r --arg u "${username}" '.[$u].instance_type // ""' "${USERS_JSON}")
+  EFF_INSTANCE_TYPE="${EFF_INSTANCE_TYPE:-${INSTANCE_TYPE:-t3.micro}}"
+  EFF_USE_SPOT=$(jq -r     --arg u "${username}" '.[$u].use_spot // ""'       "${USERS_JSON}")
+  EFF_USE_SPOT="${EFF_USE_SPOT:-${USE_SPOT:-false}}"
+  EFF_HIBERNATION=$(jq -r  --arg u "${username}" '.[$u].hibernation // ""'    "${USERS_JSON}")
+  EFF_HIBERNATION="${EFF_HIBERNATION:-false}"
+
+  if [[ "${EFF_HIBERNATION}" == "true" && "${EFF_USE_SPOT}" == "true" ]]; then
+    echo "ERROR: ${username}: hibernation=true requires use_spot=false." >&2
+    echo "       Set use_spot=false in ${username}'s registry entry or USE_SPOT=false in admin.env." >&2
+    exit 1
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Data volume phase (optional — only when ENABLE_DATA_VOLUMES=true)
+  # ---------------------------------------------------------------------------
+  DATA_VOLUME_ID=""
+  if [[ "${ENABLE_DATA_VOLUMES:-false}" == "true" ]]; then
+    DATA_KEY="${PROJECT_NAME}/users/${username}/data.tfstate"
+    # Per-user data volume size takes precedence over the project-wide default
+    EFF_DATA_VOL_SIZE=$(jq -r --arg u "${username}" '.[$u].ebs_data_volume_size_gb // ""' "${USERS_JSON}")
+    EFF_DATA_VOL_SIZE="${EFF_DATA_VOL_SIZE:-${EBS_DATA_VOLUME_SIZE_GB:-30}}"
+    echo "--- ${username}: data volume ---"
+    terraform -chdir="${TF_USER_DATA_DIR}" init \
+      -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+      -backend-config="key=${DATA_KEY}" \
+      -backend-config="region=${TF_BACKEND_REGION}" \
+      -reconfigure > /dev/null 2>&1
+    terraform -chdir="${TF_USER_DATA_DIR}" apply -auto-approve \
+      -var="username=${username}" \
+      -var="project_name=${PROJECT_NAME}" \
+      -var="aws_region=${AWS_REGION}" \
+      -var="subnet_id=${SUBNET_ID}" \
+      -var="ebs_data_volume_size_gb=${EFF_DATA_VOL_SIZE}"
+    DATA_VOLUME_ID=$(terraform -chdir="${TF_USER_DATA_DIR}" output -raw volume_id 2>/dev/null | grep -Eo 'vol-[0-9a-f]+' || echo "")
+    echo "  Data volume: ${DATA_VOLUME_ID}"
+    echo ""
+  fi
+
   echo "--- ${username}: terraform init ---"
   terraform -chdir="${TF_USER_DIR}" init \
     -backend-config="bucket=${TF_BACKEND_BUCKET}" \
@@ -365,13 +407,15 @@ for username in "${APPLY_USERS[@]}"; do
     -var="autoshutdown_idle_minutes=${AUTOSHUTDOWN_IDLE_MINUTES:-30}" \
     -var="project_name=${PROJECT_NAME}" \
     -var="aws_region=${AWS_REGION}" \
-    -var="instance_type=${INSTANCE_TYPE:-t3.micro}" \
-    -var="use_spot=${USE_SPOT:-false}" \
+    -var="instance_type=${EFF_INSTANCE_TYPE}" \
+    -var="use_spot=${EFF_USE_SPOT}" \
     -var="ebs_volume_size_gb=${EBS_VOLUME_SIZE_GB:-30}" \
     -var="owner_email=${OWNER_EMAIL:-}" \
     -var="subnet_id=${SUBNET_ID}" \
     -var="associate_public_ip=${ASSOC_PUBLIC_IP}" \
     -var="security_group_id=${SECURITY_GROUP_ID}" \
+    -var="data_volume_id=${DATA_VOLUME_ID}" \
+    -var="hibernation=${EFF_HIBERNATION}" \
     "${EXTRA_USER_ARGS[@]}" \
     -out="${TF_USER_DIR}/.tfplan_${username}"
   echo ""

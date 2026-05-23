@@ -42,23 +42,68 @@ npm install -g @anthropic-ai/claude-code
 claude --version || true
 
 # ---------------------------------------------------------------------------
+# Data volume — mount at /home/developer/ if DATA_VOLUME_ID is set
+# ---------------------------------------------------------------------------
+if [[ -n "${DATA_VOLUME_ID:-}" ]]; then
+  echo "--- mounting data volume ${DATA_VOLUME_ID} ---"
+  # Nitro instances expose EBS volumes via NVMe. The volume serial is the volume
+  # ID with dashes removed (vol-0abc1234 → vol0abc1234).
+  VOLUME_SERIAL="${DATA_VOLUME_ID//-/}"
+  DATA_DEV=""
+  for i in $(seq 1 30); do
+    SYMLINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_SERIAL}"
+    if [[ -L "${SYMLINK}" ]]; then
+      DATA_DEV=$(readlink -f "${SYMLINK}")
+      break
+    fi
+    sleep 2
+  done
+  if [[ -z "${DATA_DEV}" ]]; then
+    echo "WARNING: Data volume device not found after 60s — continuing without mount." >&2
+  else
+    if ! blkid "${DATA_DEV}" > /dev/null 2>&1; then
+      echo "  First boot: formatting data volume..."
+      mkfs.ext4 -L fre-user-data "${DATA_DEV}"
+    fi
+    mkdir -p /home/developer
+    mount "${DATA_DEV}" /home/developer
+    grep -q "fre-user-data" /etc/fstab || \
+      echo "LABEL=fre-user-data /home/developer ext4 defaults,nofail 0 2" >> /etc/fstab
+    echo "  Data volume mounted at /home/developer/"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Developer user
 # ---------------------------------------------------------------------------
+if [[ "${PREFERRED_SHELL:-bash}" == "zsh" ]]; then
+  dnf install -y zsh
+  _SHELL="$(which zsh)"
+else
+  _SHELL="/bin/bash"
+fi
+
 if ! id "developer" &>/dev/null; then
-  if [[ "${PREFERRED_SHELL:-bash}" == "zsh" ]]; then
-    dnf install -y zsh
-    useradd -m -s "$(which zsh)" developer
-    # Suppress the zsh new-user wizard on first login
-    touch /home/developer/.zshrc
-    chown developer:developer /home/developer/.zshrc
-    echo "Preferred shell: zsh"
+  if mountpoint -q /home/developer 2>/dev/null; then
+    # Data volume already mounted — create user without recreating home dir
+    useradd -M -d /home/developer -s "${_SHELL}" developer
   else
-    useradd -m -s /bin/bash developer
-    echo "Preferred shell: bash"
+    useradd -m -d /home/developer -s "${_SHELL}" developer
   fi
   echo "developer ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/developer
   chmod 440 /etc/sudoers.d/developer
 fi
+
+if [[ "${PREFERRED_SHELL:-bash}" == "zsh" ]]; then
+  # Suppress the zsh new-user wizard on first login
+  touch /home/developer/.zshrc
+  chown developer:developer /home/developer/.zshrc
+  echo "Preferred shell: zsh"
+else
+  echo "Preferred shell: bash"
+fi
+
+chown developer:developer /home/developer
 
 # ---------------------------------------------------------------------------
 # SSH authorized key

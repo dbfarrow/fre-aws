@@ -746,19 +746,11 @@ if [[ "${MODE}" == "admin" ]]; then
       MIGRATE_LIVE=""
       [[ "${3:-}" == "--live" ]] && MIGRATE_LIVE="true"
       AGENT_SOCK=$(_detect_ssh_agent_sock)
-      # Vault dir: host-side at ~/.fre/<project>/vault, mounted into container at /vault
-      _VAULT_DIR="${HOME}/.fre/${PROJECT_NAME:-fre-aws}/vault"
-      mkdir -p "${_VAULT_DIR}"
-      chmod 700 "${_VAULT_DIR}"
       _MIGRATE_ARGS=(
-        "--env"    "DEV_USERNAME=${USERNAME}"
-        "--env"    "MIGRATE_LIVE=${MIGRATE_LIVE}"
-        "--env"    "AWS_PROFILE=${AWS_PROFILE}"
-        "--env"    "VAULT_HOST_DIR=/vault"
-        "--volume" "${_VAULT_DIR}:/vault"
+        "--env" "DEV_USERNAME=${USERNAME}"
+        "--env" "MIGRATE_LIVE=${MIGRATE_LIVE}"
+        "--env" "AWS_PROFILE=${AWS_PROFILE}"
       )
-      [[ -f "${HOME}/.gitconfig" ]] && \
-        _MIGRATE_ARGS+=("--volume" "${HOME}/.gitconfig:/host-gitconfig:ro" "--env" "GIT_CONFIG_FILE=/host-gitconfig")
       if [[ -n "${AGENT_SOCK}" ]]; then
         docker run "${DOCKER_ARGS[@]}" \
           "${_MIGRATE_ARGS[@]}" \

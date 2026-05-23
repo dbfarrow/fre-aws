@@ -157,6 +157,9 @@ module "user_ec2" {
   create_spot_instance                = var.use_spot
   spot_instance_interruption_behavior = "stop" # preserve EBS data on interruption
 
+  # Hibernation — only valid for on-demand instances (use_spot must be false)
+  hibernation = var.hibernation
+
   # IMDSv2 (Zero Trust: prevents SSRF-based credential theft)
   metadata_options = {
     http_endpoint               = "enabled"
@@ -194,6 +197,7 @@ module "user_ec2" {
     "GIT_USER_EMAIL='${var.git_user_email}'",
     "PREFERRED_SHELL='${var.preferred_shell}'",
     "AUTOSHUTDOWN_IDLE_MINUTES='${var.autoshutdown_idle_minutes}'",
+    "DATA_VOLUME_ID='${var.data_volume_id}'",
     "",
     file("${path.module}/../user_data_main.sh"),
     local.admin_keys_block,
@@ -217,15 +221,25 @@ module "user_ec2" {
 }
 
 # ---------------------------------------------------------------------------
+# Data volume attachment (conditional — only when data_volume_id is set)
+# ---------------------------------------------------------------------------
+# skip_destroy = true: when the EC2 instance is terminated, the volume detaches
+# automatically; we don't want Terraform to block the destroy waiting to detach.
+# The volume itself lives in a separate Terraform state (user-data/) and is never
+# deleted by this module.
+resource "aws_volume_attachment" "user_data" {
+  count       = var.data_volume_id != "" ? 1 : 0
+  device_name = "/dev/sdf"
+  volume_id   = var.data_volume_id
+  instance_id = module.user_ec2.id
+
+  force_detach = false
+  skip_destroy = true
+}
+
+# ---------------------------------------------------------------------------
 # Explicit instance tagging — spot instance workaround
 # ---------------------------------------------------------------------------
-# terraform-aws-modules/ec2-instance propagates tags to spot instances via
-# aws_ec2_tag resources inside the module, but those can fail silently during
-# apply (the spot_instance_id is "known after apply" and the apply may partially
-# succeed). Adding these at the root level ensures tags are (re)applied on every
-# terraform apply, using the module's id output which correctly returns the EC2
-# instance ID (not the spot request ID) once the spot is fulfilled.
-
 resource "aws_ec2_tag" "user_project_name" {
   resource_id = module.user_ec2.id
   key         = "ProjectName"
