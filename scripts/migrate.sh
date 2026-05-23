@@ -244,7 +244,7 @@ _init_user_data() {
     -backend-config="bucket=${TF_BACKEND_BUCKET}" \
     -backend-config="key=${DATA_KEY}" \
     -backend-config="region=${TF_BACKEND_REGION}" \
-    > /dev/null 2>&1
+    >&2
 }
 
 # Common terraform variable args for a user.
@@ -340,13 +340,16 @@ _create_data_volume() {
   local subnet_id="$2"
   echo "--- creating data volume for ${username} ---" >&2
   _init_user_data "${username}"
-  terraform -chdir="${TF_USER_DATA_DIR}" apply -auto-approve \
+  if ! terraform -chdir="${TF_USER_DATA_DIR}" apply -auto-approve \
     -var="username=${username}" \
     -var="project_name=${PROJECT_NAME}" \
     -var="aws_region=${AWS_REGION}" \
     -var="subnet_id=${subnet_id}" \
     -var="ebs_data_volume_size_gb=${EBS_DATA_VOLUME_SIZE_GB:-30}" \
-    > /dev/null 2>&1
+    >&2; then
+    echo "ERROR: terraform apply failed for data volume." >&2
+    exit 1
+  fi
   local vol_id
   vol_id=$(terraform -chdir="${TF_USER_DATA_DIR}" output -raw volume_id 2>/dev/null | grep -Eo 'vol-[0-9a-f]+')
   if [[ -z "${vol_id}" ]]; then
