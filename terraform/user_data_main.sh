@@ -48,18 +48,22 @@ if [[ -n "${DATA_VOLUME_ID:-}" ]]; then
   echo "--- mounting data volume ${DATA_VOLUME_ID} ---"
   # Nitro instances expose EBS volumes via NVMe. The volume serial is the volume
   # ID with dashes removed (vol-0abc1234 → vol0abc1234).
+  # Wait up to 5 minutes (60 × 5s). The Terraform aws_volume_attachment resource
+  # is applied after the instance reaches running state, so the attachment can
+  # arrive well after user_data starts — especially when dnf cache is warm and
+  # the package installs finish in seconds rather than minutes.
   VOLUME_SERIAL="${DATA_VOLUME_ID//-/}"
   DATA_DEV=""
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do
     SYMLINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_SERIAL}"
     if [[ -L "${SYMLINK}" ]]; then
       DATA_DEV=$(readlink -f "${SYMLINK}")
       break
     fi
-    sleep 2
+    sleep 5
   done
   if [[ -z "${DATA_DEV}" ]]; then
-    echo "WARNING: Data volume device not found after 60s — continuing without mount." >&2
+    echo "WARNING: Data volume device not found after 300s — continuing without mount." >&2
   else
     if ! blkid "${DATA_DEV}" > /dev/null 2>&1; then
       echo "  First boot: formatting data volume..."

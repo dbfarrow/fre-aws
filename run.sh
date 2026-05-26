@@ -87,7 +87,10 @@ infrastructure:
 
 instance lifecycle:
   start [user]          Start an EC2 instance (omit user to start all)
-  stop [user]           Stop an EC2 instance (omit user to stop all)
+  stop [user] [--shutdown]
+                        Stop an EC2 instance (omit user to stop all).
+                        Hibernates by default when the instance supports it.
+                        --shutdown  always do a full stop instead of hibernating
   migrate <user>        Blue-green instance migration: backup home dir + credentials,
                         provision a spare instance (<user>-spare), restore, and leave
                         spare running for validation.
@@ -477,6 +480,9 @@ if [[ "${MODE}" == "admin" ]]; then
     stat)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/stat.sh
       ;;
+    diag)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/diag.sh
+      ;;
     list)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh "${@:2}"
       ;;
@@ -618,9 +624,12 @@ if [[ "${MODE}" == "admin" ]]; then
       fi
       ;;
     stop)
+      SHUTDOWN_FLAG=""
+      [[ "${3:-}" == "--shutdown" ]] && SHUTDOWN_FLAG="true"
       if [[ -n "${USERNAME}" ]]; then
         docker run "${DOCKER_ARGS[@]}" \
           --env "DEV_USERNAME=${USERNAME}" \
+          --env "SHUTDOWN_MODE=${SHUTDOWN_FLAG}" \
           "${IMAGE_NAME}" /workspace/scripts/stop.sh
       else
         CONFIGURED_USERS=$(docker run "${DOCKER_ARGS_QUIET[@]}" "${IMAGE_NAME}" /workspace/scripts/list-users.sh)
@@ -628,7 +637,7 @@ if [[ "${MODE}" == "admin" ]]; then
           echo "No users registered. Run './admin.sh add-user' first." >&2; exit 1
         fi
         for user in ${CONFIGURED_USERS}; do
-          docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
+          docker run "${DOCKER_ARGS[@]}" --env "DEV_USERNAME=${user}" --env "SHUTDOWN_MODE=${SHUTDOWN_FLAG}" "${IMAGE_NAME}" /workspace/scripts/stop.sh
         done
       fi
       ;;

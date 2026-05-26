@@ -681,9 +681,16 @@ do_promote() {
     "s3://${TF_BACKEND_BUCKET}/${backup_key}" \
     --region "${TF_BACKEND_REGION}" 2>/dev/null || true
 
+  # P7: Refresh live config on the promoted instance.
+  # Updates .fre-config (username, region), session_start.sh, autoshutdown timer, etc.
+  # Must run after P3 so the Username tag is already dave when refresh resolves the instance.
+  echo "--- refreshing config on promoted instance ---"
+  DEV_USERNAME="${DEV_USERNAME}" bash "${SCRIPT_DIR}/refresh.sh"
+
   echo ""
   echo "=== Migration complete. ${DEV_USERNAME} is now running on new infrastructure. ==="
   echo "    Connect: ./admin.sh connect ${DEV_USERNAME}"
+  echo "    Note: re-login to Claude required (run /login on first connect)"
 }
 
 # ---------------------------------------------------------------------------

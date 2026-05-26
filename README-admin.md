@@ -552,8 +552,8 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ### Keeping costs low
 
-- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
-- **Stop instances manually when needed** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
+- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten — instances with hibernation enabled are hibernated rather than stopped, preserving the user's session state. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
+- **Stop instances manually when needed** — `./admin.sh stop <username>`. Hibernates automatically if the instance was provisioned with `HIBERNATION=true` (preserves RAM state for fast resume). Use `--shutdown` to force a full stop instead. A stopped or hibernated EC2 incurs no compute charges.
 - **Spot instances are on by default** — saves 60–90% once free tier expires.
 - For heavy workloads (browser automation, large builds), use `INSTANCE_TYPE=t3.small` (2 GB RAM) or larger.
 
@@ -1052,7 +1052,8 @@ aws logs tail /aws/lambda/<project>-slack-notifier --since 1h
 ### Instance lifecycle
 ```bash
 ./admin.sh start [username]             # start an instance (omit username to start all)
-./admin.sh stop  [username]             # stop an instance  (omit username to stop all)
+./admin.sh stop  [username]             # stop/hibernate an instance (omit username for all)
+./admin.sh stop  [username] --shutdown  # force a full stop even if hibernation is enabled
 ```
 
 ### Instance migration
@@ -1068,6 +1069,8 @@ the admin host.
 ./admin.sh down <username>-spare        # abandon a spare without promoting
 ./admin.sh down <username> --delete-data  # destroy instance AND data volume (requires typed confirmation)
 ```
+
+Promotion (`--live`) automatically runs `refresh` on the promoted instance to update `.fre-config` with the correct username and push the latest `session_start.sh`. The user will need to run `/login` in Claude once after migration — auth tokens are instance-specific and do not transfer.
 
 **Architecture: persistent EBS data volume**
 

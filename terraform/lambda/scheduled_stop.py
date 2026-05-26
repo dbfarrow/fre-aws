@@ -13,10 +13,26 @@ def handler(event, context):
         {'Name': 'tag:ProjectName', 'Values': [project]},
         {'Name': 'instance-state-name', 'Values': ['running', 'pending']}
     ])
-    ids = [i['InstanceId'] for r in resp['Reservations'] for i in r['Instances']]
-    if not ids:
+    instances = [i for r in resp['Reservations'] for i in r['Instances']]
+    if not instances:
         logger.info(f"No running instances for project '{project}'")
-        return {'stopped': []}
-    logger.info(f"Stopping {len(ids)} instances: {ids}")
-    ec2.stop_instances(InstanceIds=ids)
-    return {'stopped': ids}
+        return {'hibernated': [], 'stopped': []}
+
+    hibernate_ids = [
+        i['InstanceId'] for i in instances
+        if i.get('HibernationOptions', {}).get('Configured', False)
+    ]
+    stop_ids = [
+        i['InstanceId'] for i in instances
+        if not i.get('HibernationOptions', {}).get('Configured', False)
+    ]
+
+    if hibernate_ids:
+        logger.info(f"Hibernating {len(hibernate_ids)} instances: {hibernate_ids}")
+        ec2.stop_instances(InstanceIds=hibernate_ids, Hibernate=True)
+
+    if stop_ids:
+        logger.info(f"Stopping {len(stop_ids)} instances: {stop_ids}")
+        ec2.stop_instances(InstanceIds=stop_ids)
+
+    return {'hibernated': hibernate_ids, 'stopped': stop_ids}

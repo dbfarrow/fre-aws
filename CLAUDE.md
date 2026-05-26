@@ -380,6 +380,21 @@ terraform plan
 
 ## Debugging Tips
 
+### Containerized environment constraint
+
+Claude Code always runs inside a Docker container on the user's machine. It **cannot** directly execute AWS CLI commands, run Terraform, or SSH into EC2 instances. When diagnostics are needed:
+
+1. Write the diagnostic commands to `scripts/diag.sh` (update it in place for each new diagnostic need)
+2. Tell the user to run `./admin.sh diag` — this executes the script in the Docker container with full AWS credentials and Terraform access
+3. The script tees output to both stdout and `config/diag-output.txt` (writable from inside the container via the `/workspace/config/` mount)
+4. Ask the user to say **"results"** when done — then read `config/diag-output.txt` with the Read tool
+
+**Never** ask the user to copy-paste AWS CLI or shell command output — copy-paste injects line breaks that break commands. Always write diagnostic commands to `diag.sh` instead.
+
+The `diag.sh` script is a living file: overwrite it whenever a new diagnostic is needed. It is not committed to git (the output file `config/diag-output.txt` is gitignored).
+
+### General tips
+
 - **Always write debug commands as a single line** — users copy-paste from the terminal; line continuations break paste
 - Check autoshutdown timer: `systemctl status autoshutdown.timer`
 - Check autoshutdown logs: `journalctl -u autoshutdown.service --no-pager -n 20`
