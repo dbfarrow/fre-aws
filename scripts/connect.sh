@@ -64,6 +64,46 @@ if [[ -z "${INSTANCE_ID}" || "${INSTANCE_ID}" == "None" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Weekly SSM agent version check (runs when DO_VERSION_CHECK=true, set by
+# run.sh if the state file is absent or >7 days old).
+# Reads/writes /workspace/config/.state/versions.env on the host (via mount).
+# ---------------------------------------------------------------------------
+if [[ "${DO_VERSION_CHECK:-false}" == "true" ]]; then
+  _VER_SSM_NEW=$(aws ssm describe-instance-information \
+    --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+    --query 'InstanceInformationList[0].AgentVersion' \
+    --region "${AWS_REGION}" \
+    --output text 2>/dev/null || true)
+  if [[ -n "${_VER_SSM_NEW}" && "${_VER_SSM_NEW}" != "None" ]]; then
+    _VER_STATE_FILE="/workspace/config/.state/versions.env"
+    mkdir -p "/workspace/config/.state"
+    # Read existing fields (preserve PLUGIN_* written by build)
+    _VER_PLUGIN=""; _VER_PLUGIN_AT=0
+    _VER_SSM_OLD=""; _VER_SSM_CHANGED=0
+    if [[ -f "${_VER_STATE_FILE}" ]]; then
+      _VER_PLUGIN=$(grep      '^PLUGIN_VERSION='       "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+      _VER_PLUGIN_AT=$(grep   '^PLUGIN_UPDATED_AT='    "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+      _VER_SSM_OLD=$(grep     '^SSM_AGENT_VERSION='    "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+      _VER_SSM_CHANGED=$(grep '^SSM_AGENT_CHANGED_AT=' "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+    fi
+    # If this is the first check ever, seed plugin version from the running container
+    if [[ -z "${_VER_PLUGIN}" ]]; then
+      _VER_PLUGIN=$(session-manager-plugin --version 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+      _VER_PLUGIN_AT=$(date +%s)
+    fi
+    # Detect agent version change
+    if [[ -n "${_VER_SSM_OLD}" && "${_VER_SSM_NEW}" != "${_VER_SSM_OLD}" ]]; then
+      echo "ℹ  SSM agent version changed: ${_VER_SSM_OLD} → ${_VER_SSM_NEW}"
+      _VER_SSM_CHANGED=$(date +%s)
+    fi
+    printf 'PLUGIN_VERSION="%s"\nPLUGIN_UPDATED_AT="%s"\nSSM_AGENT_VERSION="%s"\nSSM_AGENT_CHANGED_AT="%s"\nSSM_AGENT_CHECKED_AT="%s"\n' \
+      "${_VER_PLUGIN}" "${_VER_PLUGIN_AT:-0}" \
+      "${_VER_SSM_NEW}" "${_VER_SSM_CHANGED:-0}" "$(date +%s)" \
+      > "${_VER_STATE_FILE}"
+  fi
+fi
+
 # Verify the instance is running
 INSTANCE_STATE=$(aws ec2 describe-instances \
   --instance-ids "${INSTANCE_ID}" \
@@ -123,6 +163,11 @@ SSH_OPTS=(
   "-A"                              # Forward agent to EC2 (keys in agent available on instance)
   "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"
+  # Keepalives: send a null packet every 30s so the SSM WebSocket stays alive
+  # and dead connections are detected quickly (3 missed → disconnect with an
+  # error) rather than hanging silently until manually killed.
+  "-o" "ServerAliveInterval=30"
+  "-o" "ServerAliveCountMax=3"
   # Tunnel SSH through SSM — no inbound port 22 needed in security group
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
 )

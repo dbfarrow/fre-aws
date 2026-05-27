@@ -391,7 +391,7 @@ Claude Code always runs inside a Docker container on the user's machine. It **ca
 
 **Never** ask the user to copy-paste AWS CLI or shell command output — copy-paste injects line breaks that break commands. Always write diagnostic commands to `diag.sh` instead.
 
-The `diag.sh` script is a living file: overwrite it whenever a new diagnostic is needed. It is not committed to git (the output file `config/diag-output.txt` is gitignored).
+The `diag.sh` script is a living file: overwrite it whenever a new diagnostic is needed. It is gitignored and never committed (the output file `config/diag-output.txt` is also gitignored). For permanent, reusable diagnostics that are worth keeping, give them a descriptive name (e.g. `scripts/ssm-health.sh`) and wire a dedicated `./admin.sh` command to them — see `run.sh` dispatch and `scripts/ssm-health.sh` as an example.
 
 ### General tips
 
