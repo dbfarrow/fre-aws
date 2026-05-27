@@ -61,7 +61,10 @@ config/users/
 # Per-project run container Dockerfile — created by Claude, not for version control
 .fre-run.dockerfile
 
-# Diagnostic output written by scripts/diag.sh — never commit
+# Diagnostic scratch pad and its output — never commit.
+# diag.sh is a living file overwritten for each ad-hoc debugging task.
+# For permanent diagnostics, see scripts/ssm-health.sh (./admin.sh ssm-health).
+scripts/diag.sh
 config/diag-output.txt
 
 # Claude Code local settings

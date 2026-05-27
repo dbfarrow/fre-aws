@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# diag.sh — SSM session / tunnel-freeze diagnosis
-# Current hypothesis: session-manager-plugin version in Docker image (built at image
-#   build time) may be older than the SSM agent on the new instance (3.3.4108.0),
-#   causing protocol-level WebSocket stalls even under active traffic.
-#   This check reports both versions so they can be compared.
+# ssm-health.sh — SSM session health check
+# Reports the client-side session-manager-plugin version (inside Docker) and the
+# SSM agent version on the instance, plus memory, load, agent logs, autoshutdown
+# status, network MTU, and disk I/O — everything needed to diagnose SSM tunnel
+# freezes and plugin/agent version drift.
 #
-# Run via: ./admin.sh diag
+# Run via: ./admin.sh ssm-health
 # Output goes to stdout AND config/diag-output.txt (readable by Claude on the host).
 set -euo pipefail
 

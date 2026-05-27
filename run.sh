@@ -483,6 +483,9 @@ if [[ "${MODE}" == "admin" ]]; then
     diag)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/diag.sh
       ;;
+    ssm-health)
+      docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/ssm-health.sh
+      ;;
     list)
       docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /workspace/scripts/list.sh "${@:2}"
       ;;
