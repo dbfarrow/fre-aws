@@ -452,24 +452,24 @@ _stale_push_check() {
   local timestamp_file="${config_dir}/.last-push-${username}"
   local tracked=()
   for f in "${HOME}/.tmux.conf" "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.vimrc" "${HOME}/.fre-aws"; do
-    [[ -f "${f}" ]] && tracked+=("${f}")
+    if [[ -f "${f}" ]]; then tracked+=("${f}"); fi
   done
-  [[ ${#tracked[@]} -eq 0 ]] && return 0
+  if [[ ${#tracked[@]} -eq 0 ]]; then return 0; fi
   _STALE_FILES=()
   if [[ ! -f "${timestamp_file}" ]]; then
     _STALE_FILES=("${tracked[@]}")
   else
     for f in "${tracked[@]}"; do
-      [[ "${f}" -nt "${timestamp_file}" ]] && _STALE_FILES+=("${f}")
+      if [[ "${f}" -nt "${timestamp_file}" ]]; then _STALE_FILES+=("${f}"); fi
     done
   fi
-  [[ ${#_STALE_FILES[@]} -eq 0 ]] && return 0
+  if [[ ${#_STALE_FILES[@]} -eq 0 ]]; then return 0; fi
   echo "Config files changed since last push to '${username}':"
   for f in "${_STALE_FILES[@]}"; do printf "  %s\n" "$(basename "${f}")"; done
   echo ""
   read -r -p "Push config before connecting? [y/N] " _push_confirm
   echo ""
-  [[ "${_push_confirm}" =~ ^[Yy]$ ]] && _DO_PUSH=true
+  if [[ "${_push_confirm}" =~ ^[Yy]$ ]]; then _DO_PUSH=true; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -686,6 +686,35 @@ if [[ "${MODE}" == "admin" ]]; then
           echo ""
         fi
       fi
+      # ---------------------------------------------------------------------------
+      # Version drift check: warn if SSM agent updated since last Docker build.
+      # The weekly agent version check runs inside connect.sh (has AWS credentials).
+      # ---------------------------------------------------------------------------
+      _VER_STATE_FILE="$(pwd)/config/.state/versions.env"
+      _DO_VERSION_CHECK=true   # default: check on first run (no state file yet)
+      _VER_PLUGIN="unknown"; _VER_SSM="unknown"
+      _VER_PLUGIN_UPDATED_AT=0; _VER_SSM_CHANGED_AT=0; _VER_SSM_CHECKED_AT=0
+      if [[ -f "${_VER_STATE_FILE}" ]]; then
+        _VER_PLUGIN=$(grep         '^PLUGIN_VERSION='       "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _VER_PLUGIN_UPDATED_AT=$(grep '^PLUGIN_UPDATED_AT='  "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _VER_SSM=$(grep            '^SSM_AGENT_VERSION='    "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _VER_SSM_CHANGED_AT=$(grep '^SSM_AGENT_CHANGED_AT=' "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _VER_SSM_CHECKED_AT=$(grep '^SSM_AGENT_CHECKED_AT=' "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        # Warn if agent changed after last build
+        if [[ -n "${_VER_SSM_CHANGED_AT}" && -n "${_VER_PLUGIN_UPDATED_AT}" ]] \
+            && [[ "${_VER_SSM_CHANGED_AT:-0}" -gt "${_VER_PLUGIN_UPDATED_AT:-0}" ]]; then
+          echo "⚠  SSM agent was updated since your last Docker build."
+          echo "   Agent: ${_VER_SSM}   Plugin built against: ${_VER_PLUGIN}"
+          echo "   Run: ./admin.sh build --no-cache"
+          echo ""
+        fi
+        # Only re-check weekly
+        _VER_NOW=$(date +%s)
+        if [[ $(( _VER_NOW - ${_VER_SSM_CHECKED_AT:-0} )) -lt 604800 ]]; then
+          _DO_VERSION_CHECK=false
+        fi
+      fi
+
       _EXTRA_PORT_ARGS=()
       for _p in "${EXTRA_FORWARD_PORTS[@]+"${EXTRA_FORWARD_PORTS[@]}"}"; do
         _EXTRA_PORT_ARGS+=("--publish" "${_p}:${_p}")
@@ -700,6 +729,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "EXTRA_FORWARD_PORTS=${_EXTRA_PORTS_ENV}" \
+          --env "DO_VERSION_CHECK=${_DO_VERSION_CHECK}" \
           "${_CONNECT_PROFILE_ARG[@]}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
       else
@@ -718,6 +748,7 @@ if [[ "${MODE}" == "admin" ]]; then
           --volume "${HOME}/.ssh:/root/.ssh:ro" \
           --env "DEV_USERNAME=${USERNAME}" \
           --env "EXTRA_FORWARD_PORTS=${_EXTRA_PORTS_ENV}" \
+          --env "DO_VERSION_CHECK=${_DO_VERSION_CHECK}" \
           "${_CONNECT_PROFILE_ARG[@]}" \
           --env "SSH_KEY_FILE=${CONTAINER_SSH_KEY}" \
           "${IMAGE_NAME}" /workspace/scripts/connect.sh
@@ -850,7 +881,27 @@ if [[ "${MODE}" == "admin" ]]; then
         "${IMAGE_NAME}" /workspace/scripts/push-admin-keys.sh
       ;;
     build)
-      docker build -t "${IMAGE_NAME}" "$(dirname "$0")"
+      _BUILD_ARGS=()
+      [[ "${2:-}" == "--no-cache" ]] && _BUILD_ARGS+=("--no-cache")
+      docker build "${_BUILD_ARGS[@]+"${_BUILD_ARGS[@]}"}" -t "${IMAGE_NAME}" "$(dirname "$0")"
+      # Capture plugin version and record it in version state.
+      # Only build updates the plugin version — this is how the drift warning clears.
+      _PLUGIN_VER=$(docker run --rm "${IMAGE_NAME}" session-manager-plugin --version 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+      _VER_STATE_DIR="$(dirname "$0")/config/.state"
+      _VER_STATE_FILE="${_VER_STATE_DIR}/versions.env"
+      mkdir -p "${_VER_STATE_DIR}"
+      # Preserve existing SSM agent fields so we don't lose weekly-check history
+      _PREV_SSM_VER=""; _PREV_SSM_CHANGED=0; _PREV_SSM_CHECKED=0
+      if [[ -f "${_VER_STATE_FILE}" ]]; then
+        _PREV_SSM_VER=$(grep    '^SSM_AGENT_VERSION='    "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _PREV_SSM_CHANGED=$(grep '^SSM_AGENT_CHANGED_AT=' "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+        _PREV_SSM_CHECKED=$(grep '^SSM_AGENT_CHECKED_AT=' "${_VER_STATE_FILE}" | cut -d= -f2 | tr -d '"' || true)
+      fi
+      printf 'PLUGIN_VERSION="%s"\nPLUGIN_UPDATED_AT="%s"\nSSM_AGENT_VERSION="%s"\nSSM_AGENT_CHANGED_AT="%s"\nSSM_AGENT_CHECKED_AT="%s"\n' \
+        "${_PLUGIN_VER}" "$(date +%s)" \
+        "${_PREV_SSM_VER:-}" "${_PREV_SSM_CHANGED:-0}" "${_PREV_SSM_CHECKED:-0}" \
+        > "${_VER_STATE_FILE}"
+      echo "session-manager-plugin ${_PLUGIN_VER} installed."
       ;;
     test)
       docker run "${DOCKER_ARGS[@]}" \
