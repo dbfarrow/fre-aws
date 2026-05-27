@@ -60,10 +60,27 @@ if [[ "${INSTANCE_STATE}" == "stopped" ]]; then
   exit 0
 fi
 
-echo "Stopping instance ${INSTANCE_ID} (${DEV_USERNAME})..."
+SHUTDOWN_MODE="${SHUTDOWN_MODE:-false}"
+STOP_ARGS=()
+STOP_VERB="Stopping"
+
+if [[ "${SHUTDOWN_MODE}" != "true" ]]; then
+  HIBERNATION_CONFIGURED=$(aws ec2 describe-instances \
+    --instance-ids "${INSTANCE_ID}" \
+    --region "${AWS_REGION}" \
+    --query 'Reservations[0].Instances[0].HibernationOptions.Configured' \
+    --output text 2>/dev/null || echo "False")
+  if [[ "${HIBERNATION_CONFIGURED}" == "True" ]]; then
+    STOP_ARGS+=("--hibernate")
+    STOP_VERB="Hibernating"
+  fi
+fi
+
+echo "${STOP_VERB} instance ${INSTANCE_ID} (${DEV_USERNAME})..."
 aws ec2 stop-instances \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}" \
+  "${STOP_ARGS[@]+"${STOP_ARGS[@]}"}" \
   --output json > /dev/null
 
 echo "Waiting for instance to reach stopped state..."
@@ -71,4 +88,8 @@ aws ec2 wait instance-stopped \
   --instance-ids "${INSTANCE_ID}" \
   --region "${AWS_REGION}"
 
-echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is stopped. EBS data is preserved."
+if [[ "${STOP_VERB}" == "Hibernating" ]]; then
+  echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is hibernated. Resume with: ./admin.sh start ${DEV_USERNAME}"
+else
+  echo "Instance ${INSTANCE_ID} (${DEV_USERNAME}) is stopped. EBS data is preserved."
+fi

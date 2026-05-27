@@ -12,3 +12,8 @@ output "instance_ami" {
   description = "AMI ID of the current EC2 instance. Read by up.sh to pin the AMI and prevent unintended instance replacement when Amazon publishes a new AMI."
   value       = module.user_ec2.ami
 }
+
+output "data_volume_id" {
+  description = "EBS data volume ID attached to this instance (empty string if not using data volumes)."
+  value       = var.data_volume_id
+}

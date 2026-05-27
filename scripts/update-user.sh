@@ -5,8 +5,10 @@
 # Usage: ./admin.sh update-user <file>
 #   Recognised fields: NEW_USERNAME, USER_EMAIL, ROLE, GIT_USER_NAME,
 #     GIT_USER_EMAIL, SSH_PUBLIC_KEY, PREFERRED_SHELL, SLACK_USER_ID
+#   Per-user compute overrides: INSTANCE_TYPE, USE_SPOT, HIBERNATION, EBS_DATA_VOLUME_SIZE_GB
 #
-# To apply changes to a running instance: ./admin.sh refresh <username>
+# Compute overrides take effect on the next 'admin.sh up' or 'admin.sh migrate'.
+# To apply identity/config changes to a running instance: ./admin.sh refresh <username>
 # For SSH key changes: also run ./admin.sh update-user-key <username>
 set -euo pipefail
 
@@ -92,23 +94,31 @@ echo ""
 # empty values are left unchanged in the registry).
 # ---------------------------------------------------------------------------
 jq \
-  --arg user          "${TARGET_USERNAME}" \
-  --arg user_email    "${USER_EMAIL:-}" \
-  --arg role          "${ROLE:-}" \
-  --arg git_name      "${GIT_USER_NAME:-}" \
-  --arg git_email     "${GIT_USER_EMAIL:-}" \
-  --arg ssh_key       "${SSH_PUBLIC_KEY:-}" \
-  --arg shell         "${PREFERRED_SHELL:-}" \
-  --arg slack_user_id "${SLACK_USER_ID:-}" \
+  --arg user             "${TARGET_USERNAME}" \
+  --arg user_email       "${USER_EMAIL:-}" \
+  --arg role             "${ROLE:-}" \
+  --arg git_name         "${GIT_USER_NAME:-}" \
+  --arg git_email        "${GIT_USER_EMAIL:-}" \
+  --arg ssh_key          "${SSH_PUBLIC_KEY:-}" \
+  --arg shell            "${PREFERRED_SHELL:-}" \
+  --arg slack_user_id    "${SLACK_USER_ID:-}" \
+  --arg instance_type    "${INSTANCE_TYPE:-}" \
+  --arg use_spot         "${USE_SPOT:-}" \
+  --arg hibernation      "${HIBERNATION:-}" \
+  --arg data_vol_size    "${EBS_DATA_VOLUME_SIZE_GB:-}" \
   '
   .[$user] *=
-    (if $user_email    != "" then {user_email:      $user_email}    else {} end) +
-    (if $role          != "" then {role:            $role}          else {} end) +
-    (if $git_name      != "" then {git_user_name:   $git_name}      else {} end) +
-    (if $git_email     != "" then {git_user_email:  $git_email}     else {} end) +
-    (if $ssh_key       != "" then {ssh_public_key:  $ssh_key}       else {} end) +
-    (if $shell         != "" then {preferred_shell: $shell}         else {} end) +
-    (if $slack_user_id != "" then {slack_user_id:   $slack_user_id} else {} end)
+    (if $user_email    != "" then {user_email:        $user_email}                  else {} end) +
+    (if $role          != "" then {role:              $role}                        else {} end) +
+    (if $git_name      != "" then {git_user_name:     $git_name}                   else {} end) +
+    (if $git_email     != "" then {git_user_email:    $git_email}                  else {} end) +
+    (if $ssh_key       != "" then {ssh_public_key:    $ssh_key}                    else {} end) +
+    (if $shell         != "" then {preferred_shell:   $shell}                      else {} end) +
+    (if $slack_user_id != "" then {slack_user_id:     $slack_user_id}              else {} end) +
+    (if $instance_type != "" then {instance_type:           $instance_type}                     else {} end) +
+    (if $use_spot      != "" then {use_spot:               ($use_spot == "true")}               else {} end) +
+    (if $hibernation   != "" then {hibernation:            ($hibernation == "true")}            else {} end) +
+    (if $data_vol_size != "" then {ebs_data_volume_size_gb: ($data_vol_size | tonumber)}        else {} end)
   ' \
   "${USERS_JSON}" > "${USERS_JSON}.tmp"
 mv "${USERS_JSON}.tmp" "${USERS_JSON}"

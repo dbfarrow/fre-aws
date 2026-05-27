@@ -111,3 +111,24 @@ variable "autoshutdown_idle_minutes" {
   type        = number
   default     = 30
 }
+
+variable "data_volume_id" {
+  description = <<-EOT
+    EBS data volume ID to attach at /home/developer/. When set, the volume is
+    attached as /dev/sdf and mounted at /home/developer/ on boot via user_data.
+    Leave empty (default) to use the root EBS volume for home (backward compatible).
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "hibernation" {
+  description = <<-EOT
+    Enable EC2 hibernation support. When true, the instance can be hibernated
+    (RAM written to root EBS, restored on next start) instead of stopped.
+    Requires use_spot=false — spot instances do not support hibernation.
+    Must be set at launch time; cannot be changed on a running instance.
+  EOT
+  type    = bool
+  default = false
+}

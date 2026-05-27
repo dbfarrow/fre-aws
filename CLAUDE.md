@@ -136,9 +136,15 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── slack_bot.tf             # Slack slash command bot: API Gateway + two Lambdas (conditional on enable_slack_bot)
 │   ├── lambda/slack_bot.py      # Slack bot Lambda: handle_command (sync) + handle_notify (async)
 │   ├── user/                    # Per-user module (called once per user by up.sh / down.sh)
-│   │   ├── main.tf              # EC2 instance, IAM role/profile, tags
-│   │   ├── variables.tf         # username, ssh_public_key, base outputs as inputs
-│   │   ├── outputs.tf           # instance_id, instance_state
+│   │   ├── main.tf              # EC2 instance, IAM role/profile, volume attachment, tags
+│   │   ├── variables.tf         # username, ssh_public_key, data_volume_id, base outputs as inputs
+│   │   ├── outputs.tf           # instance_id, instance_state, data_volume_id
+│   │   ├── backend.tf           # Empty S3 backend; keys injected at runtime
+│   │   └── versions.tf          # AWS provider only
+│   ├── user-data/               # Per-user EBS data volume (separate state — never destroyed by down)
+│   │   ├── main.tf              # aws_ebs_volume, prevent_destroy = true, tagged DataVolume=true
+│   │   ├── variables.tf         # username, subnet_id, ebs_data_volume_size_gb
+│   │   ├── outputs.tf           # volume_id, availability_zone
 │   │   ├── backend.tf           # Empty S3 backend; keys injected at runtime
 │   │   └── versions.tf          # AWS provider only
 │   └── tests/                   # terraform test files (*.tftest.hcl)
@@ -150,6 +156,7 @@ Always pin modules to a specific version tag (`?ref=vX.Y.Z`) — never use `late
 │   ├── start.sh                 # Start a stopped EC2 instance
 │   ├── stop.sh                  # Stop a running EC2 instance
 │   ├── connect.sh               # SSH over SSM tunnel → session_start.sh menu
+│   ├── migrate.sh               # Blue-green instance migration: detach data volume, provision spare, promote
 │   ├── refresh.sh               # Push config to running instance without rebuild
 │   ├── session_start.sh         # EC2-side: tmux launcher menu (source of truth)
 │   ├── stat.sh                  # Full environment status: identity, billing, instances (skips IC enumeration in external mode)
@@ -326,8 +333,9 @@ For power users who want to run programs interactively without the `run` round-t
 - State locking via **S3-native locking** (no DynamoDB table required)
 - Bucket and table names include the AWS account ID for global uniqueness: `${PROJECT_NAME}-${ACCOUNT_ID}-tfstate` / `${PROJECT_NAME}-${ACCOUNT_ID}-tflock`
 - Terraform state bucket is in us-east-1 (bootstrap ran there); EC2 resources are in us-west-2 — intentional
-- State is split: base state at `<project>/base/terraform.tfstate`; per-user state at `<project>/users/<username>/terraform.tfstate`
-- `up.sh` runs two phases: base apply (shared infra, fast no-op if converged), then per-user loop
+- State is split into three levels: base at `<project>/base/terraform.tfstate`; per-user EC2 at `<project>/users/<username>/terraform.tfstate`; per-user data volume at `<project>/users/<username>/data.tfstate`
+- The data volume state has `prevent_destroy = true` and is in a separate state file so `down` never touches it — data survives instance destruction
+- `up.sh` runs two phases: base apply (shared infra, fast no-op if converged), then per-user loop (optionally including data volume provisioning when `ENABLE_DATA_VOLUMES=true`)
 - `down <username>` destroys only that user's state; base is preserved. `down` with no argument tears down all users then base.
 
 ### Canonical Configuration (Multi-Admin Synchronization)
@@ -371,6 +379,21 @@ terraform plan
 ---
 
 ## Debugging Tips
+
+### Containerized environment constraint
+
+Claude Code always runs inside a Docker container on the user's machine. It **cannot** directly execute AWS CLI commands, run Terraform, or SSH into EC2 instances. When diagnostics are needed:
+
+1. Write the diagnostic commands to `scripts/diag.sh` (update it in place for each new diagnostic need)
+2. Tell the user to run `./admin.sh diag` — this executes the script in the Docker container with full AWS credentials and Terraform access
+3. The script tees output to both stdout and `config/diag-output.txt` (writable from inside the container via the `/workspace/config/` mount)
+4. Ask the user to say **"results"** when done — then read `config/diag-output.txt` with the Read tool
+
+**Never** ask the user to copy-paste AWS CLI or shell command output — copy-paste injects line breaks that break commands. Always write diagnostic commands to `diag.sh` instead.
+
+The `diag.sh` script is a living file: overwrite it whenever a new diagnostic is needed. It is not committed to git (the output file `config/diag-output.txt` is gitignored).
+
+### General tips
 
 - **Always write debug commands as a single line** — users copy-paste from the terminal; line continuations break paste
 - Check autoshutdown timer: `systemctl status autoshutdown.timer`

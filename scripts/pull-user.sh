@@ -65,12 +65,18 @@ fi
 # ---------------------------------------------------------------------------
 # Extract fields
 # ---------------------------------------------------------------------------
-user_email=$(  jq -r --arg u "${DEV_USERNAME}" '.[$u].user_email      // ""'     "${USERS_JSON}")
-role=$(        jq -r --arg u "${DEV_USERNAME}" '.[$u].role            // "user"' "${USERS_JSON}")
-git_name=$(    jq -r --arg u "${DEV_USERNAME}" '.[$u].git_user_name   // ""'     "${USERS_JSON}")
-git_email=$(   jq -r --arg u "${DEV_USERNAME}" '.[$u].git_user_email  // ""'     "${USERS_JSON}")
-ssh_key=$(     jq -r --arg u "${DEV_USERNAME}" '.[$u].ssh_public_key  // ""'     "${USERS_JSON}")
-pref_shell=$(  jq -r --arg u "${DEV_USERNAME}" '.[$u].preferred_shell // "bash"' "${USERS_JSON}")
+user_email=$(   jq -r --arg u "${DEV_USERNAME}" '.[$u].user_email        // ""'     "${USERS_JSON}")
+role=$(         jq -r --arg u "${DEV_USERNAME}" '.[$u].role              // "user"' "${USERS_JSON}")
+git_name=$(     jq -r --arg u "${DEV_USERNAME}" '.[$u].git_user_name     // ""'     "${USERS_JSON}")
+git_email=$(    jq -r --arg u "${DEV_USERNAME}" '.[$u].git_user_email    // ""'     "${USERS_JSON}")
+ssh_key=$(      jq -r --arg u "${DEV_USERNAME}" '.[$u].ssh_public_key    // ""'     "${USERS_JSON}")
+pref_shell=$(   jq -r --arg u "${DEV_USERNAME}" '.[$u].preferred_shell   // "bash"' "${USERS_JSON}")
+
+# Per-user compute overrides (empty = use project-wide default from admin.env)
+instance_type=$(   jq -r --arg u "${DEV_USERNAME}" '.[$u].instance_type          // ""' "${USERS_JSON}")
+use_spot=$(        jq -r --arg u "${DEV_USERNAME}" '.[$u].use_spot               // ""' "${USERS_JSON}")
+hibernation=$(     jq -r --arg u "${DEV_USERNAME}" '.[$u].hibernation            // ""' "${USERS_JSON}")
+data_volume_size=$(jq -r --arg u "${DEV_USERNAME}" '.[$u].ebs_data_volume_size_gb // ""' "${USERS_JSON}")
 
 # ---------------------------------------------------------------------------
 # Write output file
@@ -92,6 +98,17 @@ GIT_USER_NAME=${git_name}
 GIT_USER_EMAIL=${git_email}
 SSH_PUBLIC_KEY=${ssh_key}
 PREFERRED_SHELL=${pref_shell}
+
+# ---- Per-user compute overrides (leave empty to use the project-wide default) ----
+# Changes here require a new instance — apply with: admin.sh migrate <username>
+# Note: HIBERNATION=true requires USE_SPOT=false
+INSTANCE_TYPE=${instance_type}
+USE_SPOT=${use_spot}
+HIBERNATION=${hibernation}
+# Data volume size — expand only (never shrink). Apply with 'admin.sh up <username>',
+# then run 'sudo resize2fs /dev/disk/by-label/fre-user-data' on the instance.
+# No migration needed. Root volume size is fixed at the project default (EBS_VOLUME_SIZE_GB).
+EBS_DATA_VOLUME_SIZE_GB=${data_volume_size}
 EOF
 
 echo "Registry entry for '${DEV_USERNAME}' written to: config/users/${DEV_USERNAME}.env"

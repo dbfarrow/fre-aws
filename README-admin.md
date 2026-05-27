@@ -552,8 +552,8 @@ Controlled by `NETWORK_MODE` in `config/admin.env`. Applies to all instances.
 
 ### Keeping costs low
 
-- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
-- **Stop instances manually when needed** — `./admin.sh stop <username>`. A stopped EC2 incurs no compute charges.
+- **Instances stop automatically when idle** — each instance runs an autoshutdown timer that monitors tmux session count. When a user exits Claude and closes their session, the instance shuts itself down after `AUTOSHUTDOWN_IDLE_MINUTES` of inactivity (default: 30 minutes). A midnight Lambda provides a safety net for sessions that are detached but forgotten — instances with hibernation enabled are hibernated rather than stopped, preserving the user's session state. No manual `stop` required under normal use. Increase the idle period when debugging to avoid being interrupted mid-session.
+- **Stop instances manually when needed** — `./admin.sh stop <username>`. Hibernates automatically if the instance was provisioned with `HIBERNATION=true` (preserves RAM state for fast resume). Use `--shutdown` to force a full stop instead. A stopped or hibernated EC2 incurs no compute charges.
 - **Spot instances are on by default** — saves 60–90% once free tier expires.
 - For heavy workloads (browser automation, large builds), use `INSTANCE_TYPE=t3.small` (2 GB RAM) or larger.
 
@@ -690,6 +690,29 @@ To inspect or update a user's attributes (email, role, git config, preferred she
 `pull-user` writes a local `.env` file with all stored fields. `update-user` merges the edited fields back — only non-empty values overwrite; fields left blank are preserved unchanged in the registry.
 
 Neither command touches IAM Identity Center, installer bundles, or running instances. To apply changes (e.g. updated shell preference) to a running instance: `./admin.sh refresh <username>`.
+
+**Per-user compute overrides**
+
+The `.env` file produced by `pull-user` includes three optional compute fields that override the project-wide defaults in `admin.env`:
+
+| Field | Description |
+|-------|-------------|
+| `INSTANCE_TYPE` | EC2 instance type (e.g. `t3.medium`) |
+| `USE_SPOT` | `true`/`false` — spot saves cost but can't hibernate |
+| `HIBERNATION` | `true`/`false` — hibernate instead of stop; requires `USE_SPOT=false` |
+
+Leave any field empty to fall back to the project-wide default. Compute changes require a new instance — apply them with `admin.sh migrate <username>` rather than `refresh`.
+
+**Volume sizing**
+
+There are two EBS volumes per user when data volumes are enabled:
+
+- **Root volume** (`EBS_VOLUME_SIZE_GB` in `admin.env`) — project-wide default only, not per-user. Contains the OS and toolchain. Resizing it requires a new instance (use `migrate`), but there is rarely a reason to do so.
+- **Data volume** (`EBS_DATA_VOLUME_SIZE_GB` in `admin.env`) — stores `/home/developer/`. Can be expanded in-place without stopping the instance: update the value in `admin.env`, run `admin.sh up <username>`, then resize the filesystem on the instance:
+  ```
+  sudo resize2fs /dev/disk/by-label/fre-user-data
+  ```
+  EBS volumes can only be expanded, never shrunk. No migration needed for data volume resizing.
 
 For SSH key updates specifically, use `./admin.sh update-user-key <username>` — it handles the instance push and installer bundle regeneration that `update-user` doesn't do.
 
@@ -1029,8 +1052,69 @@ aws logs tail /aws/lambda/<project>-slack-notifier --since 1h
 ### Instance lifecycle
 ```bash
 ./admin.sh start [username]             # start an instance (omit username to start all)
-./admin.sh stop  [username]             # stop an instance  (omit username to stop all)
+./admin.sh stop  [username]             # stop/hibernate an instance (omit username for all)
+./admin.sh stop  [username] --shutdown  # force a full stop even if hibernation is enabled
 ```
+
+### Instance migration
+
+Blue-green migration for configuration changes that require a new EC2 instance (e.g. enabling
+hibernation, changing instance type, or adopting a new AMI). The user's data lives on a persistent
+EBS data volume that travels with them across instance replacements — no data is copied to S3 or to
+the admin host.
+
+```bash
+./admin.sh migrate <username>           # test run: provision spare with data volume, leave spare running
+./admin.sh migrate <username> --live    # live run: promote spare → primary (or full cycle if no spare)
+./admin.sh down <username>-spare        # abandon a spare without promoting
+./admin.sh down <username> --delete-data  # destroy instance AND data volume (requires typed confirmation)
+```
+
+Promotion (`--live`) automatically runs `refresh` on the promoted instance to update `.fre-config` with the correct username and push the latest `session_start.sh`. The user will need to run `/login` in Claude once after migration — auth tokens are instance-specific and do not transfer.
+
+**Architecture: persistent EBS data volume**
+
+Each user has two independent Terraform states:
+- `<project>/users/<username>/terraform.tfstate` — EC2 instance, IAM role, volume attachment (disposable)
+- `<project>/users/<username>/data.tfstate` — EBS data volume at `/home/developer/` (permanent, `prevent_destroy = true`)
+
+The data volume mounts at `/home/developer/` via `fstab` on every boot. The root EBS volume contains
+only the OS and toolchain. Instance replacement is zero-copy: detach volume from old instance → provision
+new instance → volume attaches and mounts automatically on boot.
+
+**Enabling data volumes for new users**
+
+Set `ENABLE_DATA_VOLUMES=true` in `config/admin.env` before running `admin.sh up <username>`. The data
+volume is provisioned as a separate Terraform apply (state: `data.tfstate`) before the EC2 instance.
+
+**Two migration flows**
+
+_Initial adoption (existing user, no data volume yet):_
+1. Original instance stays running throughout — it is your fallback at every step
+2. Creates a new blank EBS data volume in the same AZ
+3. Attaches it temporarily, SSHes in to format and rsync `/home/developer/` onto it, detaches
+4. Provisions `<username>-spare` with the data volume attached; boots with all data intact
+5. Operator validates — original is untouched
+
+_Steady-state migration (data volume already exists):_
+1. Checks `~/repos/*` for uncommitted/unpushed changes — warns and prompts to continue if dirty
+2. Stops the original instance
+3. Detaches the data volume
+4. Provisions `<username>-spare` with the data volume attached; boots with all data intact
+5. Operator validates
+
+**Live run:**
+- If `<username>-spare` already exists: shows its provisioned timestamp and prompts to promote
+- If no spare exists: runs the appropriate provision flow above, then waits for confirmation before promoting
+
+**Promotion (`--live`):**
+Destroys the original instance (EC2 + IAM state only — data volume is in a separate state and is
+unaffected), moves the spare's Terraform state to the original's state path, and runs `terraform apply`
+with the original username to rename IAM resources and tags. The EC2 instance stays running throughout.
+
+**AZ constraint:** A data volume is locked to the availability zone it was created in. If the subnet
+ever changes to a different AZ, migration would require a snapshot-and-restore. Document any AZ-pinned
+subnets when using `EXISTING_SUBNET_ID`.
 
 ### Connecting
 ```bash
