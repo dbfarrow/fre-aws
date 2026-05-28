@@ -163,10 +163,12 @@ SSH_OPTS=(
   "-A"                              # Forward agent to EC2 (keys in agent available on instance)
   "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"
-  # Keepalives: send a null packet every 30s so the SSM WebSocket stays alive
-  # and dead connections are detected quickly (3 missed → disconnect with an
-  # error) rather than hanging silently until manually killed.
-  "-o" "ServerAliveInterval=30"
+  # Keepalives: send a null packet every 10s so the SSM WebSocket stays alive.
+  # With plugin 1.2.814.0 / agent 3.3.x the WebSocket occasionally stalls without
+  # closing — 3 missed keepalives (30s total) gets a clean disconnect rather than
+  # an indefinite hang. ServerAliveInterval=10 also keeps the SSM WebSocket warm
+  # enough that the service doesn't consider the session idle between Claude turns.
+  "-o" "ServerAliveInterval=10"
   "-o" "ServerAliveCountMax=3"
   # Tunnel SSH through SSM — no inbound port 22 needed in security group
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
