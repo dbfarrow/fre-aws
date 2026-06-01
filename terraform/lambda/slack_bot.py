@@ -202,7 +202,7 @@ def _describe_project_instances():
 
 
 def _find_instance_for_user(username: str):
-    """Return (instance_id, state) for the user, or (None, None)."""
+    """Return (instance_id, state, hibernation_configured) for the user, or (None, None, False)."""
     project = os.environ["PROJECT_NAME"]
     resp = _ec2().describe_instances(
         Filters=[
@@ -212,8 +212,9 @@ def _find_instance_for_user(username: str):
     )
     for reservation in resp.get("Reservations", []):
         for inst in reservation.get("Instances", []):
-            return inst["InstanceId"], inst["State"]["Name"]
-    return None, None
+            hibernation = inst.get("HibernationOptions", {}).get("Configured", False)
+            return inst["InstanceId"], inst["State"]["Name"], hibernation
+    return None, None, False
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +346,7 @@ def handle_notify(event, context):
             _post_to_slack(response_url, _cmd_list())
 
         elif subcommand == "start":
-            instance_id, state = _find_instance_for_user(arg)
+            instance_id, state, _ = _find_instance_for_user(arg)
             if not instance_id:
                 _post_to_slack(response_url, f"No instance found for user *{arg}*.")
                 return
@@ -367,7 +368,7 @@ def handle_notify(event, context):
             )
 
         elif subcommand == "stop":
-            instance_id, state = _find_instance_for_user(arg)
+            instance_id, state, hibernation_configured = _find_instance_for_user(arg)
             if not instance_id:
                 _post_to_slack(response_url, f"No instance found for user *{arg}*.")
                 return
@@ -377,15 +378,17 @@ def handle_notify(event, context):
                     f"*{arg}*'s instance is *{state}* — can only stop a running instance.",
                 )
                 return
-            _ec2().stop_instances(InstanceIds=[instance_id])
+            stop_kwargs = {"Hibernate": True} if hibernation_configured else {}
+            _ec2().stop_instances(InstanceIds=[instance_id], **stop_kwargs)
             waiter = _ec2().get_waiter("instance_stopped")
             waiter.wait(
                 InstanceIds=[instance_id],
                 WaiterConfig={"MaxAttempts": 7, "Delay": 15},
             )
+            verb = "hibernated" if hibernation_configured else "stopped"
             _post_to_slack(
                 response_url,
-                f":red_circle: *{arg}*'s instance has stopped (`{instance_id}`).",
+                f":red_circle: *{arg}*'s instance has {verb} (`{instance_id}`).",
             )
 
         else:
