@@ -41,11 +41,17 @@ fi
 
 _PROFILE_ARGS=()
 [[ -n "${AWS_PROFILE:-}" ]] && _PROFILE_ARGS=(--profile "${AWS_PROFILE}")
-CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
-  echo "ERROR: Could not export credentials${AWS_PROFILE:+ for profile '${AWS_PROFILE}'}." >&2
-  echo "       If using SSO, run './user.sh sso-login' first." >&2
-  exit 1
-}
+if ! CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null); then
+  echo "Not logged in${AWS_PROFILE:+ (profile '${AWS_PROFILE}')}. Starting SSO login..."
+  aws sso login --use-device-code "${_PROFILE_ARGS[@]}" || {
+    echo "ERROR: SSO login failed." >&2
+    exit 1
+  }
+  CREDS=$(aws configure export-credentials "${_PROFILE_ARGS[@]}" --format env-no-export 2>/dev/null) || {
+    echo "ERROR: Could not export credentials after SSO login." >&2
+    exit 1
+  }
+fi
 eval "$(echo "${CREDS}" | sed 's/^/export /')"
 
 # Resolve instance ID by Username tag
@@ -125,26 +131,10 @@ if [[ "${INSTANCE_STATE}" != "running" ]]; then
     aws ec2 start-instances --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}" > /dev/null
     echo "Waiting for instance to be running..."
     aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}"
-    echo "Waiting for SSM agent..."
-    _ssm_ready=false
-    for _i in $(seq 1 24); do
-      _ping=$(aws ssm describe-instance-information \
-        --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
-        --region "${AWS_REGION}" \
-        --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
-      if [[ "${_ping}" == "Online" ]]; then _ssm_ready=true; break; fi
-      sleep 5
-    done
-    if [[ "${_ssm_ready}" != true ]]; then
-      echo "WARNING: SSM agent not yet responding. Connection may fail — try again in a moment."
-    else
-      echo "  Instance is ready."
-    fi
     echo ""
   elif [[ "${INSTANCE_STATE}" == "pending" ]]; then
     echo "Instance is starting up, waiting..."
     aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}"
-    echo "  Running. Connecting..."
     echo ""
   elif [[ "${INSTANCE_STATE}" == "stopping" ]]; then
     echo "Instance is currently stopping. Wait a moment and try again." >&2
@@ -155,6 +145,25 @@ if [[ "${INSTANCE_STATE}" != "running" ]]; then
   fi
 fi
 
+# Wait for SSM agent regardless of how the instance reached running state.
+# Covers: externally started (Slack bot), resumed from hibernation, pending→running.
+_ssm_ready=false
+for _i in $(seq 1 24); do
+  _ping=$(aws ssm describe-instance-information \
+    --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+    --region "${AWS_REGION}" \
+    --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+  if [[ "${_ping}" == "Online" ]]; then _ssm_ready=true; break; fi
+  if [[ "${_i}" -eq 1 ]]; then echo "Waiting for SSM agent..."; fi
+  sleep 5
+done
+if [[ "${_ssm_ready}" != true ]]; then
+  echo "WARNING: SSM agent not yet responding. Connection may fail — try again in a moment."
+else
+  echo "SSM agent ready."
+fi
+echo ""
+
 echo "Connecting to ${INSTANCE_ID} (${DEV_USERNAME}) via SSH over SSM..."
 echo ""
 
@@ -163,10 +172,12 @@ SSH_OPTS=(
   "-A"                              # Forward agent to EC2 (keys in agent available on instance)
   "-o" "StrictHostKeyChecking=no"   # Instance ID changes on recreate
   "-o" "UserKnownHostsFile=/dev/null"
-  # Keepalives: send a null packet every 30s so the SSM WebSocket stays alive
-  # and dead connections are detected quickly (3 missed → disconnect with an
-  # error) rather than hanging silently until manually killed.
-  "-o" "ServerAliveInterval=30"
+  # Keepalives: send a null packet every 10s so the SSM WebSocket stays alive.
+  # With plugin 1.2.814.0 / agent 3.3.x the WebSocket occasionally stalls without
+  # closing — 3 missed keepalives (30s total) gets a clean disconnect rather than
+  # an indefinite hang. ServerAliveInterval=10 also keeps the SSM WebSocket warm
+  # enough that the service doesn't consider the session idle between Claude turns.
+  "-o" "ServerAliveInterval=10"
   "-o" "ServerAliveCountMax=3"
   # Tunnel SSH through SSM — no inbound port 22 needed in security group
   "-o" "ProxyCommand=aws ssm start-session --target ${INSTANCE_ID} --document-name AWS-StartSSHSession --parameters portNumber=22 --region ${AWS_REGION}"
