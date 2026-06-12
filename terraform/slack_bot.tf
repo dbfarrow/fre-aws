@@ -124,13 +124,48 @@ resource "aws_iam_role_policy" "slack_notifier_s3" {
   })
 }
 
+resource "aws_iam_role_policy" "slack_notifier_ssm" {
+  count = local.slack_enabled ? 1 : 0
+  name  = "ssm-run-command"
+  role  = aws_iam_role.slack_notifier[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ssm:SendCommand"
+        Resource = "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ssm:SendCommand"
+        Resource = "arn:aws:ec2:${var.aws_region}:*:instance/*"
+        Condition = {
+          StringEquals = {
+            "ssm:resourceTag/ProjectName" = var.project_name
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = [
+          "ssm:DescribeInstanceInformation",
+          "ssm:GetCommandInvocation",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
 resource "aws_lambda_function" "slack_notifier" {
   count         = local.slack_enabled ? 1 : 0
   function_name = "${var.project_name}-slack-notifier"
   role          = aws_iam_role.slack_notifier[0].arn
   runtime       = "python3.12"
   handler       = "slack_bot.handle_notify"
-  timeout       = 120
+  timeout       = 300
   filename      = data.archive_file.slack_bot[0].output_path
   source_code_hash = data.archive_file.slack_bot[0].output_base64sha256
 
